@@ -27,7 +27,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "rlcd-runtime-0.9.0";
+constexpr const char *FW_VERSION = "rlcd-runtime-0.10.0";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
@@ -253,10 +253,30 @@ bool hostReadSensors(SensorReading &out) { return sensorsRead(out); }
 bool hostBeep(uint16_t freq, uint16_t ms) {
   return audioIsReady() && audioPlayBeep(freq, ms);
 }
-void hostDisplay(const char *a, const char *b) {
-  statusLine1 = a && a[0] ? a : "script";
-  statusLine2 = b ? b : "";
-  drawRuntimeHud(false);
+bool hostPlayPcm(const int16_t *samples, size_t count) {
+  return audioIsReady() && audioPlayPcm(samples, count);
+}
+uint32_t hostSampleRate() { return audioSampleRate(); }
+void hostSetPa(bool on) { audioSetPa(on); }
+bool hostAudioReady() { return audioIsReady(); }
+bool hostKeyDown() { return digitalRead(PIN_KEY_BTN) == LOW; }
+bool hostBootDown() { return digitalRead(PIN_BOOT_BTN) == LOW; }
+int hostWifiRssi() { return WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0; }
+void hostWifiIp(char *out, size_t n) {
+  if (!out || !n) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    out[0] = 0;
+    return;
+  }
+  String ip = WiFi.localIP().toString();
+  strncpy(out, ip.c_str(), n - 1);
+  out[n - 1] = 0;
+}
+void hostWifiSsid(char *out, size_t n) {
+  if (!out || !n) return;
+  String ssid = WiFi.SSID();
+  strncpy(out, ssid.c_str(), n - 1);
+  out[n - 1] = 0;
 }
 void hostOnSensors(const SensorReading &r) { lastSensors = r; }
 
@@ -455,9 +475,18 @@ void setupImpl() {
   sensorsBegin();
 
   ScriptHost host{};
+  host.display = &display;
   host.readSensors = hostReadSensors;
   host.beep = hostBeep;
-  host.displayText = hostDisplay;
+  host.playPcm = hostPlayPcm;
+  host.sampleRate = hostSampleRate;
+  host.setPa = hostSetPa;
+  host.audioReady = hostAudioReady;
+  host.keyDown = hostKeyDown;
+  host.bootDown = hostBootDown;
+  host.wifiRssi = hostWifiRssi;
+  host.wifiIp = hostWifiIp;
+  host.wifiSsid = hostWifiSsid;
   host.emitEvent = emitDeviceEvent;
   host.onSensors = hostOnSensors;
   scriptEngineBegin(host);

@@ -24,15 +24,7 @@ On `401`, ask the human to mint/rotate a token at https://onlyclaws.world/epaper
 3. Copy the `oct_…` value once; store in Agent secret vault
 4. Revoke anytime from the same UI
 
-API (session cookie, not agent token):
-
-- `POST /api/agent-tokens` `{"name":"aki"}`
-- `GET /api/agent-tokens`
-- `DELETE /api/agent-tokens/{id}`
-
 ## Core calls
-
-All require `Authorization: Bearer oct_…`.
 
 | Action | Call |
 |--------|------|
@@ -44,7 +36,24 @@ All require `Authorization: Bearer oct_…`.
 | **Deploy Lua** | `POST /api/scripts` (`language=lua`, `source` = Lua string) |
 | Events from `emit()` | `GET /api/events` |
 
-### Lua deploy example
+## Lua on device (full board)
+
+Firmware exposes **graphics, PCM audio, sensors, buttons, WiFi** — not a text-only demo.
+
+### Graphics (400×300, 1bpp)
+
+`gfx.clear` / `pixel` / `line` / `rect` / `fill_rect` / `circle` / `fill_circle` / `text` / `blit(b64)` / `flush`  
+`gfx.W`=400, `gfx.H`=300. Color `0`/`1`. Call `gfx.flush()` after draw ops.
+
+### Audio
+
+`audio.beep(freq, ms)` · `audio.play_pcm(b64)` (int16 LE mono @ `sample_rate()`) · `audio.pa(on)` · `audio.ready()`
+
+### Other
+
+`sensors()` · `emit(name, table?)` · `input.key()` / `boot()` · `net.rssi()` / `ip()` / `ssid()` · `log` / `sleep` / `stop` / `millis` · `display(l1,l2)` convenience
+
+### Deploy example
 
 ```http
 POST /api/scripts
@@ -52,49 +61,21 @@ Authorization: Bearer oct_...
 Content-Type: application/json
 
 {
-  "name": "hot-alert",
+  "name": "draw-demo",
   "language": "lua",
-  "mode": "loop",
-  "every_ms": 10000,
+  "mode": "once",
   "device_id": "a4cb8fdf8440",
-  "source": "function on_loop()\n  local s = sensors()\n  if s.temp_c and s.temp_c > 35 then beep(1200,80); emit('hot',{temp=s.temp_c}) end\n  return 10000\nend\n"
+  "source": "function on_start()\n  gfx.clear(0)\n  gfx.fill_circle(200,120,50,1)\n  gfx.flush()\n  audio.beep(1000,80)\nend\n"
 }
 ```
 
-Lua whitelist on device: `sensors`, `beep`, `emit`, `display`, `log`, `sleep`, `stop`, `millis` (also `oc.*`).
+## Do not
 
-### Invoke example (one-shot only)
+- Do not call `POST /api/auth/login` with user passwords
+- Do not use **device** `device_token` as the Agent credential
+- Do not mint agent tokens using an existing agent token
 
-```http
-POST /api/invoke
-Authorization: Bearer oct_...
-Content-Type: application/json
-
-{
-  "device_id": "a4cb8fdf8440",
-  "tools": [
-    {"tool": "sensors.read"},
-    {"tool": "beep", "freq": 1000, "ms": 80}
-  ]
-}
-```
-
-### Push example
-
-```http
-POST /api/push
-Authorization: Bearer oct_...
-Content-Type: application/json
-
-{
-  "device_id": "a4cb8fdf8440",
-  "title": "Aki",
-  "body": "hello from agent",
-  "beep": true
-}
-```
-
-## Device IDs (panels)
+## Device IDs
 
 | id | Panel |
 |----|--------|
@@ -102,14 +83,3 @@ Content-Type: application/json
 | `441bf6923320` | ePaper 3.97" 800×480 |
 
 Prefer `GET /api/devices` and use an **online** device you own.
-
-## Do not
-
-- Do not call `POST /api/auth/login` with user passwords
-- Do not use **device** `device_token` (firmware wire auth) as the Agent credential
-- Do not mint new agent tokens using an existing agent token (blocked server-side)
-
-## Edge scripts (optional)
-
-Whitelist on device: `sensors.read`, `beep`, `wave`, `react`, `dialog`, `sleep`, `emit`, `if`, `stop`.  
-See `/api/agent/docs.md` for JSON VM examples.

@@ -74,14 +74,15 @@ Known device IDs:
   "tools": [
     {"tool": "sensors.read"},
     {"tool": "beep", "freq": 1000, "ms": 100},
-    {"tool": "display", "title": "ping", "line2": "ok"}
+    {"tool": "display", "title": "ping", "line2": "ok"},
+    {"tool": "gfx.clear", "color": 0},
+    {"tool": "gfx.flush"}
   ]
 }
 ```
 
-Shorthand: `{ "device_id": "...", "tool": { "tool": "beep", "freq": 880, "ms": 80 } }`
-
-Queued as `type=invoke`. Prefer **Lua deploy** for any non-trivial logic.
+Invoke tools: `sensors.read`, `beep`, `display`, `emit`, `gfx.clear`, `gfx.flush`, `play_pcm` (`b64`).
+Prefer **Lua deploy** for pixel drawing and multi-step logic.
 
 ---
 
@@ -108,22 +109,75 @@ Queued as `type=invoke`. Prefer **Lua deploy** for any non-trivial logic.
 
 Also: `POST /api/scripts/{id}/deploy`, `POST /api/script/stop`, `GET /api/script/status`, `GET /api/events`
 
-### 4.2 Lua API (device whitelist)
+### 4.2 Lua API (full board surface)
+
+Color: `0` = off / white plane, `1` = on / black. Display is **400×300** 1bpp (`gfx.W` / `gfx.H`).
+
+#### Sensors / control
 
 | API | Notes |
 |-----|------|
-| `sensors()` | returns `{temp_c, humidity, battery_v, battery_pct}` |
-| `beep(freq, ms)` | speaker; ms capped at 2000 |
+| `sensors()` | `{temp_c, humidity, battery_v, battery_pct}` when available |
 | `emit(name, table?)` | POST event to cloud |
-| `display(line1, line2?)` | minimal status text on LCD |
-| `log(...)` | serial log |
+| `log(...)` | serial |
 | `sleep(ms)` | cooperative delay (≤60s) |
 | `stop()` | end script |
 | `millis()` | uptime ms |
+| `display(line1, line2?)` | convenience two-line status + flush |
 
-Same functions available as `oc.*`.
+#### Graphics (`gfx.*` or `gfx_*`)
 
-Lifecycle: optional `on_start` / `setup`, then `on_loop` or `loop` each iteration.
+| API | Notes |
+|-----|------|
+| `gfx.W` / `gfx.H` | 400 / 300 |
+| `gfx.clear(color?)` | fill screen |
+| `gfx.pixel(x,y,color?)` | |
+| `gfx.line(x0,y0,x1,y1,color?)` | |
+| `gfx.rect(x,y,w,h,color?)` | |
+| `gfx.fill_rect(x,y,w,h,color?)` | |
+| `gfx.circle(x,y,r,color?)` | |
+| `gfx.fill_circle(x,y,r,color?)` | |
+| `gfx.text(x,y,str,color?)` | FreeMonoBold 12pt |
+| `gfx.blit(b64)` | full-frame MONO_HLSB 15000 bytes, base64 |
+| `gfx.flush()` | push framebuffer to panel |
+
+Drawing is buffered — call `gfx.flush()` after changes (except `display()` / `gfx.blit` which flush).
+
+#### Audio (`audio.*`)
+
+| API | Notes |
+|-----|------|
+| `audio.ready()` | ES8311 ready |
+| `audio.sample_rate()` | e.g. 16000 |
+| `audio.pa(on)` | speaker amp |
+| `audio.beep(freq, ms)` | square wave (≤5s) |
+| `audio.play_pcm(b64)` | int16 LE mono PCM, base64; max ~2s @ 16 kHz |
+
+#### Input / net
+
+| API | Notes |
+|-----|------|
+| `input.key()` / `key()` | KEY button held |
+| `input.boot()` / `boot()` | BOOT held |
+| `net.rssi()` / `wifi_rssi()` | |
+| `net.ip()` / `wifi_ip()` | |
+| `net.ssid()` / `wifi_ssid()` | |
+
+Same APIs also under `oc.*` where registered. Lifecycle: optional `on_start` / `setup`, then `on_loop` / `loop`.
+
+Example — draw a cat face and beep:
+
+```lua
+function on_start()
+  gfx.clear(0)
+  gfx.fill_circle(200, 120, 60, 1)
+  gfx.fill_circle(170, 100, 8, 0)
+  gfx.fill_circle(230, 100, 8, 0)
+  gfx.fill_circle(200, 140, 12, 0)
+  gfx.flush()
+  audio.beep(880, 80)
+end
+```
 
 ---
 

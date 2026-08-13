@@ -1,9 +1,15 @@
 #include "script_engine.h"
 
+#include <Adafruit_GFX.h>
 #include <ArduinoJson.h>
 #include <EspLuaEngine.h>
+#include <Fonts/FreeMonoBold12pt7b.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include "board_pins.h"
+#include "st7305_rlcd.h"
 
 namespace {
 ScriptHost gHost{};
@@ -16,9 +22,13 @@ String gMode = "once";
 uint32_t gEveryMs = 1000;
 uint32_t gNextDueMs = 0;
 bool gStartDone = false;
+bool gSleepRequested = false;
 SensorReading gVars{};
 bool gHasVars = false;
-bool gSleepRequested = false;
+
+// Scratch for PCM decode (PSRAM preferred).
+int16_t *gPcmBuf = nullptr;
+size_t gPcmCap = 0;
 
 void setError(const char *msg) {
   gError = msg ? msg : "error";
@@ -26,18 +36,48 @@ void setError(const char *msg) {
   Serial.printf("[lua] error: %s\n", gError.c_str());
 }
 
-int l_beep(lua_State *L) {
-  const int freq = luaL_optinteger(L, 1, 880);
-  const int ms = luaL_optinteger(L, 2, 100);
-  if (!gHost.beep) {
-    lua_pushboolean(L, 0);
-    return 1;
-  }
-  uint16_t f = (uint16_t)constrain(freq, 100, 8000);
-  uint16_t m = (uint16_t)constrain(ms, 1, 2000);
-  lua_pushboolean(L, gHost.beep(f, m) ? 1 : 0);
-  return 1;
+St7305Rlcd *lcd() { return gHost.display; }
+
+int b64Val(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
 }
+
+// Decode base64 into out; returns byte count or 0 on failure.
+size_t b64Decode(const char *in, uint8_t *out, size_t outMax) {
+  if (!in || !out) return 0;
+  size_t n = 0;
+  int val = 0, valb = -8;
+  for (const char *p = in; *p; ++p) {
+    if (*p == '=' || *p == '\n' || *p == '\r' || *p == ' ') continue;
+    int d = b64Val(*p);
+    if (d < 0) return 0;
+    val = (val << 6) + d;
+    valb += 6;
+    if (valb >= 0) {
+      if (n >= outMax) return 0;
+      out[n++] = (uint8_t)((val >> valb) & 0xFF);
+      valb -= 8;
+    }
+  }
+  return n;
+}
+
+bool ensurePcmCap(size_t samples) {
+  if (gPcmCap >= samples) return true;
+  if (gPcmBuf) free(gPcmBuf);
+  gPcmBuf = (int16_t *)heap_caps_malloc(samples * sizeof(int16_t),
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!gPcmBuf) gPcmBuf = (int16_t *)malloc(samples * sizeof(int16_t));
+  gPcmCap = gPcmBuf ? samples : 0;
+  return gPcmBuf != nullptr;
+}
+
+// ---- sensors / time / log / emit / stop / sleep ----
 
 int l_sensors(lua_State *L) {
   lua_newtable(L);
@@ -62,52 +102,6 @@ int l_sensors(lua_State *L) {
   return 1;
 }
 
-int l_emit(lua_State *L) {
-  const char *name = luaL_optstring(L, 1, "event");
-  String data = "{}";
-  if (lua_istable(L, 2)) {
-    // Minimal table→JSON for flat string/number/bool fields.
-    DynamicJsonDocument doc(512);
-    JsonObject o = doc.to<JsonObject>();
-    lua_pushnil(L);
-    while (lua_next(L, 2) != 0) {
-      if (lua_type(L, -2) == LUA_TSTRING) {
-        const char *k = lua_tostring(L, -2);
-        if (lua_isboolean(L, -1)) o[k] = (bool)lua_toboolean(L, -1);
-        else if (lua_isinteger(L, -1)) o[k] = (long)lua_tointeger(L, -1);
-        else if (lua_isnumber(L, -1)) o[k] = (double)lua_tonumber(L, -1);
-        else if (lua_isstring(L, -1)) o[k] = lua_tostring(L, -1);
-      }
-      lua_pop(L, 1);
-    }
-    data = "";
-    serializeJson(o, data);
-  } else if (gHasVars) {
-    DynamicJsonDocument doc(256);
-    JsonObject o = doc.to<JsonObject>();
-    if (gVars.okTemp) {
-      o["temp_c"] = gVars.tempC;
-      o["humidity"] = gVars.humidity;
-    }
-    if (gVars.okBattery) {
-      o["battery_v"] = gVars.batteryV;
-      o["battery_pct"] = gVars.batteryPct;
-    }
-    data = "";
-    serializeJson(o, data);
-  }
-  bool ok = gHost.emitEvent && gHost.emitEvent(name, data.c_str());
-  lua_pushboolean(L, ok ? 1 : 0);
-  return 1;
-}
-
-int l_display(lua_State *L) {
-  const char *a = luaL_optstring(L, 1, "");
-  const char *b = luaL_optstring(L, 2, "");
-  if (gHost.displayText) gHost.displayText(a, b);
-  return 0;
-}
-
 int l_log(lua_State *L) {
   const int n = lua_gettop(L);
   Serial.print("[lua] ");
@@ -118,6 +112,11 @@ int l_log(lua_State *L) {
   }
   Serial.println();
   return 0;
+}
+
+int l_millis(lua_State *L) {
+  lua_pushinteger(L, (lua_Integer)millis());
+  return 1;
 }
 
 int l_sleep(lua_State *L) {
@@ -134,33 +133,314 @@ int l_stop(lua_State *L) {
   return 0;
 }
 
-int l_millis(lua_State *L) {
-  lua_pushinteger(L, (lua_Integer)millis());
+int l_emit(lua_State *L) {
+  const char *name = luaL_optstring(L, 1, "event");
+  String data = "{}";
+  if (lua_istable(L, 2)) {
+    DynamicJsonDocument doc(768);
+    JsonObject o = doc.to<JsonObject>();
+    lua_pushnil(L);
+    while (lua_next(L, 2) != 0) {
+      if (lua_type(L, -2) == LUA_TSTRING) {
+        const char *k = lua_tostring(L, -2);
+        if (lua_isboolean(L, -1)) o[k] = (bool)lua_toboolean(L, -1);
+        else if (lua_isinteger(L, -1)) o[k] = (long)lua_tointeger(L, -1);
+        else if (lua_isnumber(L, -1)) o[k] = (double)lua_tonumber(L, -1);
+        else if (lua_isstring(L, -1)) o[k] = lua_tostring(L, -1);
+      }
+      lua_pop(L, 1);
+    }
+    data = "";
+    serializeJson(o, data);
+  }
+  bool ok = gHost.emitEvent && gHost.emitEvent(name, data.c_str());
+  lua_pushboolean(L, ok ? 1 : 0);
   return 1;
+}
+
+// ---- audio ----
+
+int l_beep(lua_State *L) {
+  const int freq = luaL_optinteger(L, 1, 880);
+  const int ms = luaL_optinteger(L, 2, 100);
+  if (!gHost.beep) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  lua_pushboolean(L, gHost.beep((uint16_t)constrain(freq, 20, 8000),
+                                (uint16_t)constrain(ms, 1, 5000))
+                         ? 1
+                         : 0);
+  return 1;
+}
+
+int l_audio_ready(lua_State *L) {
+  lua_pushboolean(L, gHost.audioReady && gHost.audioReady() ? 1 : 0);
+  return 1;
+}
+
+int l_sample_rate(lua_State *L) {
+  lua_pushinteger(L, gHost.sampleRate ? (lua_Integer)gHost.sampleRate() : 16000);
+  return 1;
+}
+
+int l_pa(lua_State *L) {
+  if (gHost.setPa) gHost.setPa(lua_toboolean(L, 1));
+  return 0;
+}
+
+int l_play_pcm_b64(lua_State *L) {
+  const char *b64 = luaL_checkstring(L, 1);
+  if (!gHost.playPcm) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  // Max ~2s @ 16kHz int16 = 64000 bytes
+  constexpr size_t kMaxBytes = 64000;
+  uint8_t *raw = (uint8_t *)heap_caps_malloc(kMaxBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!raw) raw = (uint8_t *)malloc(kMaxBytes);
+  if (!raw) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  size_t n = b64Decode(b64, raw, kMaxBytes);
+  if (n < 2 || (n & 1)) {
+    free(raw);
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  size_t samples = n / 2;
+  if (!ensurePcmCap(samples)) {
+    free(raw);
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  memcpy(gPcmBuf, raw, n);
+  free(raw);
+  bool ok = gHost.playPcm(gPcmBuf, samples);
+  lua_pushboolean(L, ok ? 1 : 0);
+  return 1;
+}
+
+// ---- input / net ----
+
+int l_key(lua_State *L) {
+  lua_pushboolean(L, gHost.keyDown && gHost.keyDown() ? 1 : 0);
+  return 1;
+}
+
+int l_boot(lua_State *L) {
+  lua_pushboolean(L, gHost.bootDown && gHost.bootDown() ? 1 : 0);
+  return 1;
+}
+
+int l_wifi_rssi(lua_State *L) {
+  lua_pushinteger(L, gHost.wifiRssi ? gHost.wifiRssi() : 0);
+  return 1;
+}
+
+int l_wifi_ip(lua_State *L) {
+  char buf[48] = {0};
+  if (gHost.wifiIp) gHost.wifiIp(buf, sizeof(buf));
+  lua_pushstring(L, buf);
+  return 1;
+}
+
+int l_wifi_ssid(lua_State *L) {
+  char buf[40] = {0};
+  if (gHost.wifiSsid) gHost.wifiSsid(buf, sizeof(buf));
+  lua_pushstring(L, buf);
+  return 1;
+}
+
+// ---- graphics ----
+
+int l_gfx_w(lua_State *L) {
+  lua_pushinteger(L, LCD_WIDTH);
+  return 1;
+}
+int l_gfx_h(lua_State *L) {
+  lua_pushinteger(L, LCD_HEIGHT);
+  return 1;
+}
+
+int l_gfx_clear(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  d->fillScreen((uint16_t)luaL_optinteger(L, 1, 0));
+  return 0;
+}
+
+int l_gfx_pixel(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  d->drawPixel((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
+               (uint16_t)luaL_optinteger(L, 3, 1));
+  return 0;
+}
+
+int l_gfx_line(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  d->drawLine((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
+              (int16_t)luaL_checkinteger(L, 3), (int16_t)luaL_checkinteger(L, 4),
+              (uint16_t)luaL_optinteger(L, 5, 1));
+  return 0;
+}
+
+int l_gfx_rect(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  d->drawRect((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
+              (int16_t)luaL_checkinteger(L, 3), (int16_t)luaL_checkinteger(L, 4),
+              (uint16_t)luaL_optinteger(L, 5, 1));
+  return 0;
+}
+
+int l_gfx_fill_rect(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  d->fillRect((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
+              (int16_t)luaL_checkinteger(L, 3), (int16_t)luaL_checkinteger(L, 4),
+              (uint16_t)luaL_optinteger(L, 5, 1));
+  return 0;
+}
+
+int l_gfx_circle(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  d->drawCircle((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
+                (int16_t)luaL_checkinteger(L, 3), (uint16_t)luaL_optinteger(L, 4, 1));
+  return 0;
+}
+
+int l_gfx_fill_circle(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  d->fillCircle((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
+                (int16_t)luaL_checkinteger(L, 3), (uint16_t)luaL_optinteger(L, 4, 1));
+  return 0;
+}
+
+int l_gfx_text(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  int16_t x = (int16_t)luaL_checkinteger(L, 1);
+  int16_t y = (int16_t)luaL_checkinteger(L, 2);
+  const char *s = luaL_checkstring(L, 3);
+  uint16_t color = (uint16_t)luaL_optinteger(L, 4, 1);
+  d->setFont(&FreeMonoBold12pt7b);
+  d->setTextColor(color);
+  d->setCursor(x, y);
+  d->print(s);
+  return 0;
+}
+
+int l_gfx_flush(lua_State *L) {
+  (void)L;
+  St7305Rlcd *d = lcd();
+  if (d) d->display();
+  return 0;
+}
+
+// Full-frame 1bpp MONO_HLSB (400x300/8 = 15000 bytes), base64.
+int l_gfx_blit_b64(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  const char *b64 = luaL_checkstring(L, 1);
+  const size_t need = d->frameBytes();
+  uint8_t *raw = (uint8_t *)heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!raw) raw = (uint8_t *)malloc(need);
+  if (!raw) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  size_t n = b64Decode(b64, raw, need);
+  bool ok = false;
+  if (n == need) ok = d->showGxBitmap(raw, n);
+  free(raw);
+  lua_pushboolean(L, ok ? 1 : 0);
+  return 1;
+}
+
+// Convenience: two-line status (still available).
+int l_display(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) return 0;
+  const char *a = luaL_optstring(L, 1, "");
+  const char *b = luaL_optstring(L, 2, "");
+  d->fillScreen(0);
+  d->drawRect(4, 4, LCD_WIDTH - 8, LCD_HEIGHT - 8, 1);
+  d->setFont(&FreeMonoBold12pt7b);
+  d->setTextColor(1);
+  d->setCursor(24, 48);
+  d->print(a);
+  d->setCursor(24, 84);
+  d->print(b);
+  d->display();
+  return 0;
 }
 
 bool bindApis() {
   if (!gLua) return false;
   bool ok = true;
-  ok &= gLua->registerFunction("beep", l_beep);
   ok &= gLua->registerFunction("sensors", l_sensors);
-  ok &= gLua->registerFunction("emit", l_emit);
-  ok &= gLua->registerFunction("display", l_display);
   ok &= gLua->registerFunction("log", l_log);
+  ok &= gLua->registerFunction("millis", l_millis);
   ok &= gLua->registerFunction("sleep", l_sleep);
   ok &= gLua->registerFunction("stop", l_stop);
-  ok &= gLua->registerFunction("millis", l_millis);
-  // Namespace table: oc.*
-  const char *boot =
-      "oc = oc or {}\n"
-      "oc.beep = beep\n"
-      "oc.sensors = sensors\n"
-      "oc.emit = emit\n"
-      "oc.display = display\n"
-      "oc.log = log\n"
-      "oc.sleep = sleep\n"
-      "oc.stop = stop\n"
-      "oc.millis = millis\n";
+  ok &= gLua->registerFunction("emit", l_emit);
+  ok &= gLua->registerFunction("beep", l_beep);
+  ok &= gLua->registerFunction("audio_ready", l_audio_ready);
+  ok &= gLua->registerFunction("sample_rate", l_sample_rate);
+  ok &= gLua->registerFunction("pa", l_pa);
+  ok &= gLua->registerFunction("play_pcm", l_play_pcm_b64);
+  ok &= gLua->registerFunction("key", l_key);
+  ok &= gLua->registerFunction("boot", l_boot);
+  ok &= gLua->registerFunction("wifi_rssi", l_wifi_rssi);
+  ok &= gLua->registerFunction("wifi_ip", l_wifi_ip);
+  ok &= gLua->registerFunction("wifi_ssid", l_wifi_ssid);
+  ok &= gLua->registerFunction("display", l_display);
+  ok &= gLua->registerFunction("gfx_w", l_gfx_w);
+  ok &= gLua->registerFunction("gfx_h", l_gfx_h);
+  ok &= gLua->registerFunction("gfx_clear", l_gfx_clear);
+  ok &= gLua->registerFunction("gfx_pixel", l_gfx_pixel);
+  ok &= gLua->registerFunction("gfx_line", l_gfx_line);
+  ok &= gLua->registerFunction("gfx_rect", l_gfx_rect);
+  ok &= gLua->registerFunction("gfx_fill_rect", l_gfx_fill_rect);
+  ok &= gLua->registerFunction("gfx_circle", l_gfx_circle);
+  ok &= gLua->registerFunction("gfx_fill_circle", l_gfx_fill_circle);
+  ok &= gLua->registerFunction("gfx_text", l_gfx_text);
+  ok &= gLua->registerFunction("gfx_flush", l_gfx_flush);
+  ok &= gLua->registerFunction("gfx_blit", l_gfx_blit_b64);
+
+  const char *boot = R"LUA(
+oc = oc or {}
+gfx = gfx or {}
+audio = audio or {}
+input = input or {}
+net = net or {}
+
+oc.sensors = sensors; oc.log = log; oc.millis = millis; oc.sleep = sleep
+oc.stop = stop; oc.emit = emit; oc.display = display
+oc.beep = beep; oc.play_pcm = play_pcm; oc.key = key
+
+audio.beep = beep; audio.ready = audio_ready; audio.sample_rate = sample_rate
+audio.pa = pa; audio.play_pcm = play_pcm
+
+input.key = key; input.boot = boot
+
+net.rssi = wifi_rssi; net.ip = wifi_ip; net.ssid = wifi_ssid
+
+gfx.W = gfx_w(); gfx.H = gfx_h()
+gfx.clear = gfx_clear; gfx.pixel = gfx_pixel; gfx.line = gfx_line
+gfx.rect = gfx_rect; gfx.fill_rect = gfx_fill_rect
+gfx.circle = gfx_circle; gfx.fill_circle = gfx_fill_circle
+gfx.text = gfx_text; gfx.flush = gfx_flush; gfx.blit = gfx_blit
+)LUA";
   ok &= gLua->executeScript(boot);
   return ok;
 }
@@ -239,7 +519,6 @@ bool scriptEngineLoadLua(const char *scriptId, const char *luaSource, const char
   gNextDueMs = 0;
   gError = "";
   gState = "running";
-
   if (!gLua->executeScript(luaSource)) {
     setError(gLua->getLastError());
     return false;
@@ -284,7 +563,6 @@ void scriptEngineTick() {
     return;
   }
 
-  // Top-level-only script already ran at load.
   if (gMode == "loop") {
     if (!gLua->executeScript(gSource.c_str())) {
       setError(gLua->getLastError());
@@ -304,7 +582,7 @@ const char *scriptEngineLanguage() { return "lua"; }
 
 bool scriptEngineInvokeJson(const char *json) {
   if (!json || !json[0]) return false;
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(8192);
   if (deserializeJson(doc, json)) return false;
   JsonArray tools = doc["tools"].as<JsonArray>();
   if (tools.isNull() && doc.is<JsonArray>()) tools = doc.as<JsonArray>();
@@ -312,8 +590,8 @@ bool scriptEngineInvokeJson(const char *json) {
   auto runOne = [&](JsonObject step) -> bool {
     const char *tool = step["tool"] | "";
     if (!strcmp(tool, "beep")) {
-      if (!gHost.beep) return false;
-      return gHost.beep(step["freq"] | 880, step["ms"] | 100);
+      return gHost.beep &&
+             gHost.beep(step["freq"] | 880, step["ms"] | 100);
     }
     if (!strcmp(tool, "sensors.read") || !strcmp(tool, "sensors")) {
       if (!gHost.readSensors) return false;
@@ -325,8 +603,25 @@ bool scriptEngineInvokeJson(const char *json) {
       return true;
     }
     if (!strcmp(tool, "display")) {
-      if (gHost.displayText)
-        gHost.displayText(step["title"] | step["line1"] | "", step["line2"] | "");
+      // Use convenience two-line helper via temporary lua-less path
+      St7305Rlcd *d = lcd();
+      if (!d) return false;
+      d->fillScreen(0);
+      d->setFont(&FreeMonoBold12pt7b);
+      d->setTextColor(1);
+      d->setCursor(24, 48);
+      d->print(step["title"] | step["line1"] | "");
+      d->setCursor(24, 84);
+      d->print(step["line2"] | "");
+      d->display();
+      return true;
+    }
+    if (!strcmp(tool, "gfx.flush")) {
+      if (lcd()) lcd()->display();
+      return true;
+    }
+    if (!strcmp(tool, "gfx.clear")) {
+      if (lcd()) lcd()->fillScreen(step["color"] | 0);
       return true;
     }
     if (!strcmp(tool, "emit")) {
@@ -334,6 +629,20 @@ bool scriptEngineInvokeJson(const char *json) {
       String data = "{}";
       if (!step["data"].isNull()) serializeJson(step["data"], data);
       return gHost.emitEvent(step["name"] | "event", data.c_str());
+    }
+    if (!strcmp(tool, "play_pcm") && step["b64"]) {
+      // Reuse lua binding path
+      if (!gLua && !resetEngine()) return false;
+      lua_State *L = gLua->getLuaState();
+      lua_getglobal(L, "play_pcm");
+      lua_pushstring(L, step["b64"] | "");
+      if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+        lua_pop(L, 1);
+        return false;
+      }
+      bool ok = lua_toboolean(L, -1);
+      lua_pop(L, 1);
+      return ok;
     }
     return false;
   };

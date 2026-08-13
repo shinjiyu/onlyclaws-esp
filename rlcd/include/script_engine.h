@@ -4,18 +4,32 @@
 
 #include "sensors.h"
 
-// Pure runtime host: whitelist hardware/network APIs exposed to Lua.
+class St7305Rlcd;
+
+// Pure runtime host — expose board capabilities to Lua (no product UI).
 struct ScriptHost {
-  bool (*readSensors)(SensorReading &out);
-  bool (*beep)(uint16_t freqHz, uint16_t ms);
-  void (*displayText)(const char *line1, const char *line2);
-  bool (*emitEvent)(const char *name, const char *jsonData);
-  void (*onSensors)(const SensorReading &r);
+  St7305Rlcd *display = nullptr;
+
+  bool (*readSensors)(SensorReading &out) = nullptr;
+  bool (*beep)(uint16_t freqHz, uint16_t ms) = nullptr;
+  bool (*playPcm)(const int16_t *samples, size_t count) = nullptr;
+  uint32_t (*sampleRate)() = nullptr;
+  void (*setPa)(bool on) = nullptr;
+  bool (*audioReady)() = nullptr;
+
+  bool (*keyDown)() = nullptr;
+  bool (*bootDown)() = nullptr;
+
+  int (*wifiRssi)() = nullptr;
+  void (*wifiIp)(char *out, size_t n) = nullptr;
+  void (*wifiSsid)(char *out, size_t n) = nullptr;
+
+  bool (*emitEvent)(const char *name, const char *jsonData) = nullptr;
+  void (*onSensors)(const SensorReading &r) = nullptr;
 };
 
 void scriptEngineBegin(const ScriptHost &host);
 
-// Load Lua source. mode: "once" | "loop". every_ms used between on_loop calls.
 bool scriptEngineLoadLua(const char *scriptId, const char *luaSource, const char *mode,
                          uint32_t everyMs);
 
@@ -23,9 +37,8 @@ void scriptEngineStop(const char *reason = "stopped");
 void scriptEngineTick();
 bool scriptEngineIsRunning();
 const char *scriptEngineScriptId();
-const char *scriptEngineState();  // idle|running|error|stopped
+const char *scriptEngineState();
 const char *scriptEngineLastError();
-const char *scriptEngineLanguage();  // lua
+const char *scriptEngineLanguage();
 
-// Remote one-shot tools (JSON): {"tools":[{"tool":"beep",...}, ...]}
 bool scriptEngineInvokeJson(const char *json);
