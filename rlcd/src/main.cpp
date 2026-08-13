@@ -28,7 +28,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "rlcd-agent-0.7.0";
+constexpr const char *FW_VERSION = "rlcd-agent-0.8.0";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
@@ -219,7 +219,7 @@ bool httpJson(const char *method, const String &url, const String &body, String 
   Serial.printf("%s heap=%u %s\n", method, ESP.getFreeHeap(), url.c_str());
   bool ok = false;
   if (http.begin(tls, url)) {
-    http.addHeader("Authorization", String("Bearer ") + EPD_DEVICE_TOKEN);
+    http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
     http.addHeader("Content-Type", "application/json");
     int code = (strcmp(method, "GET") == 0) ? http.GET() : http.POST(body);
     out = http.getString();
@@ -245,7 +245,7 @@ bool downloadAsset(const String &url) {
   Serial.printf("GET asset heap=%u %s\n", ESP.getFreeHeap(), url.c_str());
   bool ok = false;
   if (http.begin(tls, url)) {
-    http.addHeader("Authorization", String("Bearer ") + EPD_DEVICE_TOKEN);
+    http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
     if (http.GET() == 200) {
       WiFiClient *stream = http.getStreamPtr();
       size_t got = 0;

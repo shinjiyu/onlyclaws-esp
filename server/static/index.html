@@ -92,8 +92,8 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>ePaper 远程投屏</h1>
-    <p class="sub">中文 / 图片服务端渲染 · 默认局刷减少闪烁 · kuroneko.chat 登录</p>
+    <h1>OnlyClaws ESP</h1>
+    <p class="sub">kuroneko.chat 登录 · 每人管理自己的设备 · 远端 Agent / 边缘脚本</p>
 
     <section id="loginView" class="panel">
       <form id="loginForm">
@@ -103,7 +103,7 @@
         <input id="password" type="password" autocomplete="current-password" required />
         <div class="row">
           <button type="submit" id="loginBtn">登录</button>
-          <span class="muted">仅授权用户可进入控制台</span>
+          <span class="muted">登录后只能看到并控制你绑定的 ESP</span>
         </div>
         <p id="loginErr" class="err hidden"></p>
       </form>
@@ -119,6 +119,19 @@
           <span class="muted" id="whoami"></span>
           <button type="button" class="secondary" id="logoutBtn">退出</button>
         </div>
+        <form id="registerForm" class="row" style="margin-top:12px;align-items:flex-end">
+          <div style="flex:1;min-width:140px">
+            <label for="regDeviceId">绑定设备 ID（MAC 后缀）</label>
+            <input id="regDeviceId" placeholder="a4cb8fdf8440" style="margin-bottom:0" />
+          </div>
+          <div style="flex:1;min-width:120px">
+            <label for="regName">名称（可选）</label>
+            <input id="regName" placeholder="我的 RLCD" style="margin-bottom:0" />
+          </div>
+          <button type="submit" id="regBtn">绑定并生成 Token</button>
+        </form>
+        <p id="regMsg" class="ok hidden" style="word-break:break-all"></p>
+        <p id="regErr" class="err hidden"></p>
       </div>
 
       <div class="panel">
@@ -284,6 +297,33 @@
     document.getElementById("logoutBtn").addEventListener("click", async () => {
       await api("/epaper/api/auth/logout", { method: "POST", body: "{}" });
       location.reload();
+    });
+
+    document.getElementById("registerForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const ok = document.getElementById("regMsg");
+      const err = document.getElementById("regErr");
+      show(ok, false); show(err, false);
+      const btn = document.getElementById("regBtn");
+      btn.disabled = true;
+      try {
+        const data = await api("/epaper/api/devices/register", {
+          method: "POST",
+          body: JSON.stringify({
+            device_id: document.getElementById("regDeviceId").value.trim(),
+            name: document.getElementById("regName").value.trim(),
+          }),
+        });
+        ok.textContent =
+          "已绑定 " + data.device.id + " · device_token（只显示一次）: " + data.device_token;
+        show(ok, true);
+        await refreshDevices();
+      } catch (ex) {
+        err.textContent = ex.message || "绑定失败";
+        show(err, true);
+      } finally {
+        btn.disabled = false;
+      }
     });
 
     let selectedDeviceId = localStorage.getItem("epd_device_id") || "";

@@ -1,8 +1,9 @@
 # OnlyClaws ESP32 Agent Platform — Agent Function-Call Spec
 
 Base URL: `https://onlyclaws.world/epaper`  
-Auth for **control-plane** APIs: **kuroneko.chat** session (allowlisted email).  
-Auth for **device** APIs: shared `EPD_DEVICE_TOKEN` bearer (devices only; agents must not use this).
+Auth for **control-plane** APIs: **kuroneko.chat** session. Each user only sees **their own** devices.  
+Auth for **device** APIs: **per-device** bearer from `POST /api/devices/register` (shown once).  
+Optional lock: `EPD_ALLOWLIST` comma-list; `*` or empty = any kuroneko user.
 
 **Product model:** remote Agents drive devices over the network. Optionally deploy a JSON tools script that runs a **local loop on the ESP32** (edge autonomy). The full LLM does **not** run on-device.
 
@@ -19,8 +20,8 @@ Auth for **device** APIs: shared `EPD_DEVICE_TOKEN` bearer (devices only; agents
 ```
 
 - Proxies to `https://kuroneko.chat/api/auth/login`
-- Email must be in server allowlist (`EPD_ALLOWLIST`)
 - On success sets HttpOnly cookie `epd_session` (`Path=/epaper`, `Secure`, `SameSite=Lax`)
+- Optional: if server `EPD_ALLOWLIST` is a comma-list, email must be listed (`*` / empty = open)
 
 ### 1.2 Session check / logout
 
@@ -40,8 +41,10 @@ Auth for **device** APIs: shared `EPD_DEVICE_TOKEN` bearer (devices only; agents
 
 | Capability | API | Effect |
 |------------|-----|--------|
-| List devices + sensors | `GET /api/devices` | Online, fw, temp/humidity/battery, script meta |
-| Remote invoke tools | `POST /api/invoke` | One-shot whitelist tools on device |
+| List **my** devices | `GET /api/devices` | Only devices owned by the session |
+| Register / claim device | `POST /api/devices/register` | Bind `device_id`; returns `device_token` once |
+| Rotate token | `POST /api/devices/{id}/rotate-token` | New bearer; old invalid |
+| Remote invoke tools | `POST /api/invoke` | One-shot whitelist tools on **your** device |
 | Create script | `POST /api/scripts` | Store JSON tools script |
 | Deploy script | `POST /api/scripts/{id}/deploy` | Device runs local loop / once |
 | Stop script | `POST /api/script/stop` | Stop edge loop |

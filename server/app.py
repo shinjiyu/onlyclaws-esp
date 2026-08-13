@@ -22,6 +22,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
 import render as epd_render
+import tenancy
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("EPD_DATA_DIR", BASE_DIR / "data"))
@@ -34,16 +35,10 @@ KURONEKO_BASE = os.environ.get("KURONEKO_BASE", "https://kuroneko.chat").rstrip(
 SESSION_SECRET = os.environ.get("EPD_SESSION_SECRET", "")
 SESSION_COOKIE = os.environ.get("EPD_SESSION_COOKIE", "epd_session")
 SESSION_MAX_AGE = int(os.environ.get("EPD_SESSION_MAX_AGE", "604800"))
-ALLOWLIST = {
-    e.strip().lower()
-    for e in os.environ.get("EPD_ALLOWLIST", "yzy.zhenyu@gmail.com").split(",")
-    if e.strip()
-}
-DEVICE_TOKEN = os.environ.get("EPD_DEVICE_TOKEN", "")
-DEFAULT_DEVICE_ID = os.environ.get("EPD_DEFAULT_DEVICE_ID", "441bf6923320")
+DEFAULT_DEVICE_ID = os.environ.get("EPD_DEFAULT_DEVICE_ID", "a4cb8fdf8440")
 PUBLIC_BASE = os.environ.get("EPD_PUBLIC_BASE", "https://onlyclaws.world/epaper")
 
-# device_id -> (width, height, display_name)
+# device_id -> (width, height, display_name) — hints only; ownership is in DB
 DEVICE_PANELS: dict[str, tuple[int, int, str]] = {
     "441bf6923320": (800, 480, "ESP32-S3 ePaper 3.97"),
     "a4cb8fdf8440": (400, 300, "ESP32-S3 RLCD 4.2"),
@@ -53,12 +48,11 @@ DEVICE_PANELS: dict[str, tuple[int, int, str]] = {
 def panel_for(device_id: str) -> tuple[int, int, str]:
     if device_id in DEVICE_PANELS:
         return DEVICE_PANELS[device_id]
-    return (800, 480, device_id)
+    return (400, 300, device_id)
+
 
 if not SESSION_SECRET:
     raise RuntimeError("EPD_SESSION_SECRET is required")
-if not DEVICE_TOKEN:
-    raise RuntimeError("EPD_DEVICE_TOKEN is required")
 
 serializer = URLSafeTimedSerializer(SESSION_SECRET, salt="epaper-ctrl")
 
@@ -111,6 +105,9 @@ def init_db() -> None:
         ensure_column(conn, "messages", "full_refresh", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "messages", "asset", "TEXT")
         ensure_column(conn, "messages", "actions", "TEXT")
+        ensure_column(conn, "devices", "owner_email", "TEXT")
+        ensure_column(conn, "devices", "token_hash", "TEXT")
+        ensure_column(conn, "devices", "claimed_at", "TEXT")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS scripts (
@@ -156,13 +153,7 @@ def init_db() -> None:
             """
         )
         VOICE_DIR.mkdir(parents=True, exist_ok=True)
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO devices (id, name, last_seen, ip, rssi, fw, meta)
-            VALUES (?, ?, NULL, NULL, NULL, NULL, '{}')
-            """,
-            (DEFAULT_DEVICE_ID, panel_for(DEFAULT_DEVICE_ID)[2]),
-        )
+        ensure_column(conn, "scripts", "owner_email", "TEXT")
         for did, (_w, _h, name) in DEVICE_PANELS.items():
             conn.execute(
                 """
@@ -175,6 +166,9 @@ def init_db() -> None:
                 "UPDATE devices SET name=? WHERE id=? AND (name IS NULL OR name=? OR name=id)",
                 (name, did, did),
             )
+        tenancy.migrate_device_tenancy(
+            conn, {did: name for did, (_w, _h, name) in DEVICE_PANELS.items()}
+        )
 
 
 class Waiters:
@@ -388,7 +382,7 @@ def read_session(request: Request) -> Optional[dict[str, Any]]:
     except (BadSignature, SignatureExpired):
         return None
     email = str(data.get("email", "")).lower()
-    if email not in ALLOWLIST:
+    if not email or not tenancy.email_allowed(email):
         return None
     return data
 
@@ -400,31 +394,50 @@ async def require_user(request: Request) -> dict[str, Any]:
     return sess
 
 
-def require_device(request: Request) -> str:
-    auth = request.headers.get("Authorization", "")
-    token = ""
-    if auth.lower().startswith("bearer "):
-        token = auth[7:].strip()
-    if not token:
-        token = request.headers.get("X-Device-Token", "").strip()
-    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
-        raise HTTPException(status_code=401, detail="invalid device token")
-    return token
-
-
-def require_known_device(device_id: str, request: Request) -> str:
-    """Device bearer auth + device_id must be a registered panel/device."""
-    require_device(request)
-    device_id = (device_id or "").strip().lower()
-    if not device_id or len(device_id) > 32:
-        raise HTTPException(status_code=400, detail="bad device id")
-    if device_id in DEVICE_PANELS:
-        return device_id
+def user_owns_device(device_id: str, sess: dict[str, Any]) -> str:
     with db() as conn:
-        row = conn.execute("SELECT id FROM devices WHERE id=?", (device_id,)).fetchone()
+        tenancy.assert_user_owns_device(conn, device_id, tenancy.session_email(sess))
+    return (device_id or "").strip().lower()
+
+
+def resolve_user_device_id(
+    device_id: Optional[str], sess: dict[str, Any]
+) -> str:
+    """Pick explicit device or the caller's first owned device."""
+    email = tenancy.session_email(sess)
+    did = (device_id or "").strip().lower()
+    with db() as conn:
+        if did:
+            tenancy.assert_user_owns_device(conn, did, email)
+            return did
+        row = conn.execute(
+            """
+            SELECT id FROM devices
+            WHERE lower(coalesce(owner_email,''))=?
+            ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END, id
+            LIMIT 1
+            """,
+            (email, DEFAULT_DEVICE_ID),
+        ).fetchone()
     if not row:
-        raise HTTPException(status_code=403, detail="unknown device")
-    return device_id
+        raise HTTPException(
+            status_code=400,
+            detail="no devices bound to your account; POST /api/devices/register first",
+        )
+    return str(row["id"])
+
+
+def require_device_token(device_id: str, request: Request) -> str:
+    """Per-device bearer auth for device wire protocol."""
+    token = tenancy.extract_bearer(request)
+    with db() as conn:
+        tenancy.verify_device_token(conn, device_id, token)
+    return (device_id or "").strip().lower()
+
+
+# FastAPI dependency: path {device_id} + bearer must match that device's token.
+def require_known_device(device_id: str, request: Request) -> str:
+    return require_device_token(device_id, request)
 
 
 async def kuroneko_login(email: str, password: str) -> dict[str, Any]:
@@ -615,8 +628,8 @@ async def login(body: LoginIn, response: Response) -> dict[str, Any]:
     data = await kuroneko_login(email, body.password)
     user = data.get("user") or {}
     user_email = str(user.get("email") or email).strip().lower()
-    if user_email not in ALLOWLIST:
-        raise HTTPException(status_code=403, detail="not authorized for epaper control")
+    if not tenancy.email_allowed(user_email):
+        raise HTTPException(status_code=403, detail="not authorized for this instance")
 
     access = data.get("access_token")
     if access:
@@ -629,8 +642,8 @@ async def login(body: LoginIn, response: Response) -> dict[str, Any]:
         except HTTPException:
             pass
 
-    if user_email not in ALLOWLIST:
-        raise HTTPException(status_code=403, detail="not authorized for epaper control")
+    if not tenancy.email_allowed(user_email):
+        raise HTTPException(status_code=403, detail="not authorized for this instance")
 
     set_session(response, user_email, user)
     return {
@@ -658,10 +671,17 @@ async def me(sess: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
 
 
 @app.get("/api/devices")
-async def list_devices(_: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+async def list_devices(sess: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    email = tenancy.session_email(sess)
     with db() as conn:
         rows = conn.execute(
-            "SELECT id, name, last_seen, ip, rssi, fw, meta FROM devices ORDER BY id"
+            """
+            SELECT id, name, last_seen, ip, rssi, fw, meta, owner_email, claimed_at
+            FROM devices
+            WHERE lower(coalesce(owner_email,''))=?
+            ORDER BY id
+            """,
+            (email,),
         ).fetchall()
     now = time.time()
     devices = []
@@ -692,6 +712,8 @@ async def list_devices(_: dict[str, Any] = Depends(require_user)) -> dict[str, A
                 "fw": r["fw"],
                 "meta": meta,
                 "online": online,
+                "owner_email": r["owner_email"],
+                "claimed_at": r["claimed_at"],
                 "width": panel_for(r["id"])[0],
                 "height": panel_for(r["id"])[1],
             }
@@ -699,31 +721,110 @@ async def list_devices(_: dict[str, Any] = Depends(require_user)) -> dict[str, A
     return {"success": True, "devices": devices}
 
 
+class DeviceRegisterIn(BaseModel):
+    device_id: str = Field(..., min_length=4, max_length=32)
+    name: str = ""
+
+
+@app.post("/api/devices/register")
+async def register_device(
+    body: DeviceRegisterIn, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    """Claim a device id for the current user and issue a fresh per-device token."""
+    email = tenancy.session_email(sess)
+    device_id = body.device_id.strip().lower()
+    if not device_id.isalnum():
+        raise HTTPException(status_code=400, detail="device_id must be alphanumeric")
+    name = body.name.strip() or panel_for(device_id)[2]
+    token = tenancy.new_device_token()
+    th = tenancy.hash_token(token)
+    now = utc_now()
+    with db() as conn:
+        row = tenancy.get_device(conn, device_id)
+        if row:
+            owner = (row["owner_email"] or "").strip().lower()
+            if owner and owner != email:
+                raise HTTPException(status_code=409, detail="device already claimed")
+            conn.execute(
+                """
+                UPDATE devices
+                SET name=?, owner_email=?, token_hash=?, claimed_at=?
+                WHERE id=?
+                """,
+                (name, email, th, now, device_id),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO devices (id, name, meta, owner_email, token_hash, claimed_at)
+                VALUES (?, ?, '{}', ?, ?, ?)
+                """,
+                (device_id, name, email, th, now),
+            )
+    return {
+        "success": True,
+        "device": {
+            "id": device_id,
+            "name": name,
+            "owner_email": email,
+            "claimed_at": now,
+        },
+        "device_token": token,
+        "note": "Save device_token now; it is shown only once. Put it in device_secrets.h or NVS.",
+    }
+
+
+@app.post("/api/devices/{device_id}/rotate-token")
+async def rotate_device_token(
+    device_id: str, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    email = tenancy.session_email(sess)
+    token = tenancy.new_device_token()
+    th = tenancy.hash_token(token)
+    with db() as conn:
+        tenancy.assert_user_owns_device(conn, device_id, email)
+        conn.execute(
+            "UPDATE devices SET token_hash=?, claimed_at=? WHERE id=?",
+            (th, utc_now(), device_id.strip().lower()),
+        )
+    return {
+        "success": True,
+        "device_id": device_id.strip().lower(),
+        "device_token": token,
+        "note": "Previous token is invalid. Update the device firmware/NVS.",
+    }
+
+
 @app.get("/api/messages")
 async def list_messages(
     device_id: Optional[str] = None,
     limit: int = 30,
-    _: dict[str, Any] = Depends(require_user),
+    sess: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     limit = max(1, min(limit, 100))
+    email = tenancy.session_email(sess)
     with db() as conn:
         if device_id:
+            tenancy.assert_user_owns_device(conn, device_id, email)
             rows = conn.execute(
                 """
                 SELECT id, device_id, type, title, body, created_at, created_by,
                        delivered_at, acked_at, status, full_refresh, asset, actions
                 FROM messages WHERE device_id=? ORDER BY created_at DESC LIMIT ?
                 """,
-                (device_id, limit),
+                (device_id.strip().lower(), limit),
             ).fetchall()
         else:
             rows = conn.execute(
                 """
-                SELECT id, device_id, type, title, body, created_at, created_by,
-                       delivered_at, acked_at, status, full_refresh, asset, actions
-                FROM messages ORDER BY created_at DESC LIMIT ?
+                SELECT m.id, m.device_id, m.type, m.title, m.body, m.created_at, m.created_by,
+                       m.delivered_at, m.acked_at, m.status, m.full_refresh, m.asset, m.actions
+                FROM messages m
+                JOIN devices d ON d.id = m.device_id
+                WHERE lower(coalesce(d.owner_email,''))=?
+                ORDER BY m.created_at DESC LIMIT ?
                 """,
-                (limit,),
+                (email, limit),
             ).fetchall()
     out = []
     for r in rows:
@@ -739,7 +840,7 @@ async def push(
 ) -> dict[str, Any]:
     if not body.body.strip() and not body.title.strip():
         raise HTTPException(status_code=400, detail="title/body required")
-    device_id = (body.device_id or DEFAULT_DEVICE_ID).strip()
+    device_id = resolve_user_device_id(body.device_id, sess)
     width, height, _ = panel_for(device_id)
     try:
         bitmap = epd_render.render_text_card(
@@ -781,7 +882,7 @@ async def push_image(
         raise HTTPException(status_code=400, detail="empty file")
     if len(raw) > 8 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="file too large (max 8MB)")
-    device = (device_id or DEFAULT_DEVICE_ID).strip()
+    device = resolve_user_device_id(device_id, sess)
     width, height, _ = panel_for(device)
     try:
         bitmap = epd_render.render_uploaded_image(
@@ -815,7 +916,7 @@ async def device_action(
         raise HTTPException(
             status_code=400, detail="need beep, wave, react, and/or title"
         )
-    device_id = (body.device_id or DEFAULT_DEVICE_ID).strip()
+    device_id = resolve_user_device_id(body.device_id, sess)
     title = body.title.strip() or ("action" if not body.title else body.title)
     msg = enqueue_bitmap(
         device_id=device_id,
@@ -840,8 +941,8 @@ async def create_script(
     with db() as conn:
         conn.execute(
             """
-            INSERT INTO scripts (id, name, source, created_at, created_by, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO scripts (id, name, source, created_at, created_by, updated_at, owner_email)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 script_id,
@@ -850,6 +951,7 @@ async def create_script(
                 now,
                 str(sess.get("email") or ""),
                 now,
+                tenancy.session_email(sess),
             ),
         )
     out: dict[str, Any] = {
@@ -873,16 +975,19 @@ async def create_script(
 
 @app.get("/api/scripts")
 async def list_scripts(
-    limit: int = 30, _: dict[str, Any] = Depends(require_user)
+    limit: int = 30, sess: dict[str, Any] = Depends(require_user)
 ) -> dict[str, Any]:
     limit = max(1, min(limit, 100))
+    email = tenancy.session_email(sess)
     with db() as conn:
         rows = conn.execute(
             """
             SELECT id, name, source, created_at, created_by, updated_at
-            FROM scripts ORDER BY updated_at DESC LIMIT ?
+            FROM scripts
+            WHERE lower(coalesce(owner_email, created_by, ''))=?
+            ORDER BY updated_at DESC LIMIT ?
             """,
-            (limit,),
+            (email, limit),
         ).fetchall()
     scripts = []
     for r in rows:
@@ -897,15 +1002,18 @@ async def list_scripts(
 
 @app.get("/api/scripts/{script_id}")
 async def get_script(
-    script_id: str, _: dict[str, Any] = Depends(require_user)
+    script_id: str, sess: dict[str, Any] = Depends(require_user)
 ) -> dict[str, Any]:
     with db() as conn:
         row = conn.execute(
-            "SELECT id, name, source, created_at, created_by, updated_at FROM scripts WHERE id=?",
+            "SELECT id, name, source, created_at, created_by, updated_at, owner_email FROM scripts WHERE id=?",
             (script_id,),
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="script not found")
+    owner = (row["owner_email"] or row["created_by"] or "").lower()
+    if owner != tenancy.session_email(sess):
+        raise HTTPException(status_code=403, detail="script not owned by you")
     d = dict(row)
     d["source"] = json.loads(d["source"])
     return {"success": True, "script": d}
@@ -919,10 +1027,14 @@ async def deploy_script(
 ) -> dict[str, Any]:
     with db() as conn:
         row = conn.execute(
-            "SELECT id, name, source FROM scripts WHERE id=?", (script_id,)
+            "SELECT id, name, source, created_by, owner_email FROM scripts WHERE id=?",
+            (script_id,),
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="script not found")
+    owner = (row["owner_email"] or row["created_by"] or "").lower()
+    if owner != tenancy.session_email(sess):
+        raise HTTPException(status_code=403, detail="script not owned by you")
     source_obj = json.loads(row["source"])
     if body.mode in ("once", "loop"):
         source_obj["mode"] = body.mode
@@ -933,7 +1045,7 @@ async def deploy_script(
     source = json.dumps(source_obj, ensure_ascii=False, separators=(",", ":"))
     if len(source) > SCRIPT_SOURCE_MAX:
         raise HTTPException(status_code=400, detail="script too large after overrides")
-    device_id = (body.device_id or DEFAULT_DEVICE_ID).strip()
+    device_id = resolve_user_device_id(body.device_id, sess)
     now = utc_now()
     with db() as conn:
         conn.execute(
@@ -979,7 +1091,7 @@ async def deploy_script(
 async def stop_script(
     body: ScriptStopIn, sess: dict[str, Any] = Depends(require_user)
 ) -> dict[str, Any]:
-    device_id = (body.device_id or DEFAULT_DEVICE_ID).strip()
+    device_id = resolve_user_device_id(body.device_id, sess)
     now = utc_now()
     with db() as conn:
         conn.execute(
@@ -1001,9 +1113,9 @@ async def stop_script(
 
 @app.get("/api/script/status")
 async def script_status(
-    device_id: Optional[str] = None, _: dict[str, Any] = Depends(require_user)
+    device_id: Optional[str] = None, sess: dict[str, Any] = Depends(require_user)
 ) -> dict[str, Any]:
-    did = (device_id or DEFAULT_DEVICE_ID).strip()
+    did = resolve_user_device_id(device_id, sess)
     with db() as conn:
         runtime = conn.execute(
             "SELECT * FROM device_scripts WHERE device_id=?", (did,)
@@ -1044,7 +1156,7 @@ async def invoke_tools(
     payload = json.dumps({"tools": tools}, ensure_ascii=False, separators=(",", ":"))
     if len(payload) > SCRIPT_SOURCE_MAX:
         raise HTTPException(status_code=400, detail="invoke payload too large")
-    device_id = (body.device_id or DEFAULT_DEVICE_ID).strip()
+    device_id = resolve_user_device_id(body.device_id, sess)
     msg = enqueue_control_message(
         device_id=device_id,
         msg_type="invoke",
@@ -1059,27 +1171,31 @@ async def invoke_tools(
 async def list_events(
     device_id: Optional[str] = None,
     limit: int = 50,
-    _: dict[str, Any] = Depends(require_user),
+    sess: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     limit = max(1, min(limit, 200))
+    email = tenancy.session_email(sess)
     with db() as conn:
         if device_id:
+            tenancy.assert_user_owns_device(conn, device_id, email)
             rows = conn.execute(
                 """
                 SELECT id, device_id, script_id, name, data, created_at
                 FROM device_events WHERE device_id=?
                 ORDER BY created_at DESC LIMIT ?
                 """,
-                (device_id.strip(), limit),
+                (device_id.strip().lower(), limit),
             ).fetchall()
         else:
             rows = conn.execute(
                 """
-                SELECT id, device_id, script_id, name, data, created_at
-                FROM device_events
-                ORDER BY created_at DESC LIMIT ?
+                SELECT e.id, e.device_id, e.script_id, e.name, e.data, e.created_at
+                FROM device_events e
+                JOIN devices d ON d.id = e.device_id
+                WHERE lower(coalesce(d.owner_email,''))=?
+                ORDER BY e.created_at DESC LIMIT ?
                 """,
-                (limit,),
+                (email, limit),
             ).fetchall()
     events = []
     for r in rows:
@@ -1124,7 +1240,7 @@ def mark_delivered(msg_id: str) -> None:
 async def device_poll(
     device_id: str,
     timeout: int = 25,
-    _: str = Depends(require_device),
+    _: str = Depends(require_known_device),
 ) -> JSONResponse:
     timeout = max(1, min(timeout, 28))
     with db() as conn:
@@ -1151,7 +1267,7 @@ async def device_poll(
 
 @app.get("/api/v1/device/{device_id}/pending")
 async def device_pending(
-    device_id: str, _: str = Depends(require_device)
+    device_id: str, _: str = Depends(require_known_device)
 ) -> dict[str, Any]:
     msg = pending_message(device_id)
     if msg:
@@ -1162,7 +1278,7 @@ async def device_pending(
 
 @app.get("/api/v1/device/{device_id}/asset/{asset_name}")
 async def device_asset(
-    device_id: str, asset_name: str, _: str = Depends(require_device)
+    device_id: str, asset_name: str, _: str = Depends(require_known_device)
 ) -> RawResponse:
     if "/" in asset_name or "\\" in asset_name or not asset_name.endswith(".bin"):
         raise HTTPException(status_code=400, detail="bad asset name")
@@ -1181,7 +1297,7 @@ async def device_asset(
 
 @app.post("/api/v1/device/{device_id}/ack")
 async def device_ack(
-    device_id: str, body: AckIn, _: str = Depends(require_device)
+    device_id: str, body: AckIn, _: str = Depends(require_known_device)
 ) -> dict[str, Any]:
     status = "acked" if body.ok else "failed"
     with db() as conn:
@@ -1198,7 +1314,7 @@ async def device_ack(
 
 @app.post("/api/v1/device/{device_id}/status")
 async def device_status(
-    device_id: str, body: StatusIn, _: str = Depends(require_device)
+    device_id: str, body: StatusIn, _: str = Depends(require_known_device)
 ) -> dict[str, Any]:
     meta = json.dumps(body.meta or {})
     with db() as conn:
@@ -1232,7 +1348,7 @@ async def device_status(
 
 @app.post("/api/v1/device/{device_id}/events")
 async def device_post_event(
-    device_id: str, body: DeviceEventIn, _: str = Depends(require_device)
+    device_id: str, body: DeviceEventIn, _: str = Depends(require_known_device)
 ) -> dict[str, Any]:
     event_id = uuid.uuid4().hex
     created = utc_now()
@@ -1315,12 +1431,14 @@ async def agent_capabilities(
         "success": True,
         "public_base": PUBLIC_BASE,
         "auth": {
-            "type": "kuroneko.chat + allowlist session cookie",
+            "type": "kuroneko.chat session; each user owns their devices",
             "login": "POST /api/auth/login",
             "me": "GET /api/auth/me",
             "logout": "POST /api/auth/logout",
             "cookie": SESSION_COOKIE,
             "cookie_path": "/epaper",
+            "allowlist": "optional EPD_ALLOWLIST (* or empty = open)",
+            "device_token": "per-device bearer from /api/devices/register",
         },
         "devices": [
             {"id": did, "name": name, "width": w, "height": h}
@@ -1337,6 +1455,19 @@ async def agent_capabilities(
                 "name": "onlyclaws_list_devices",
                 "method": "GET",
                 "path": "/api/devices",
+                "notes": "Only devices owned by the session user",
+            },
+            {
+                "name": "onlyclaws_register_device",
+                "method": "POST",
+                "path": "/api/devices/register",
+                "body": {"device_id": "string", "name": "string?"},
+                "notes": "Returns device_token once",
+            },
+            {
+                "name": "onlyclaws_rotate_token",
+                "method": "POST",
+                "path": "/api/devices/{id}/rotate-token",
             },
             {
                 "name": "onlyclaws_push_text",

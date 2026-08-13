@@ -14,6 +14,7 @@ void applyDefaults() {
   gCfg.host = CLOUD_API_HOST;
   gCfg.pathPrefix = CLOUD_API_PATH_PREFIX;
   gCfg.deviceId = EPD_DEVICE_ID;
+  gCfg.deviceToken = EPD_DEVICE_TOKEN;
 #ifdef EPD_API_HOST
   if (String(EPD_API_HOST).length()) gCfg.host = EPD_API_HOST;
 #endif
@@ -25,10 +26,12 @@ void loadOverrides() {
   String host = prefs.getString("host", "");
   String prefix = prefs.getString("prefix", "");
   String did = prefs.getString("device_id", "");
+  String tok = prefs.getString("token", "");
   prefs.end();
   if (host.length()) gCfg.host = host;
   if (prefix.length()) gCfg.pathPrefix = prefix;
   if (did.length()) gCfg.deviceId = did;
+  if (tok.length()) gCfg.deviceToken = tok;
   if (gCfg.pathPrefix.length() && gCfg.pathPrefix[0] != '/') {
     gCfg.pathPrefix = String("/") + gCfg.pathPrefix;
   }
@@ -42,12 +45,24 @@ void apiConfigBegin() { loadOverrides(); }
 
 const ApiConfig &apiConfigGet() { return gCfg; }
 
+const char *apiDeviceToken() { return gCfg.deviceToken.c_str(); }
+
 bool apiConfigSave(const ApiConfig &cfg) {
   if (!cfg.host.length() || !cfg.deviceId.length()) return false;
   if (!prefs.begin(NS, false)) return false;
   prefs.putString("host", cfg.host);
   prefs.putString("prefix", cfg.pathPrefix.length() ? cfg.pathPrefix : "/epaper");
   prefs.putString("device_id", cfg.deviceId);
+  if (cfg.deviceToken.length()) prefs.putString("token", cfg.deviceToken);
+  prefs.end();
+  loadOverrides();
+  return true;
+}
+
+bool apiConfigSaveToken(const String &token) {
+  if (!token.length()) return false;
+  if (!prefs.begin(NS, false)) return false;
+  prefs.putString("token", token);
   prefs.end();
   loadOverrides();
   return true;

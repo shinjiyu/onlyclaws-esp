@@ -52,16 +52,16 @@ Remote Agent  ──(kuroneko session)──►  OnlyClaws API
 | `src/` | Legacy ePaper firmware |
 | `server/static/agent-api.md` | Agent function-call contract |
 
-### Cloud defaults
+### Cloud defaults / multi-tenant
 
-Private server defaults are in `rlcd/include/cloud_config.h`:
+Private server defaults are in `rlcd/include/cloud_config.h`.
 
-- Host: `onlyclaws.world`
-- Path prefix: `/epaper`
-- Public base: `https://onlyclaws.world/epaper`
+- Host: `onlyclaws.world` / path `/epaper`
+- **Accounts:** kuroneko.chat login; each user only manages **their** devices
+- **Device auth:** per-device token from `POST /api/devices/register` (NVS or `device_secrets.h`)
+- Optional closed mode: set `EPD_ALLOWLIST` to a comma-list of emails
 
-Override at runtime via NVS namespace `cloud` (`host` / `prefix` / `device_id`).  
-Device token stays in gitignored `rlcd/include/device_secrets.h` (see `.example`).
+Override cloud host at runtime via NVS namespace `cloud` (`host` / `prefix` / `device_id` / `token`).
 
 ### Agent capabilities (session required)
 
@@ -168,16 +168,16 @@ Runtime secrets (`EPD_SESSION_SECRET`, `EPD_DEVICE_TOKEN`, …) must **never** b
 | `src/` | 旧 ePaper 固件 |
 | `server/static/agent-api.md` | Agent 函数调用约定 |
 
-### 私人云默认配置
+### 私人云 / 多租户
 
 写在 `rlcd/include/cloud_config.h`：
 
-- 主机：`onlyclaws.world`
-- 路径前缀：`/epaper`
-- 公网入口：`https://onlyclaws.world/epaper`
+- 主机：`onlyclaws.world`，路径 `/epaper`
+- **账号：** kuroneko.chat 登录；每人只能管理 **自己绑定** 的设备
+- **设备鉴权：** `POST /api/devices/register` 下发的 per-device token（写入 NVS 或 `device_secrets.h`）
+- 可选封闭模式：设置 `EPD_ALLOWLIST` 邮箱列表
 
-运行时可用 NVS `cloud` 覆盖 `host` / `prefix` / `device_id`。  
-设备 token 放在 gitignore 的 `rlcd/include/device_secrets.h`（参考 `.example`）。
+NVS `cloud` 可覆盖 `host` / `prefix` / `device_id` / `token`。
 
 ### Agent 能力（需登录会话）
 
