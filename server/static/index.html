@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ePaper 远程投屏</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0e1218;
+      --panel: #171d27;
+      --line: #2a3344;
+      --text: #e7ecf4;
+      --muted: #8b95a8;
+      --accent: #c4a35a;
+      --ok: #3ecf8e;
+      --bad: #ef6b7b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Noto Sans SC", "IBM Plex Sans", system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(800px 420px at 10% -10%, rgba(196,163,90,.14), transparent 55%),
+        radial-gradient(700px 380px at 100% 0%, rgba(62,207,142,.08), transparent 50%),
+        var(--bg);
+    }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { margin: 0 0 6px; font-size: 1.55rem; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); margin: 0 0 22px; font-size: .92rem; }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+    label { display: block; font-size: .82rem; color: var(--muted); margin-bottom: 6px; }
+    input, textarea, select {
+      width: 100%;
+      background: #0f141d;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 11px 12px;
+      font: inherit;
+      margin-bottom: 12px;
+    }
+    textarea { min-height: 130px; resize: vertical; }
+    button {
+      border: 0;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #1a1408;
+      font-weight: 600;
+      padding: 11px 16px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+    button:disabled { opacity: .55; cursor: wait; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .row > * { margin: 0; }
+    .spacer { flex: 1; }
+    .muted { color: var(--muted); font-size: .85rem; }
+    .mono { font-family: "IBM Plex Mono", monospace; font-size: .82rem; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid var(--line); border-radius: 999px;
+      padding: 4px 10px; font-size: .78rem; color: var(--muted);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(62,207,142,.15); }
+    .dot.off { background: var(--bad); }
+    .msg { border-top: 1px solid var(--line); padding: 10px 0; }
+    .msg:first-child { border-top: 0; }
+    .err { color: var(--bad); font-size: .9rem; margin: 8px 0 0; }
+    .ok { color: var(--ok); font-size: .9rem; margin: 8px 0 0; }
+    .hidden { display: none !important; }
+    .check {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--muted); font-size: .88rem; margin: 0 0 12px;
+    }
+    .check input { width: auto; margin: 0; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+    .tabs button.active { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>ePaper 远程投屏</h1>
+    <p class="sub">中文 / 图片服务端渲染 · 默认局刷减少闪烁 · kuroneko.chat 登录</p>
+
+    <section id="loginView" class="panel">
+      <form id="loginForm">
+        <label for="email">kuroneko.chat 邮箱</label>
+        <input id="email" type="email" autocomplete="username" required placeholder="you@example.com" />
+        <label for="password">密码</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+        <div class="row">
+          <button type="submit" id="loginBtn">登录</button>
+          <span class="muted">仅授权用户可进入控制台</span>
+        </div>
+        <p id="loginErr" class="err hidden"></p>
+      </form>
+    </section>
+
+    <section id="appView" class="hidden">
+      <div class="panel">
+        <div class="row">
+          <span class="pill"><span id="onlineDot" class="dot"></span><span id="deviceLabel">设备检测中…</span></span>
+          <span class="pill mono" id="deviceMeta">—</span>
+          <select id="deviceSelect" style="max-width:220px"></select>
+          <span class="spacer"></span>
+          <span class="muted" id="whoami"></span>
+          <button type="button" class="secondary" id="logoutBtn">退出</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="tabs">
+          <button type="button" class="secondary active" id="tabText">文字</button>
+          <button type="button" class="secondary" id="tabImage">图片</button>
+        </div>
+
+        <form id="pushForm">
+          <label for="title">标题（可选，支持中文）</label>
+          <input id="title" maxlength="80" placeholder="提醒 / 便签 / …" />
+          <label for="body">正文</label>
+          <textarea id="body" maxlength="4000" placeholder="支持中文。服务端按目标设备分辨率渲染后再投递。"></textarea>
+          <label class="check"><input type="checkbox" id="fullRefresh" /> 强制全刷（残影明显时勾选；平时建议局刷）</label>
+          <div class="row">
+            <button type="submit" id="pushBtn">投递文字</button>
+            <span class="muted">默认局刷，闪烁会少很多</span>
+          </div>
+          <p id="pushMsg" class="ok hidden"></p>
+          <p id="pushErr" class="err hidden"></p>
+        </form>
+
+        <form id="imageForm" class="hidden">
+          <label for="imageFile">图片（JPG / PNG / WebP）</label>
+          <input id="imageFile" type="file" accept="image/*" required />
+          <label for="imageTitle">标题（可选）</label>
+          <input id="imageTitle" maxlength="80" placeholder="图片说明" />
+          <label for="fit">适配</label>
+          <select id="fit">
+            <option value="contain">完整放入（留白）</option>
+            <option value="cover">铺满裁剪</option>
+          </select>
+          <label class="check"><input type="checkbox" id="imageFullRefresh" /> 强制全刷</label>
+          <div class="row">
+            <button type="submit" id="imageBtn">投递图片</button>
+            <span class="muted" id="panelHint">按所选设备分辨率渲染；建议 JPG/PNG，小于 5MB（iPhone 请先转 JPG，勿用实况图）</span>
+          </div>
+          <p id="imageMsg" class="ok hidden"></p>
+          <p id="imageErr" class="err hidden"></p>
+        </form>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="margin-bottom:10px">
+          <strong>最近投递</strong>
+          <span class="spacer"></span>
+          <button type="button" class="secondary" id="refreshBtn">刷新</button>
+        </div>
+        <div id="msgList" class="muted">暂无记录</div>
+      </div>
+
+      <div class="panel">
+        <strong>Agent 接入</strong>
+        <p class="muted" style="margin:8px 0">功能调用文档需 kuroneko 登录后访问。</p>
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+          <a class="secondary" href="/epaper/api/agent/docs" target="_blank" rel="noopener">打开文档</a>
+          <a class="secondary" href="/epaper/api/agent/capabilities" target="_blank" rel="noopener">capabilities JSON</a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const api = async (path, opts = {}) => {
+      const timeoutMs = opts.timeoutMs || 30000;
+      const controller = opts.signal ? null : new AbortController();
+      const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+      try {
+        const { timeoutMs: _ignore, ...fetchOpts } = opts;
+        const r = await fetch(path, {
+          credentials: "same-origin",
+          headers: {
+            ...(opts.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+            ...(opts.headers || {}),
+          },
+          signal: opts.signal || (controller && controller.signal),
+          ...fetchOpts,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          let msg = data.message || data.detail || r.statusText;
+          if (Array.isArray(msg)) msg = msg.map((x) => x.msg || JSON.stringify(x)).join("; ");
+          if (r.status === 413) msg = "文件太大，请压缩到 5MB 以内后再传";
+          if (r.status === 401) msg = "登录已过期，请刷新页面重新登录";
+          throw new Error(msg || ("请求失败 HTTP " + r.status));
+        }
+        return data;
+      } catch (ex) {
+        const name = ex && ex.name;
+        const raw = (ex && ex.message) || String(ex || "请求失败");
+        if (name === "AbortError") {
+          throw new Error("上传超时或被中断。请换小一点的 JPG/PNG（建议 <2MB），不要用 HEIC/实况图。");
+        }
+        if (/Failed to fetch|NetworkError|Load failed|network connection was lost/i.test(raw)) {
+          throw new Error("上传失败：浏览器与服务器连接中断（常见于大图/HEIC）。请压缩为 JPG 后再试。");
+        }
+        throw new Error(raw);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
+    const loginView = document.getElementById("loginView");
+    const appView = document.getElementById("appView");
+    const pushForm = document.getElementById("pushForm");
+    const imageForm = document.getElementById("imageForm");
+
+    function show(el, on) { el.classList.toggle("hidden", !on); }
+    function setText(id, t) { document.getElementById(id).textContent = t; }
+
+    document.getElementById("tabText").onclick = () => {
+      document.getElementById("tabText").classList.add("active");
+      document.getElementById("tabImage").classList.remove("active");
+      show(pushForm, true); show(imageForm, false);
+    };
+    document.getElementById("tabImage").onclick = () => {
+      document.getElementById("tabImage").classList.add("active");
+      document.getElementById("tabText").classList.remove("active");
+      show(pushForm, false); show(imageForm, true);
+    };
+
+    async function boot() {
+      try {
+        const me = await api("/epaper/api/auth/me");
+        enterApp(me.user);
+      } catch {
+        show(loginView, true);
+        show(appView, false);
+      }
+    }
+
+    function enterApp(user) {
+      show(loginView, false);
+      show(appView, true);
+      setText("whoami", user.email || "");
+      refreshDevices();
+      refreshMessages();
+    }
+
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("loginBtn");
+      const err = document.getElementById("loginErr");
+      show(err, false);
+      btn.disabled = true;
+      try {
+        const data = await api("/epaper/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({
+            email: document.getElementById("email").value.trim(),
+            password: document.getElementById("password").value,
+          }),
+        });
+        enterApp(data.user);
+      } catch (ex) {
+        err.textContent = ex.message || "登录失败";
+        show(err, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await api("/epaper/api/auth/logout", { method: "POST", body: "{}" });
+      location.reload();
+    });
+
+    let selectedDeviceId = localStorage.getItem("epd_device_id") || "";
+
+    function currentDeviceId() {
+      const sel = document.getElementById("deviceSelect");
+      return (sel && sel.value) || selectedDeviceId || "";
+    }
+
+    pushForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const ok = document.getElementById("pushMsg");
+      const err = document.getElementById("pushErr");
+      const btn = document.getElementById("pushBtn");
+      show(ok, false); show(err, false);
+      btn.disabled = true;
+      try {
+        const data = await api("/epaper/api/push", {
+          method: "POST",
+          body: JSON.stringify({
+            title: document.getElementById("title").value.trim(),
+            body: document.getElementById("body").value,
+            full_refresh: document.getElementById("fullRefresh").checked,
+            device_id: currentDeviceId() || undefined,
+          }),
+        });
+        ok.textContent = "已入队：" + data.message.id.slice(0, 8) + "…";
+        show(ok, true);
+        document.getElementById("body").value = "";
+        refreshMessages();
+      } catch (ex) {
+        err.textContent = ex.message || "投递失败";
+        show(err, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    imageForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const ok = document.getElementById("imageMsg");
+      const err = document.getElementById("imageErr");
+      const btn = document.getElementById("imageBtn");
+      show(ok, false); show(err, false);
+      btn.disabled = true;
+      const prevLabel = btn.textContent;
+      try {
+        const file = document.getElementById("imageFile").files[0];
+        if (!file) throw new Error("请先选择图片文件");
+        const name = (file.name || "").toLowerCase();
+        const type = (file.type || "").toLowerCase();
+        if (type.includes("heic") || type.includes("heif") || /\.(heic|heif)$/i.test(name)) {
+          throw new Error("不支持 HEIC/实况图，请先在相册导出为 JPG 再上传");
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          throw new Error(`图片 ${(file.size / 1024 / 1024).toFixed(1)}MB 过大，请压缩到 5MB 以内（建议 <2MB）`);
+        }
+        btn.textContent = "上传中…";
+        ok.textContent = `正在上传 ${file.name}（${(file.size / 1024).toFixed(0)} KB）…`;
+        show(ok, true);
+
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("title", document.getElementById("imageTitle").value.trim());
+        fd.append("fit", document.getElementById("fit").value);
+        fd.append("full_refresh", document.getElementById("imageFullRefresh").checked ? "true" : "false");
+        const did = currentDeviceId();
+        if (did) fd.append("device_id", did);
+        const data = await api("/epaper/api/push/image", {
+          method: "POST",
+          body: fd,
+          timeoutMs: 90000,
+        });
+        ok.textContent = "图片已入队：" + data.message.id.slice(0, 8) + "… 请等设备拉取（约几秒到半分钟）";
+        show(ok, true);
+        show(err, false);
+        imageForm.reset();
+        refreshMessages();
+      } catch (ex) {
+        show(ok, false);
+        err.textContent = "上传失败：" + (ex.message || "未知错误");
+        show(err, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prevLabel;
+      }
+    });
+
+    document.getElementById("imageFile").addEventListener("change", () => {
+      const err = document.getElementById("imageErr");
+      const ok = document.getElementById("imageMsg");
+      show(err, false);
+      show(ok, false);
+      const file = document.getElementById("imageFile").files[0];
+      if (!file) return;
+      const name = (file.name || "").toLowerCase();
+      const type = (file.type || "").toLowerCase();
+      if (type.includes("heic") || type.includes("heif") || /\.(heic|heif)$/i.test(name)) {
+        err.textContent = "检测到 HEIC/实况图：请先转为 JPG/PNG 再上传，否则会失败";
+        show(err, true);
+      } else if (file.size > 5 * 1024 * 1024) {
+        err.textContent = `文件 ${(file.size / 1024 / 1024).toFixed(1)}MB 偏大，建议压缩到 2MB 以内再传`;
+        show(err, true);
+      }
+    });
+
+    document.getElementById("refreshBtn").addEventListener("click", () => {
+      refreshDevices();
+      refreshMessages();
+    });
+
+    async function refreshDevices() {
+      try {
+        const data = await api("/epaper/api/devices");
+        const list = data.devices || [];
+        const sel = document.getElementById("deviceSelect");
+        const prev = currentDeviceId();
+        sel.innerHTML = list
+          .map((d) => {
+            const label = `${d.online ? "●" : "○"} ${d.name} (${d.width}×${d.height})`;
+            return `<option value="${escapeHtml(d.id)}">${escapeHtml(label)}</option>`;
+          })
+          .join("");
+        if (!list.length) {
+          setText("deviceLabel", "无设备");
+          return;
+        }
+        const prefer =
+          list.find((d) => d.id === prev) ||
+          list.find((d) => d.online) ||
+          list[0];
+        sel.value = prefer.id;
+        selectedDeviceId = prefer.id;
+        localStorage.setItem("epd_device_id", prefer.id);
+        const d = prefer;
+        const dot = document.getElementById("onlineDot");
+        dot.className = "dot " + (d.online ? "on" : "off");
+        setText("deviceLabel", (d.online ? "在线" : "离线") + " · " + d.name);
+        const m = d.meta || {};
+        const sensorBits = [];
+        if (m.temp_c != null) sensorBits.push(Number(m.temp_c).toFixed(1) + "°C");
+        if (m.humidity != null) sensorBits.push(Number(m.humidity).toFixed(0) + "%RH");
+        if (m.battery_pct != null) sensorBits.push("电量 " + m.battery_pct + "%");
+        else if (m.battery_v != null) sensorBits.push(Number(m.battery_v).toFixed(2) + "V");
+        setText(
+          "deviceMeta",
+          [
+            d.id,
+            `${d.width}×${d.height}`,
+            d.ip || "no-ip",
+            d.rssi != null ? d.rssi + "dBm" : "",
+            d.fw || "",
+            sensorBits.length ? sensorBits.join(" · ") : "传感器 —",
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        );
+        const hint = document.getElementById("panelHint");
+        if (hint) hint.textContent = `自动转成 ${d.width}×${d.height} 黑白 1-bit；请用 JPG/PNG，建议 <2MB`;
+      } catch (_) {}
+    }
+
+    document.getElementById("deviceSelect").addEventListener("change", (e) => {
+      selectedDeviceId = e.target.value;
+      localStorage.setItem("epd_device_id", selectedDeviceId);
+      refreshDevices();
+    });
+
+    async function refreshMessages() {
+      try {
+        const data = await api("/epaper/api/messages?limit=20");
+        const box = document.getElementById("msgList");
+        const list = data.messages || [];
+        if (!list.length) {
+          box.className = "muted";
+          box.textContent = "暂无记录";
+          return;
+        }
+        box.className = "";
+        box.innerHTML = list
+          .map((m) => {
+            const title = m.title ? `<strong>${escapeHtml(m.title)}</strong> · ` : "";
+            const mode = m.full_refresh ? "全刷" : "局刷";
+            return `<div class="msg">
+              <div>${title}<span class="mono">${escapeHtml(m.status)}</span>
+                <span class="muted"> · ${mode} · ${escapeHtml(m.created_at || "")}</span></div>
+              <div>${escapeHtml(m.body || "")}</div>
+            </div>`;
+          })
+          .join("");
+      } catch (_) {}
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    setInterval(() => {
+      if (!appView.classList.contains("hidden")) {
+        refreshDevices();
+        refreshMessages();
+      }
+    }, 8000);
+
+    boot();
+  </script>
+</body>
+</html>

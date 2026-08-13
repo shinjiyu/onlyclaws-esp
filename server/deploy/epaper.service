@@ -1,0 +1,15 @@
+[Unit]
+Description=ESP32 ePaper control plane
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/epaper
+EnvironmentFile=/opt/epaper/epaper.env
+ExecStart=/opt/epaper/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8787 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
