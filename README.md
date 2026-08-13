@@ -20,24 +20,27 @@ No character UI, no on-device LLM — Agents drive hardware over the network and
 
 ### Lua on device
 
+Full board surface (not a text demo): **gfx**, **PCM audio**, sensors, buttons, Wi‑Fi.
+
 ```lua
 function on_start()
-  log("boot")
-  emit("script_started")
+  gfx.clear(0)
+  gfx.fill_circle(200, 120, 50, 1)
+  gfx.flush()
+  audio.beep(1000, 80)
+  -- audio.play_pcm(b64_int16_le) for real samples
 end
 
 function on_loop()
   local s = sensors()
   if s.temp_c and s.temp_c > 35 then
-    beep(1200, 80)
     emit("hot", { temp = s.temp_c })
   end
-  display("temp", string.format("%.1fC", s.temp_c or -1))
-  return 10000  -- next delay ms (or call sleep(10000))
+  return 10000
 end
 ```
 
-Whitelist APIs: `sensors`, `beep`, `emit`, `display`, `log`, `sleep`, `stop`, `millis` (also under `oc.*`).
+APIs: `gfx.*` (pixel/line/rect/circle/text/blit/flush, 400×300 1bpp) · `audio.beep` / `play_pcm` / `pa` · `sensors` · `emit` · `input.key`/`boot` · `net.rssi`/`ip`/`ssid` · `log`/`sleep`/`stop`/`millis` · `display` (two-line helper). Also under `oc.*`.
 
 Deploy:
 
@@ -57,7 +60,7 @@ POST /api/scripts
 
 | Path | Role |
 |------|------|
-| `rlcd/` | ESP32-S3-RLCD runtime (`rlcd-runtime-0.9.x`, Lua) |
+| `rlcd/` | ESP32-S3-RLCD runtime (`rlcd-runtime-0.10.x`, Lua) |
 | `server/` | FastAPI control plane |
 | `src/` | Legacy ePaper firmware |
 
@@ -86,7 +89,7 @@ kuroneko 登录后只能管自己的设备；每台板独立 `device_token`。
 
 ### Lua
 
-见上方示例。白名单：`sensors` / `beep` / `emit` / `display` / `log` / `sleep` / `stop` / `millis`。
+板端暴露完整能力：`gfx.*` 像素绘图、`audio.play_pcm` / `beep`、传感器、按键、Wi‑Fi。详见 `/api/agent/skill.md`。
 
 ### 编译烧录
 
