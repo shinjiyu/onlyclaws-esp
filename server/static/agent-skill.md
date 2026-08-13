@@ -38,13 +38,32 @@ All require `Authorization: Bearer oct_…`.
 |--------|------|
 | Who am I | `GET /api/auth/me` |
 | List my devices | `GET /api/devices` |
-| Invoke tools | `POST /api/invoke` |
-| Push text card | `POST /api/push` |
-| Beep / wave / react | `POST /api/action` |
-| Deploy edge script | `POST /api/scripts` (+ optional deploy) |
-| Events | `GET /api/events` |
+| Invoke one-shot tools | `POST /api/invoke` |
+| Push text / bitmap | `POST /api/push` |
+| Beep action | `POST /api/action` |
+| **Deploy Lua** | `POST /api/scripts` (`language=lua`, `source` = Lua string) |
+| Events from `emit()` | `GET /api/events` |
 
-### Invoke example
+### Lua deploy example
+
+```http
+POST /api/scripts
+Authorization: Bearer oct_...
+Content-Type: application/json
+
+{
+  "name": "hot-alert",
+  "language": "lua",
+  "mode": "loop",
+  "every_ms": 10000,
+  "device_id": "a4cb8fdf8440",
+  "source": "function on_loop()\n  local s = sensors()\n  if s.temp_c and s.temp_c > 35 then beep(1200,80); emit('hot',{temp=s.temp_c}) end\n  return 10000\nend\n"
+}
+```
+
+Lua whitelist on device: `sensors`, `beep`, `emit`, `display`, `log`, `sleep`, `stop`, `millis` (also `oc.*`).
+
+### Invoke example (one-shot only)
 
 ```http
 POST /api/invoke

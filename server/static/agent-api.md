@@ -2,7 +2,7 @@
 
 Base URL: `https://onlyclaws.world/epaper`
 
-**Product model:** remote Agents drive devices over the network. Optionally deploy a JSON tools script that runs a **local loop on the ESP32** (edge autonomy). The full LLM does **not** run on-device.
+**Product model:** pure agent/device framework. Remote Agents control ESP32 over the network; optionally deploy **Lua** for an on-device loop. No character UI. The full LLM does **not** run on-device.
 
 ---
 
@@ -45,13 +45,13 @@ Per-device token from `POST /api/devices/register` — ESP wire protocol only. *
 | Register / claim device | `POST /api/devices/register` | Bind `device_id`; returns `device_token` once |
 | Rotate device token | `POST /api/devices/{id}/rotate-token` | New firmware bearer; old invalid |
 | Remote invoke tools | `POST /api/invoke` | One-shot whitelist tools on **your** device |
-| Create script | `POST /api/scripts` | Store JSON tools script |
-| Deploy script | `POST /api/scripts/{id}/deploy` | Device runs local loop / once |
+| Create Lua script | `POST /api/scripts` | Store Lua source (`language=lua`) |
+| Deploy Lua script | `POST /api/scripts/{id}/deploy` | Device runs `on_loop` / once |
 | Stop script | `POST /api/script/stop` | Stop edge loop |
 | Script status | `GET /api/script/status` | Runtime + device-reported state |
-| Device events | `GET /api/events` | `emit` from scripts |
-| Push text / image | `POST /api/push`, `/api/push/image` | Bitmap card + optional cues |
-| Device actions | `POST /api/action` | beep/wave/react without card |
+| Device events | `GET /api/events` | `emit` from Lua |
+| Push text / image | `POST /api/push`, `/api/push/image` | Optional bitmap / status text |
+| Device actions | `POST /api/action` | beep (and legacy action flags) |
 | Agent docs | `GET /api/agent/docs.md` | This contract |
 | Capabilities JSON | `GET /api/agent/capabilities` | Machine catalog |
 
@@ -74,14 +74,14 @@ Known device IDs:
   "tools": [
     {"tool": "sensors.read"},
     {"tool": "beep", "freq": 1000, "ms": 100},
-    {"tool": "wave"}
+    {"tool": "display", "title": "ping", "line2": "ok"}
   ]
 }
 ```
 
-Shorthand single tool: `{ "device_id": "...", "tool": { "tool": "react" } }`
+Shorthand: `{ "device_id": "...", "tool": { "tool": "beep", "freq": 880, "ms": 80 } }`
 
-Queued as message `type=invoke`; device executes on next poll (~2.5s).
+Queued as `type=invoke`. Prefer **Lua deploy** for any non-trivial logic.
 
 ---
 
