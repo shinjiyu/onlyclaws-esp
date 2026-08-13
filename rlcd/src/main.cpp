@@ -18,7 +18,6 @@
 #include "api_config.h"
 #include "audio_es8311.h"
 #include "board_pins.h"
-#include "character_ui.h"
 #include "cloud_config.h"
 #include "device_secrets.h"
 #include "script_engine.h"
@@ -28,7 +27,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "rlcd-agent-0.8.0";
+constexpr const char *FW_VERSION = "rlcd-runtime-0.9.0";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
@@ -36,10 +35,10 @@ St7305Rlcd display;
 WiFiClientSecure tls;
 uint8_t *frameBuf = nullptr;
 String lastShownId;
-uint32_t lastStatusMs = 0;
 uint32_t lastSensorMs = 0;
 SensorReading lastSensors{};
-bool sceneActive = false;
+String statusLine1 = "OnlyClaws";
+String statusLine2 = "runtime";
 
 String macSuffix() {
   uint8_t mac[6] = {};
@@ -79,7 +78,6 @@ bool ensureFrameBuf() {
 }
 
 void drawStatus(const char *title, const char *line2, const char *line3 = nullptr) {
-  sceneActive = false;
   display.fillScreen(0);
   display.drawRect(4, 4, LCD_WIDTH - 8, LCD_HEIGHT - 8, 1);
   display.setTextColor(1);
@@ -96,56 +94,31 @@ void drawStatus(const char *title, const char *line2, const char *line3 = nullpt
   display.setCursor(24, 180);
   display.print("MAC ");
   display.print(macSuffix());
+  display.setCursor(24, 216);
+  display.print(FW_VERSION);
   display.display();
+}
+
+void drawRuntimeHud(bool forceSensors = false) {
+  if (forceSensors || millis() - lastSensorMs > 30000) {
+    SensorReading r;
+    if (sensorsRead(r)) lastSensors = r;
+    lastSensorMs = millis();
+  }
+  char line3[48];
+  snprintf(line3, sizeof(line3), "script %s", scriptEngineState());
+  drawStatus(statusLine1.c_str(), statusLine2.c_str(), line3);
 }
 
 void drawPortalHint() {
-  sceneActive = false;
-  display.fillScreen(0);
-  display.drawRect(4, 4, LCD_WIDTH - 8, LCD_HEIGHT - 8, 1);
-  display.setTextColor(1);
-  display.setFont(&FreeMonoBold18pt7b);
-  display.setCursor(24, 48);
-  display.print("WiFi Setup");
-  display.setFont(&FreeMonoBold12pt7b);
-  display.setCursor(24, 96);
-  display.print("1) Join RLCD-Setup-*");
-  display.setCursor(24, 132);
-  display.print("2) Pass 12345678");
-  display.setCursor(24, 168);
-  display.print("3) Open captive page");
-  display.setCursor(24, 204);
-  display.print("or http://192.168.4.1/");
+  drawStatus("WiFi Setup", "1) Join RLCD-Setup-*", "2) http://192.168.4.1/");
+}
+
+void drawBitmapFrame() {
+  if (!frameBuf) return;
+  // 1-bit framebuffer already matches panel geometry.
+  display.drawBitmap(0, 0, frameBuf, LCD_WIDTH, LCD_HEIGHT, 1, 0);
   display.display();
-}
-
-void refreshHud() {
-  CharacterHud h;
-  h.tempC = lastSensors.okTemp ? lastSensors.tempC : NAN;
-  h.humidity = lastSensors.okTemp ? lastSensors.humidity : NAN;
-  h.batteryV = lastSensors.okBattery ? lastSensors.batteryV : NAN;
-  h.batteryPct = lastSensors.okBattery ? lastSensors.batteryPct : -1;
-  h.rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
-  static char ssidBuf[33];
-  if (WiFi.status() == WL_CONNECTED) {
-    strncpy(ssidBuf, WiFi.SSID().c_str(), sizeof(ssidBuf) - 1);
-    ssidBuf[sizeof(ssidBuf) - 1] = 0;
-    h.ssid = ssidBuf;
-  } else {
-    h.ssid = "offline";
-  }
-  characterSetHud(h);
-}
-
-void showCharacterScene(bool force = false) {
-  sceneActive = true;
-  refreshHud();
-  const uint32_t now = millis();
-  characterTick(now);
-  if (force || characterNeedsRedraw(now)) {
-    characterRender(display);
-    display.display();
-  }
 }
 
 bool connectWifiWith(const WifiCreds &c, uint32_t timeoutMs = 20000) {
@@ -172,20 +145,16 @@ bool connectWifiWith(const WifiCreds &c, uint32_t timeoutMs = 20000) {
 
 bool ensureWifiConnected() {
   if (bootButtonHeld()) {
-    Serial.println("BOOT held -> SoftAP web provision");
     drawPortalHint();
     if (!wifiApProvision(0)) return false;
   }
-
   for (int attempt = 0; attempt < 3; ++attempt) {
     WifiCreds creds;
     if (!wifiStoreLoad(creds)) {
-      Serial.println("No NVS WiFi -> SoftAP web provision");
       drawPortalHint();
       if (!wifiApProvision(0)) return false;
       continue;
     }
-    Serial.printf("WiFi from NVS ssid=%s\n", creds.ssid.c_str());
     drawStatus("Connecting", creds.ssid.c_str());
     if (connectWifiWith(creds)) return true;
     drawPortalHint();
@@ -198,7 +167,6 @@ String apiUrl(const char *suffix) { return apiDeviceUrl(suffix); }
 String absoluteUrl(const char *pathOrUrl) { return apiAbsoluteUrl(pathOrUrl); }
 
 SemaphoreHandle_t httpMutex = nullptr;
-
 bool httpLock() {
   if (!httpMutex) httpMutex = xSemaphoreCreateMutex();
   return httpMutex && xSemaphoreTake(httpMutex, pdMS_TO_TICKS(60000)) == pdTRUE;
@@ -224,11 +192,8 @@ bool httpJson(const char *method, const String &url, const String &body, String 
     int code = (strcmp(method, "GET") == 0) ? http.GET() : http.POST(body);
     out = http.getString();
     http.end();
-    if (code < 200 || code >= 300) {
-      Serial.printf("HTTP %d\n", code);
-    } else {
-      ok = true;
-    }
+    if (code < 200 || code >= 300) Serial.printf("HTTP %d\n", code);
+    else ok = true;
   }
   httpUnlock();
   return ok;
@@ -242,7 +207,6 @@ bool downloadAsset(const String &url) {
   http.setReuse(false);
   tls.setInsecure();
   tls.setTimeout(30000);
-  Serial.printf("GET asset heap=%u %s\n", ESP.getFreeHeap(), url.c_str());
   bool ok = false;
   if (http.begin(tls, url)) {
     http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
@@ -260,7 +224,6 @@ bool downloadAsset(const String &url) {
         }
         got += stream->readBytes(frameBuf + got, min(avail, FRAME_BYTES - got));
       }
-      Serial.printf("asset got=%u need=%u\n", (unsigned)got, (unsigned)FRAME_BYTES);
       ok = got == FRAME_BYTES;
     }
     http.end();
@@ -269,28 +232,14 @@ bool downloadAsset(const String &url) {
   return ok;
 }
 
-void updateSensors(bool redrawHud = true) {
-  SensorReading r;
-  if (sensorsRead(r)) {
-    lastSensors = r;
-    Serial.printf("[sensors] temp=%.1fC rh=%.0f%% bat=%.2fV (%d%%)\n", r.tempC,
-                  r.humidity, r.batteryV, r.batteryPct);
-  }
-  lastSensorMs = millis();
-  if (redrawHud) refreshHud();
-}
-
 bool emitDeviceEvent(const char *name, const char *jsonData) {
   DynamicJsonDocument doc(768);
   doc["name"] = name ? name : "event";
   doc["script_id"] = scriptEngineScriptId();
   if (jsonData && jsonData[0]) {
     DynamicJsonDocument data(512);
-    if (!deserializeJson(data, jsonData)) {
-      doc["data"] = data.as<JsonVariant>();
-    } else {
-      doc["data"] = jsonData;
-    }
+    if (!deserializeJson(data, jsonData)) doc["data"] = data.as<JsonVariant>();
+    else doc["data"] = jsonData;
   } else {
     doc.createNestedObject("data");
   }
@@ -304,19 +253,17 @@ bool hostReadSensors(SensorReading &out) { return sensorsRead(out); }
 bool hostBeep(uint16_t freq, uint16_t ms) {
   return audioIsReady() && audioPlayBeep(freq, ms);
 }
-void hostWave() { characterWave(); }
-void hostReact() { characterReact(); }
-void hostDialog(const char *title) {
-  characterSetDialog(title && title[0] ? title : "script", nullptr, 0, 30000);
-  showCharacterScene(true);
+void hostDisplay(const char *a, const char *b) {
+  statusLine1 = a && a[0] ? a : "script";
+  statusLine2 = b ? b : "";
+  drawRuntimeHud(false);
 }
-void hostOnSensors(const SensorReading &r) {
-  lastSensors = r;
-  refreshHud();
-}
+void hostOnSensors(const SensorReading &r) { lastSensors = r; }
 
 void postStatus() {
-  updateSensors(false);
+  SensorReading r;
+  if (sensorsRead(r)) lastSensors = r;
+  lastSensorMs = millis();
   DynamicJsonDocument doc(768);
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
@@ -332,22 +279,52 @@ void postStatus() {
   }
   meta["script_id"] = scriptEngineScriptId();
   meta["script_state"] = scriptEngineState();
+  meta["script_lang"] = scriptEngineLanguage();
   if (scriptEngineLastError()[0]) meta["script_error"] = scriptEngineLastError();
   meta["api_host"] = apiConfigGet().host;
   String body;
   serializeJson(doc, body);
   String out;
-  if (httpJson("POST", apiUrl("/status"), body, out, 15000)) {
-    Serial.println("status ok");
-  }
+  if (httpJson("POST", apiUrl("/status"), body, out, 15000)) Serial.println("status ok");
 }
 
 void ackMessage(const String &messageId, bool ok, uint32_t ms) {
   String body = String("{\"message_id\":\"") + messageId +
-                "\",\"ok\":" + (ok ? "true" : "false") + ",\"ms\":" + String(ms) +
-                "}";
+                "\",\"ok\":" + (ok ? "true" : "false") + ",\"ms\":" + String(ms) + "}";
   String out;
   httpJson("POST", apiUrl("/ack"), body, out, 15000);
+}
+
+bool loadLuaFromEnvelope(const String &scriptIdIn, const String &bodyIn) {
+  String scriptId = scriptIdIn;
+  String mode = "loop";
+  uint32_t everyMs = 1000;
+  String lua;
+
+  DynamicJsonDocument wrap(16384);
+  if (!deserializeJson(wrap, bodyIn)) {
+    if (wrap["script_id"]) scriptId = wrap["script_id"].as<String>();
+    if (wrap["mode"]) mode = wrap["mode"].as<String>();
+    if (!wrap["every_ms"].isNull()) everyMs = wrap["every_ms"].as<uint32_t>();
+    const char *lang = wrap["language"] | "lua";
+    if (strcmp(lang, "lua") != 0) {
+      Serial.printf("[script] unsupported language=%s\n", lang);
+      return false;
+    }
+    if (wrap["source"].is<const char *>()) {
+      lua = wrap["source"].as<const char *>();
+    } else if (wrap["source"].is<String>()) {
+      lua = wrap["source"].as<String>();
+    } else if (!wrap["source"].isNull()) {
+      // Reject JSON-tools objects; framework is Lua-only now.
+      return false;
+    }
+  } else {
+    // Raw Lua source in body
+    lua = bodyIn;
+  }
+  if (!lua.length()) return false;
+  return scriptEngineLoadLua(scriptId.c_str(), lua.c_str(), mode.c_str(), everyMs);
 }
 
 bool handlePayload(const String &json) {
@@ -365,90 +342,50 @@ bool handlePayload(const String &json) {
 
   if (!strcmp(type, "script_stop")) {
     scriptEngineStop("remote stop");
+    statusLine1 = "OnlyClaws";
+    statusLine2 = "script stopped";
+    drawRuntimeHud(true);
     postStatus();
     ok = true;
-    ackMessage(id, ok, millis() - t0);
-    if (ok) lastShownId = id;
-    return ok;
-  }
-
-  if (!strcmp(type, "script")) {
+  } else if (!strcmp(type, "script")) {
     String scriptId = msg["title"] | "";
     String body = msg["body"] | "";
-    // body may be raw script JSON, or {"script_id","source"}
-    if (body.startsWith("{")) {
-      DynamicJsonDocument wrap(16384);
-      if (!deserializeJson(wrap, body) && !wrap["source"].isNull()) {
-        if (wrap["script_id"]) scriptId = wrap["script_id"].as<String>();
-        body = "";
-        serializeJson(wrap["source"], body);
-      }
-    }
-    ok = scriptEngineLoad(scriptId.c_str(), body.c_str());
+    ok = loadLuaFromEnvelope(scriptId, body);
     if (ok) {
-      characterSetDialog(scriptId.length() ? scriptId.c_str() : "script", nullptr, 0,
-                         20000);
-      showCharacterScene(true);
+      statusLine1 = "script";
+      statusLine2 = scriptId.length() ? scriptId : "running";
+      drawRuntimeHud(false);
       if (audioIsReady()) audioPlayBeep(660, 80);
       postStatus();
     }
-    ackMessage(id, ok, millis() - t0);
-    if (ok) lastShownId = id;
-    return ok;
-  }
-
-  if (!strcmp(type, "invoke")) {
-    String body = msg["body"] | "";
-    ok = scriptEngineInvokeJson(body.c_str());
-    showCharacterScene(true);
-    ackMessage(id, ok, millis() - t0);
-    if (ok) lastShownId = id;
-    return ok;
-  }
-
-  String title = msg["title"] | "";
-  String body = msg["body"] | "";
-  if (!title.length() && body.length()) title = body.substring(0, 24);
-
-  JsonObject actions = msg["actions"].as<JsonObject>();
-  const bool doBeep = actions.isNull() ? true : (actions["beep"] | true);
-  const bool doWave = actions.isNull() ? false : (actions["wave"] | false);
-  const bool doReact = actions.isNull() ? true : (actions["react"] | true);
-
-  String asset = absoluteUrl(msg["asset_path"] | "");
-  const bool hasAsset = asset.length() > 0;
-  if (hasAsset) {
-    ok = downloadAsset(asset);
+  } else if (!strcmp(type, "invoke")) {
+    ok = scriptEngineInvokeJson(msg["body"] | "");
+    drawRuntimeHud(false);
   } else {
-    ok = title.length() > 0 || doBeep || doWave || doReact;
+    // Optional bitmap push (framework display surface, not character UI).
+    JsonObject actions = msg["actions"].as<JsonObject>();
+    const bool doBeep = actions.isNull() ? false : (actions["beep"] | false);
+    String asset = absoluteUrl(msg["asset_path"] | "");
+    String title = msg["title"] | "";
+    if (asset.length()) {
+      ok = downloadAsset(asset);
+      if (ok) drawBitmapFrame();
+    } else if (title.length()) {
+      statusLine1 = title;
+      statusLine2 = msg["body"] | "";
+      drawRuntimeHud(false);
+      ok = true;
+    } else {
+      ok = doBeep;
+    }
+    if (doBeep && audioIsReady()) audioPlayBeep(880, 100);
   }
 
-  if (ok) {
-    if (hasAsset || title.length()) {
-      characterSetDialog(title.c_str(),
-                         hasAsset && frameBuf ? frameBuf : nullptr,
-                         hasAsset ? FRAME_BYTES : 0, 60000);
-    }
-    if (doWave) characterWave();
-    if (doReact) characterReact();
-    showCharacterScene(true);
-    if (doBeep && audioIsReady()) audioPlayBeep(880, 100);
-    if (doWave) {
-      for (int i = 0; i < 6; ++i) {
-        characterTick(millis());
-        characterRender(display);
-        display.display();
-        delay(100);
-      }
-      showCharacterScene(true);
-    }
-  }
   ackMessage(id, ok, millis() - t0);
   if (ok) lastShownId = id;
   return ok;
 }
 
-// KEY via interrupt — HTTPS must not eat short presses.
 volatile uint32_t keyDownAtMs = 0;
 volatile bool keyHeld = false;
 volatile bool keyShortPending = false;
@@ -499,82 +436,46 @@ void netTask(void *) {
   }
 }
 
-void doWaveAndBeep() {
-  Serial.println("[ui] KEY short -> wave+beep");
-  characterWave();
-  if (audioIsReady()) {
-    const bool ok = audioPlayBeep(1000, 140);
-    Serial.printf("[ui] beep %s pa=%d\n", ok ? "ok" : "fail",
-                  digitalRead(PIN_AUDIO_PA));
-  } else {
-    Serial.println("[ui] audio not ready");
-  }
-  for (int i = 0; i < 8; ++i) {
-    characterTick(millis());
-    characterRender(display);
-    display.display();
-    delay(100);
-  }
-  showCharacterScene(true);
-}
-
 void setupImpl() {
   Serial.begin(115200);
   delay(400);
   Serial.println();
-  Serial.println("=== ESP32-S3-RLCD-4.2 agent platform ===");
+  Serial.println("=== OnlyClaws ESP runtime (Lua) ===");
   apiConfigBegin();
-  Serial.printf("fw=%s device=%s cloud=%s%s heap=%u psram=%u\n", FW_VERSION,
+  Serial.printf("fw=%s device=%s cloud=%s%s heap=%u\n", FW_VERSION,
                 apiConfigGet().deviceId.c_str(), apiConfigGet().host.c_str(),
-                apiConfigGet().pathPrefix.c_str(), ESP.getFreeHeap(),
-                ESP.getFreePsram());
+                apiConfigGet().pathPrefix.c_str(), ESP.getFreeHeap());
 
   pinMode(PIN_KEY_BTN, INPUT_PULLUP);
   pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_KEY_BTN), onKeyIsr, CHANGE);
 
-  if (!display.begin()) {
-    Serial.println("[lcd] begin failed");
-  }
+  display.begin();
   ensureFrameBuf();
   sensorsBegin();
-  characterBegin();
 
   ScriptHost host{};
   host.readSensors = hostReadSensors;
   host.beep = hostBeep;
-  host.wave = hostWave;
-  host.react = hostReact;
-  host.dialog = hostDialog;
+  host.displayText = hostDisplay;
   host.emitEvent = emitDeviceEvent;
   host.onSensors = hostOnSensors;
   scriptEngineBegin(host);
 
-  if (audioBegin(16000)) {
-    Serial.println("[audio] boot chime");
-    audioPlayBeep(880, 120);
-  } else {
-    Serial.println("[audio] init skipped/failed");
-  }
+  if (audioBegin(16000)) audioPlayBeep(880, 80);
 
   while (!ensureWifiConnected()) delay(1000);
 
-  updateSensors();
-  showCharacterScene(true);
+  statusLine1 = "OnlyClaws";
+  statusLine2 = "online";
+  drawRuntimeHud(true);
   postStatus();
-  lastStatusMs = millis();
 
-  Serial.println("[diag] forced wave+beep self-test");
-  doWaveAndBeep();
-
-  Serial.println(
-      "ready. KEY short=wave+beep; hold=WiFi; cloud=invoke/script/push.");
+  Serial.println("ready. KEY short=beep; hold=WiFi; cloud=invoke/Lua script.");
   xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 1, nullptr, 0);
-  Serial.printf("[diag] KEY raw=%d (1=released)\n", digitalRead(PIN_KEY_BTN));
 }
 
 void loopImpl() {
-  // Long-press detected while held (ISR only marks short on release).
   if (keyHeld && keyLongArmed && (millis() - keyDownAtMs > 1500)) {
     keyLongArmed = false;
     keyLongPending = true;
@@ -583,23 +484,22 @@ void loopImpl() {
   if (keyLongPending) {
     keyLongPending = false;
     keyShortPending = false;
-    Serial.println("KEY held -> SoftAP web provision");
     drawPortalHint();
     if (wifiApProvision(0)) {
       WifiCreds creds;
       if (wifiStoreLoad(creds) && connectWifiWith(creds)) {
-        showCharacterScene(true);
+        drawRuntimeHud(true);
         postStatus();
       }
     } else if (WiFi.status() == WL_CONNECTED) {
-      showCharacterScene(true);
+      drawRuntimeHud(true);
     }
     while (digitalRead(PIN_KEY_BTN) == LOW) delay(20);
   }
 
   if (keyShortPending) {
     keyShortPending = false;
-    doWaveAndBeep();
+    if (audioIsReady()) audioPlayBeep(1000, 120);
   }
 
   if (netJsonReady) {
@@ -612,7 +512,7 @@ void loopImpl() {
   if (WiFi.status() != WL_CONNECTED) {
     WifiCreds creds;
     if (wifiStoreLoad(creds) && connectWifiWith(creds, 15000)) {
-      showCharacterScene(true);
+      drawRuntimeHud(true);
       postStatus();
     } else {
       drawPortalHint();
@@ -622,21 +522,6 @@ void loopImpl() {
     return;
   }
 
-  if (millis() - lastSensorMs > 30000) {
-    updateSensors();
-    if (sceneActive) showCharacterScene(true);
-  }
-
-  if (sceneActive) {
-    showCharacterScene(false);
-  }
-
-  static uint32_t lastKeyLog = 0;
-  if (millis() - lastKeyLog > 5000) {
-    lastKeyLog = millis();
-    Serial.printf("[diag] key=%d held=%d\n", digitalRead(PIN_KEY_BTN),
-                  (int)keyHeld);
-  }
   delay(15);
 }
 }  // namespace

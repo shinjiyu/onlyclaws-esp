@@ -1,169 +1,217 @@
 #include "script_engine.h"
 
 #include <ArduinoJson.h>
+#include <EspLuaEngine.h>
 #include <math.h>
 #include <string.h>
 
 namespace {
 ScriptHost gHost{};
+EspLuaEngine *gLua = nullptr;
 String gSource;
 String gScriptId;
 String gState = "idle";
 String gError;
-String gMode = "once";  // once | loop
+String gMode = "once";
 uint32_t gEveryMs = 1000;
-uint32_t gMaxIters = 0;
-uint32_t gIters = 0;
 uint32_t gNextDueMs = 0;
-int gStepIndex = 0;
-bool gInStart = true;
+bool gStartDone = false;
 SensorReading gVars{};
 bool gHasVars = false;
+bool gSleepRequested = false;
 
-constexpr size_t kDocCap = 12288;
-
-bool setError(const char *msg) {
+void setError(const char *msg) {
   gError = msg ? msg : "error";
   gState = "error";
-  return false;
+  Serial.printf("[lua] error: %s\n", gError.c_str());
 }
 
-float metaValue(const char *key) {
-  if (!key) return NAN;
-  if (!strcmp(key, "temp_c")) return gHasVars && gVars.okTemp ? gVars.tempC : NAN;
-  if (!strcmp(key, "humidity"))
-    return gHasVars && gVars.okTemp ? gVars.humidity : NAN;
-  if (!strcmp(key, "battery_v"))
-    return gHasVars && gVars.okBattery ? gVars.batteryV : NAN;
-  if (!strcmp(key, "battery_pct"))
-    return gHasVars && gVars.okBattery ? (float)gVars.batteryPct : NAN;
-  return NAN;
+int l_beep(lua_State *L) {
+  const int freq = luaL_optinteger(L, 1, 880);
+  const int ms = luaL_optinteger(L, 2, 100);
+  if (!gHost.beep) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  uint16_t f = (uint16_t)constrain(freq, 100, 8000);
+  uint16_t m = (uint16_t)constrain(ms, 1, 2000);
+  lua_pushboolean(L, gHost.beep(f, m) ? 1 : 0);
+  return 1;
 }
 
-bool evalCond(JsonObject cond) {
-  const char *meta = cond["meta"] | "";
-  const char *op = cond["op"] | "gt";
-  float value = cond["value"] | NAN;
-  float cur = metaValue(meta);
-  if (isnan(cur) || isnan(value)) return false;
-  if (!strcmp(op, "gt")) return cur > value;
-  if (!strcmp(op, "gte")) return cur >= value;
-  if (!strcmp(op, "lt")) return cur < value;
-  if (!strcmp(op, "lte")) return cur <= value;
-  if (!strcmp(op, "eq")) return fabsf(cur - value) < 0.0001f;
-  if (!strcmp(op, "neq")) return fabsf(cur - value) >= 0.0001f;
-  return false;
+int l_sensors(lua_State *L) {
+  lua_newtable(L);
+  if (!gHost.readSensors) return 1;
+  SensorReading r;
+  if (!gHost.readSensors(r)) return 1;
+  gVars = r;
+  gHasVars = true;
+  if (gHost.onSensors) gHost.onSensors(r);
+  if (r.okTemp) {
+    lua_pushnumber(L, r.tempC);
+    lua_setfield(L, -2, "temp_c");
+    lua_pushnumber(L, r.humidity);
+    lua_setfield(L, -2, "humidity");
+  }
+  if (r.okBattery) {
+    lua_pushnumber(L, r.batteryV);
+    lua_setfield(L, -2, "battery_v");
+    lua_pushinteger(L, r.batteryPct);
+    lua_setfield(L, -2, "battery_pct");
+  }
+  return 1;
 }
 
-bool runTool(JsonObject step) {
-  const char *tool = step["tool"] | "";
-  if (!tool[0]) return setError("missing tool");
-
-  if (!strcmp(tool, "sensors.read")) {
-    if (!gHost.readSensors) return setError("no sensors");
-    SensorReading r;
-    if (!gHost.readSensors(r)) return setError("sensors.read failed");
-    gVars = r;
-    gHasVars = true;
-    if (gHost.onSensors) gHost.onSensors(r);
-    return true;
-  }
-  if (!strcmp(tool, "beep")) {
-    if (!gHost.beep) return setError("no beep");
-    uint16_t freq = step["freq"] | 880;
-    uint16_t ms = step["ms"] | 100;
-    if (ms > 2000) ms = 2000;
-    return gHost.beep(freq, ms);
-  }
-  if (!strcmp(tool, "wave")) {
-    if (gHost.wave) gHost.wave();
-    return true;
-  }
-  if (!strcmp(tool, "react")) {
-    if (gHost.react) gHost.react();
-    return true;
-  }
-  if (!strcmp(tool, "dialog")) {
-    const char *title = step["title"] | "";
-    if (gHost.dialog) gHost.dialog(title);
-    return true;
-  }
-  if (!strcmp(tool, "sleep")) {
-    uint32_t ms = step["ms"] | 0;
-    if (ms > 60000) ms = 60000;
-    gNextDueMs = millis() + ms;
-    return true;
-  }
-  if (!strcmp(tool, "emit")) {
-    if (!gHost.emitEvent) return setError("no emit");
-    const char *name = step["name"] | "event";
-    String data = "{}";
-    if (!step["data"].isNull()) {
-      serializeJson(step["data"], data);
-    } else {
-      // Convenience: attach last sensor snapshot.
-      DynamicJsonDocument d(256);
-      JsonObject o = d.to<JsonObject>();
-      if (gHasVars && gVars.okTemp) {
-        o["temp_c"] = gVars.tempC;
-        o["humidity"] = gVars.humidity;
+int l_emit(lua_State *L) {
+  const char *name = luaL_optstring(L, 1, "event");
+  String data = "{}";
+  if (lua_istable(L, 2)) {
+    // Minimal table→JSON for flat string/number/bool fields.
+    DynamicJsonDocument doc(512);
+    JsonObject o = doc.to<JsonObject>();
+    lua_pushnil(L);
+    while (lua_next(L, 2) != 0) {
+      if (lua_type(L, -2) == LUA_TSTRING) {
+        const char *k = lua_tostring(L, -2);
+        if (lua_isboolean(L, -1)) o[k] = (bool)lua_toboolean(L, -1);
+        else if (lua_isinteger(L, -1)) o[k] = (long)lua_tointeger(L, -1);
+        else if (lua_isnumber(L, -1)) o[k] = (double)lua_tonumber(L, -1);
+        else if (lua_isstring(L, -1)) o[k] = lua_tostring(L, -1);
       }
-      if (gHasVars && gVars.okBattery) {
-        o["battery_v"] = gVars.batteryV;
-        o["battery_pct"] = gVars.batteryPct;
-      }
-      data = "";
-      serializeJson(o, data);
+      lua_pop(L, 1);
     }
-    return gHost.emitEvent(name, data.c_str());
-  }
-  if (!strcmp(tool, "stop")) {
-    scriptEngineStop("script stop");
-    return true;
-  }
-  if (!strcmp(tool, "if")) {
-    JsonObject when = step["when"].as<JsonObject>();
-    if (when.isNull()) when = step["cond"].as<JsonObject>();
-    JsonArray thenArr = step["then"].as<JsonArray>();
-    JsonArray elseArr = step["else"].as<JsonArray>();
-    const bool ok = !when.isNull() && evalCond(when);
-    JsonArray arr = ok ? thenArr : elseArr;
-    if (arr.isNull()) return true;
-    for (JsonObject s : arr) {
-      if (!runTool(s)) return false;
-      if (gState != "running") return true;
+    data = "";
+    serializeJson(o, data);
+  } else if (gHasVars) {
+    DynamicJsonDocument doc(256);
+    JsonObject o = doc.to<JsonObject>();
+    if (gVars.okTemp) {
+      o["temp_c"] = gVars.tempC;
+      o["humidity"] = gVars.humidity;
     }
-    return true;
+    if (gVars.okBattery) {
+      o["battery_v"] = gVars.batteryV;
+      o["battery_pct"] = gVars.batteryPct;
+    }
+    data = "";
+    serializeJson(o, data);
   }
-  return setError("unknown tool");
+  bool ok = gHost.emitEvent && gHost.emitEvent(name, data.c_str());
+  lua_pushboolean(L, ok ? 1 : 0);
+  return 1;
 }
 
-bool runArray(JsonArray arr) {
-  if (arr.isNull()) return true;
-  for (JsonObject step : arr) {
-    if (gState != "running") return true;
-    if (!runTool(step)) return false;
-    // Cooperative yield after each tool.
-    yield();
-  }
-  return true;
+int l_display(lua_State *L) {
+  const char *a = luaL_optstring(L, 1, "");
+  const char *b = luaL_optstring(L, 2, "");
+  if (gHost.displayText) gHost.displayText(a, b);
+  return 0;
 }
 
-bool parseAndArm(const char *jsonSource) {
-  DynamicJsonDocument doc(kDocCap);
-  DeserializationError err = deserializeJson(doc, jsonSource);
-  if (err) return setError("bad script json");
-  gMode = doc["mode"] | "once";
-  gEveryMs = doc["every_ms"] | 1000;
-  if (gEveryMs < 200) gEveryMs = 200;
-  if (gEveryMs > 3600000UL) gEveryMs = 3600000UL;
-  gMaxIters = doc["max_iters"] | 0;
-  gIters = 0;
-  gStepIndex = 0;
-  gInStart = true;
-  gNextDueMs = 0;
-  gError = "";
-  gState = "running";
+int l_log(lua_State *L) {
+  const int n = lua_gettop(L);
+  Serial.print("[lua] ");
+  for (int i = 1; i <= n; ++i) {
+    if (i > 1) Serial.print(' ');
+    if (lua_isstring(L, i) || lua_isnumber(L, i)) Serial.print(lua_tostring(L, i));
+    else Serial.print(lua_typename(L, lua_type(L, i)));
+  }
+  Serial.println();
+  return 0;
+}
+
+int l_sleep(lua_State *L) {
+  uint32_t ms = (uint32_t)luaL_optinteger(L, 1, 0);
+  if (ms > 60000) ms = 60000;
+  gNextDueMs = millis() + ms;
+  gSleepRequested = true;
+  return 0;
+}
+
+int l_stop(lua_State *L) {
+  (void)L;
+  scriptEngineStop("script stop");
+  return 0;
+}
+
+int l_millis(lua_State *L) {
+  lua_pushinteger(L, (lua_Integer)millis());
+  return 1;
+}
+
+bool bindApis() {
+  if (!gLua) return false;
+  bool ok = true;
+  ok &= gLua->registerFunction("beep", l_beep);
+  ok &= gLua->registerFunction("sensors", l_sensors);
+  ok &= gLua->registerFunction("emit", l_emit);
+  ok &= gLua->registerFunction("display", l_display);
+  ok &= gLua->registerFunction("log", l_log);
+  ok &= gLua->registerFunction("sleep", l_sleep);
+  ok &= gLua->registerFunction("stop", l_stop);
+  ok &= gLua->registerFunction("millis", l_millis);
+  // Namespace table: oc.*
+  const char *boot =
+      "oc = oc or {}\n"
+      "oc.beep = beep\n"
+      "oc.sensors = sensors\n"
+      "oc.emit = emit\n"
+      "oc.display = display\n"
+      "oc.log = log\n"
+      "oc.sleep = sleep\n"
+      "oc.stop = stop\n"
+      "oc.millis = millis\n";
+  ok &= gLua->executeScript(boot);
+  return ok;
+}
+
+bool hasGlobalFn(const char *fn) {
+  if (!gLua || !gLua->getLuaState()) return false;
+  lua_State *L = gLua->getLuaState();
+  lua_getglobal(L, fn);
+  const bool ok = lua_isfunction(L, -1);
+  lua_pop(L, 1);
+  return ok;
+}
+
+bool callGlobal(const char *fn) {
+  if (!gLua || !gLua->getLuaState()) return false;
+  if (!hasGlobalFn(fn)) return true;
+  lua_State *L = gLua->getLuaState();
+  lua_getglobal(L, fn);
+  gSleepRequested = false;
+  if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+    const char *err = lua_tostring(L, -1);
+    setError(err ? err : "lua pcall failed");
+    lua_pop(L, 1);
+    return false;
+  }
+  if (lua_isnumber(L, -1)) {
+    uint32_t ms = (uint32_t)lua_tointeger(L, -1);
+    if (ms > 0) {
+      if (ms > 60000) ms = 60000;
+      gNextDueMs = millis() + ms;
+      gSleepRequested = true;
+    }
+  }
+  lua_pop(L, 1);
+  return gState == "running";
+}
+
+bool resetEngine() {
+  if (gLua) {
+    delete gLua;
+    gLua = nullptr;
+  }
+  gLua = new EspLuaEngine();
+  if (!gLua) {
+    setError("lua alloc failed");
+    return false;
+  }
+  if (!bindApis()) {
+    setError(gLua->getLastError());
+    return false;
+  }
   return true;
 }
 }  // namespace
@@ -176,20 +224,35 @@ void scriptEngineBegin(const ScriptHost &host) {
   gError = "";
 }
 
-bool scriptEngineLoad(const char *scriptId, const char *jsonSource) {
-  if (!jsonSource || !jsonSource[0]) return setError("empty script");
+bool scriptEngineLoadLua(const char *scriptId, const char *luaSource, const char *mode,
+                         uint32_t everyMs) {
+  if (!luaSource || !luaSource[0]) {
+    setError("empty lua");
+    return false;
+  }
+  if (!resetEngine()) return false;
   gScriptId = scriptId ? scriptId : "";
-  gSource = jsonSource;
-  if (!parseAndArm(jsonSource)) return false;
-  Serial.printf("[script] load id=%s mode=%s every=%u\n", gScriptId.c_str(),
-                gMode.c_str(), (unsigned)gEveryMs);
+  gSource = luaSource;
+  gMode = (mode && !strcmp(mode, "once")) ? "once" : "loop";
+  gEveryMs = everyMs < 50 ? 50 : (everyMs > 3600000UL ? 3600000UL : everyMs);
+  gStartDone = false;
+  gNextDueMs = 0;
+  gError = "";
+  gState = "running";
+
+  if (!gLua->executeScript(luaSource)) {
+    setError(gLua->getLastError());
+    return false;
+  }
+  Serial.printf("[lua] loaded id=%s mode=%s every=%u bytes=%u\n", gScriptId.c_str(),
+                gMode.c_str(), (unsigned)gEveryMs, (unsigned)gSource.length());
   return true;
 }
 
 void scriptEngineStop(const char *reason) {
   gState = "stopped";
   if (reason && reason[0]) gError = reason;
-  Serial.printf("[script] stop: %s\n", gError.c_str());
+  Serial.printf("[lua] stop: %s\n", gError.c_str());
 }
 
 void scriptEngineTick() {
@@ -198,29 +261,35 @@ void scriptEngineTick() {
   if (gNextDueMs && (int32_t)(now - gNextDueMs) < 0) return;
   gNextDueMs = 0;
 
-  DynamicJsonDocument doc(kDocCap);
-  if (deserializeJson(doc, gSource)) {
-    setError("script reparse failed");
-    return;
-  }
-
-  if (gInStart) {
-    gInStart = false;
-    if (!runArray(doc["on_start"].as<JsonArray>())) return;
+  if (!gStartDone) {
+    gStartDone = true;
+    if (!callGlobal("on_start")) return;
+    if (gState != "running") return;
+    if (!callGlobal("setup")) return;
     if (gState != "running") return;
   }
 
-  JsonArray steps = doc["steps"].as<JsonArray>();
-  if (steps.isNull()) steps = doc["loop"].as<JsonArray>();
-  if (!runArray(steps)) return;
-  if (gState != "running") return;
+  const char *fn = nullptr;
+  if (hasGlobalFn("on_loop")) fn = "on_loop";
+  else if (hasGlobalFn("loop")) fn = "loop";
 
-  gIters++;
-  if (gMaxIters > 0 && gIters >= gMaxIters) {
-    scriptEngineStop("max_iters");
+  if (fn) {
+    gSleepRequested = false;
+    if (!callGlobal(fn)) return;
+    if (gState != "running") return;
+    if (!gSleepRequested) {
+      if (gMode == "loop") gNextDueMs = millis() + gEveryMs;
+      else scriptEngineStop("done");
+    }
     return;
   }
+
+  // Top-level-only script already ran at load.
   if (gMode == "loop") {
+    if (!gLua->executeScript(gSource.c_str())) {
+      setError(gLua->getLastError());
+      return;
+    }
     gNextDueMs = millis() + gEveryMs;
   } else {
     scriptEngineStop("done");
@@ -231,6 +300,7 @@ bool scriptEngineIsRunning() { return gState == "running"; }
 const char *scriptEngineScriptId() { return gScriptId.c_str(); }
 const char *scriptEngineState() { return gState.c_str(); }
 const char *scriptEngineLastError() { return gError.c_str(); }
+const char *scriptEngineLanguage() { return "lua"; }
 
 bool scriptEngineInvokeJson(const char *json) {
   if (!json || !json[0]) return false;
@@ -238,27 +308,43 @@ bool scriptEngineInvokeJson(const char *json) {
   if (deserializeJson(doc, json)) return false;
   JsonArray tools = doc["tools"].as<JsonArray>();
   if (tools.isNull() && doc.is<JsonArray>()) tools = doc.as<JsonArray>();
+
+  auto runOne = [&](JsonObject step) -> bool {
+    const char *tool = step["tool"] | "";
+    if (!strcmp(tool, "beep")) {
+      if (!gHost.beep) return false;
+      return gHost.beep(step["freq"] | 880, step["ms"] | 100);
+    }
+    if (!strcmp(tool, "sensors.read") || !strcmp(tool, "sensors")) {
+      if (!gHost.readSensors) return false;
+      SensorReading r;
+      if (!gHost.readSensors(r)) return false;
+      gVars = r;
+      gHasVars = true;
+      if (gHost.onSensors) gHost.onSensors(r);
+      return true;
+    }
+    if (!strcmp(tool, "display")) {
+      if (gHost.displayText)
+        gHost.displayText(step["title"] | step["line1"] | "", step["line2"] | "");
+      return true;
+    }
+    if (!strcmp(tool, "emit")) {
+      if (!gHost.emitEvent) return false;
+      String data = "{}";
+      if (!step["data"].isNull()) serializeJson(step["data"], data);
+      return gHost.emitEvent(step["name"] | "event", data.c_str());
+    }
+    return false;
+  };
+
   if (tools.isNull()) {
-    // single tool object
     JsonObject one = doc.as<JsonObject>();
     if (one.isNull() || !one["tool"]) return false;
-    const bool was = (gState == "running");
-    String prev = gState;
-    gState = "running";
-    const bool ok = runTool(one);
-    if (!was) gState = prev == "error" ? "idle" : prev;
-    return ok;
+    return runOne(one);
   }
-  const bool was = (gState == "running");
-  String prev = gState;
-  gState = "running";
-  bool ok = true;
   for (JsonObject step : tools) {
-    if (!runTool(step)) {
-      ok = false;
-      break;
-    }
+    if (!runOne(step)) return false;
   }
-  if (!was) gState = (gState == "error") ? "error" : (prev.length() ? prev : "idle");
-  return ok;
+  return true;
 }

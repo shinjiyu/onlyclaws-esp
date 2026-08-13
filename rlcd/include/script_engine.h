@@ -4,29 +4,28 @@
 
 #include "sensors.h"
 
-// JSON tools script (MVP). Agents deploy this; device runs local loop.
-// See server/static/agent-api.md § Script format.
-
+// Pure runtime host: whitelist hardware/network APIs exposed to Lua.
 struct ScriptHost {
   bool (*readSensors)(SensorReading &out);
   bool (*beep)(uint16_t freqHz, uint16_t ms);
-  void (*wave)();
-  void (*react)();
-  void (*dialog)(const char *title);
-  // Upload one event to cloud; returns false if network fail.
+  void (*displayText)(const char *line1, const char *line2);
   bool (*emitEvent)(const char *name, const char *jsonData);
-  // Optional: refresh HUD after sensors.
   void (*onSensors)(const SensorReading &r);
 };
 
 void scriptEngineBegin(const ScriptHost &host);
-bool scriptEngineLoad(const char *scriptId, const char *jsonSource);
+
+// Load Lua source. mode: "once" | "loop". every_ms used between on_loop calls.
+bool scriptEngineLoadLua(const char *scriptId, const char *luaSource, const char *mode,
+                         uint32_t everyMs);
+
 void scriptEngineStop(const char *reason = "stopped");
-void scriptEngineTick();  // call from loop()
+void scriptEngineTick();
 bool scriptEngineIsRunning();
 const char *scriptEngineScriptId();
 const char *scriptEngineState();  // idle|running|error|stopped
 const char *scriptEngineLastError();
+const char *scriptEngineLanguage();  // lua
 
-// One-shot remote invoke: {"tools":[ {"tool":"beep",...}, ... ]}
+// Remote one-shot tools (JSON): {"tools":[{"tool":"beep",...}, ...]}
 bool scriptEngineInvokeJson(const char *json);

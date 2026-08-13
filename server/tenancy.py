@@ -7,9 +7,14 @@ import hmac
 import os
 import secrets
 import sqlite3
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import HTTPException, Request
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def env_allowlist() -> Optional[set[str]]:
@@ -33,6 +38,151 @@ def hash_token(token: str) -> str:
 
 def new_device_token() -> str:
     return secrets.token_hex(16)
+
+
+# Agent control-plane tokens (human mints after login; Agent holds token, never password).
+AGENT_TOKEN_PREFIX = "oct_"
+
+
+def new_agent_control_token() -> str:
+    return AGENT_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def is_agent_control_token(token: str) -> bool:
+    return bool(token) and token.startswith(AGENT_TOKEN_PREFIX)
+
+
+def ensure_agent_tokens_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_control_tokens (
+          id TEXT PRIMARY KEY,
+          owner_email TEXT NOT NULL,
+          name TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          token_prefix TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_used_at TEXT,
+          revoked_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_tokens_owner "
+        "ON agent_control_tokens(owner_email)"
+    )
+
+
+def create_agent_control_token(
+    conn: sqlite3.Connection, *, email: str, name: str = "agent"
+) -> dict[str, Any]:
+    ensure_agent_tokens_table(conn)
+    email = email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="missing owner email")
+    token = new_agent_control_token()
+    tid = secrets.token_hex(8)
+    now = _utc_now()
+    label = (name or "agent").strip()[:80] or "agent"
+    conn.execute(
+        """
+        INSERT INTO agent_control_tokens
+          (id, owner_email, name, token_hash, token_prefix, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (tid, email, label, hash_token(token), token[:12], now),
+    )
+    return {
+        "id": tid,
+        "name": label,
+        "token": token,
+        "token_prefix": token[:12],
+        "created_at": now,
+        "note": "Save this token now; plaintext is shown only once. "
+        "Give it to your Agent as Authorization: Bearer <token>. Do not share your password.",
+    }
+
+
+def list_agent_control_tokens(
+    conn: sqlite3.Connection, email: str
+) -> list[dict[str, Any]]:
+    ensure_agent_tokens_table(conn)
+    rows = conn.execute(
+        """
+        SELECT id, name, token_prefix, created_at, last_used_at, revoked_at
+        FROM agent_control_tokens
+        WHERE lower(owner_email)=?
+        ORDER BY created_at DESC
+        """,
+        (email.strip().lower(),),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "token_prefix": r["token_prefix"],
+                "created_at": r["created_at"],
+                "last_used_at": r["last_used_at"],
+                "revoked": bool(r["revoked_at"]),
+                "revoked_at": r["revoked_at"],
+            }
+        )
+    return out
+
+
+def revoke_agent_control_token(
+    conn: sqlite3.Connection, *, email: str, token_id: str
+) -> None:
+    ensure_agent_tokens_table(conn)
+    now = _utc_now()
+    cur = conn.execute(
+        """
+        UPDATE agent_control_tokens
+        SET revoked_at=?
+        WHERE id=? AND lower(owner_email)=? AND revoked_at IS NULL
+        """,
+        (now, token_id, email.strip().lower()),
+    )
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="token not found")
+
+
+def verify_agent_control_token(
+    conn: sqlite3.Connection, token: str
+) -> dict[str, Any]:
+    """Return session-shaped principal {email, user, auth: agent_token}."""
+    ensure_agent_tokens_table(conn)
+    if not is_agent_control_token(token):
+        raise HTTPException(status_code=401, detail="invalid agent token")
+    th = hash_token(token)
+    row = conn.execute(
+        """
+        SELECT id, owner_email, name, revoked_at
+        FROM agent_control_tokens
+        WHERE token_hash=?
+        """,
+        (th,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="invalid agent token")
+    if row["revoked_at"]:
+        raise HTTPException(status_code=401, detail="agent token revoked")
+    email = str(row["owner_email"] or "").strip().lower()
+    if not email_allowed(email):
+        raise HTTPException(status_code=403, detail="not authorized for this instance")
+    now = _utc_now()
+    conn.execute(
+        "UPDATE agent_control_tokens SET last_used_at=? WHERE id=?",
+        (now, row["id"]),
+    )
+    return {
+        "email": email,
+        "user": {"email": email, "name": row["name"] or "agent"},
+        "auth": "agent_token",
+        "agent_token_id": row["id"],
+    }
 
 
 def email_allowed(email: str) -> bool:

@@ -1,39 +1,38 @@
 # OnlyClaws ESP32 Agent Platform — Agent Function-Call Spec
 
-Base URL: `https://onlyclaws.world/epaper`  
-Auth for **control-plane** APIs: **kuroneko.chat** session. Each user only sees **their own** devices.  
-Auth for **device** APIs: **per-device** bearer from `POST /api/devices/register` (shown once).  
-Optional lock: `EPD_ALLOWLIST` comma-list; `*` or empty = any kuroneko user.
+Base URL: `https://onlyclaws.world/epaper`
 
 **Product model:** remote Agents drive devices over the network. Optionally deploy a JSON tools script that runs a **local loop on the ESP32** (edge autonomy). The full LLM does **not** run on-device.
 
 ---
 
-## 1. Authentication (kuroneko.chat)
+## 1. Authentication
 
-### 1.1 Login
+### 1.1 Agent control token (preferred for Agents)
 
-`POST /api/auth/login`
+Humans log into the web UI with kuroneko.chat, then mint an **Agent control token** (`oct_…`).
 
-```json
-{ "email": "you@example.com", "password": "..." }
+Agents call every control-plane API with:
+
+```http
+Authorization: Bearer oct_...
 ```
 
-- Proxies to `https://kuroneko.chat/api/auth/login`
-- On success sets HttpOnly cookie `epd_session` (`Path=/epaper`, `Secure`, `SameSite=Lax`)
-- Optional: if server `EPD_ALLOWLIST` is a comma-list, email must be listed (`*` / empty = open)
+- Mint (human session cookie only): `POST /api/agent-tokens` `{"name":"aki"}`
+- List: `GET /api/agent-tokens`
+- Revoke: `DELETE /api/agent-tokens/{id}`
+- Public skill: `GET /api/agent/skill.md` (no auth)
 
-### 1.2 Session check / logout
+**Never** ask for kuroneko email/password. On `401`, ask the human to mint/rotate a token in the UI.
 
-- `GET /api/auth/me`
-- `POST /api/auth/logout`
+### 1.2 Human browser session (UI only)
 
-### 1.3 Calling as an agent
+`POST /api/auth/login` → HttpOnly cookie `epd_session`.  
+Humans use this to manage devices and mint tokens — **not** for Agents.
 
-1. Login once; store `Set-Cookie`
-2. Send cookie on every request
-3. Treat `401` as re-login
-4. Do **not** embed device bearer tokens in agent tools
+### 1.3 Device bearer (firmware only)
+
+Per-device token from `POST /api/devices/register` — ESP wire protocol only. **Not** for Agents.
 
 ---
 
@@ -41,9 +40,10 @@ Optional lock: `EPD_ALLOWLIST` comma-list; `*` or empty = any kuroneko user.
 
 | Capability | API | Effect |
 |------------|-----|--------|
-| List **my** devices | `GET /api/devices` | Only devices owned by the session |
+| Public skill | `GET /api/agent/skill.md` | How Agents should auth + call |
+| List **my** devices | `GET /api/devices` | Only devices owned by the token owner |
 | Register / claim device | `POST /api/devices/register` | Bind `device_id`; returns `device_token` once |
-| Rotate token | `POST /api/devices/{id}/rotate-token` | New bearer; old invalid |
+| Rotate device token | `POST /api/devices/{id}/rotate-token` | New firmware bearer; old invalid |
 | Remote invoke tools | `POST /api/invoke` | One-shot whitelist tools on **your** device |
 | Create script | `POST /api/scripts` | Store JSON tools script |
 | Deploy script | `POST /api/scripts/{id}/deploy` | Device runs local loop / once |
@@ -85,72 +85,45 @@ Queued as message `type=invoke`; device executes on next poll (~2.5s).
 
 ---
 
-## 4. Deploy edge script (optional local loop)
+## 4. Deploy edge Lua (optional local loop)
 
-### 4.1 Create
+### 4.1 Create + deploy
 
 `POST /api/scripts`
 
 ```json
 {
   "name": "hot-alert",
+  "language": "lua",
+  "mode": "loop",
+  "every_ms": 10000,
   "device_id": "a4cb8fdf8440",
-  "source": {
-    "version": 1,
-    "mode": "loop",
-    "every_ms": 10000,
-    "on_start": [
-      {"tool": "emit", "name": "script_started"}
-    ],
-    "steps": [
-      {"tool": "sensors.read"},
-      {
-        "tool": "if",
-        "when": {"meta": "temp_c", "op": "gt", "value": 35},
-        "then": [
-          {"tool": "beep", "freq": 1200, "ms": 80},
-          {"tool": "emit", "name": "hot"}
-        ]
-      }
-    ]
-  }
+  "source": "function on_start()\n  emit('script_started')\nend\n\nfunction on_loop()\n  local s = sensors()\n  if s.temp_c and s.temp_c > 35 then\n    beep(1200, 80)\n    emit('hot', { temp = s.temp_c })\n  end\n  return 10000\nend\n"
 }
 ```
 
-If `device_id` is set, the script is also deployed immediately.
+- `source` must be a **Lua string** (JSON tools DSL is retired)
+- `mode`: `once` | `loop`
+- `every_ms`: default delay between `on_loop` when the function does not return a delay / call `sleep`
 
-### 4.2 Deploy / stop / status
+Also: `POST /api/scripts/{id}/deploy`, `POST /api/script/stop`, `GET /api/script/status`, `GET /api/events`
 
-- `POST /api/scripts/{id}/deploy` `{ "device_id", "mode?", "every_ms?", "max_iters?" }`
-- `POST /api/script/stop` `{ "device_id" }`
-- `GET /api/script/status?device_id=`
-- `GET /api/events?device_id=&limit=50`
+### 4.2 Lua API (device whitelist)
 
-### 4.3 Script format (device VM)
+| API | Notes |
+|-----|------|
+| `sensors()` | returns `{temp_c, humidity, battery_v, battery_pct}` |
+| `beep(freq, ms)` | speaker; ms capped at 2000 |
+| `emit(name, table?)` | POST event to cloud |
+| `display(line1, line2?)` | minimal status text on LCD |
+| `log(...)` | serial log |
+| `sleep(ms)` | cooperative delay (≤60s) |
+| `stop()` | end script |
+| `millis()` | uptime ms |
 
-| Field | Meaning |
-|-------|---------|
-| `mode` | `once` (default) or `loop` |
-| `every_ms` | Delay between loop iterations (min 200) |
-| `max_iters` | 0 = forever; else stop after N loops |
-| `on_start` | Steps run once after load |
-| `steps` | Steps each iteration |
+Same functions available as `oc.*`.
 
-### 4.4 Whitelist tools
-
-| tool | args | notes |
-|------|------|-------|
-| `sensors.read` | — | Updates temp/humidity/battery vars |
-| `beep` | `freq`, `ms` | Speaker; `ms` capped at 2000 |
-| `wave` / `react` | — | Character cues |
-| `dialog` | `title` | Bubble text |
-| `sleep` | `ms` | Cooperative delay (≤60s) |
-| `emit` | `name`, `data?` | POST event to cloud |
-| `if` | `when`/`cond`, `then`, `else?` | `when`: `{meta, op, value}` |
-| `stop` | — | End script |
-
-`meta` keys: `temp_c`, `humidity`, `battery_v`, `battery_pct`  
-`op`: `gt` `gte` `lt` `lte` `eq` `neq`
+Lifecycle: optional `on_start` / `setup`, then `on_loop` or `loop` each iteration.
 
 ---
 
@@ -205,7 +178,6 @@ NVS namespace `cloud` can override `host` / `prefix` / `device_id`.
 ## 8. Suggested agent tool wrappers
 
 ```text
-tool onlyclaws_login(email, password)
 tool onlyclaws_list_devices()
 tool onlyclaws_invoke(device_id, tools)
 tool onlyclaws_create_script(name, source, device_id?)
@@ -217,6 +189,7 @@ tool onlyclaws_push_text(...)
 tool onlyclaws_action(...)
 ```
 
+Auth: `Authorization: Bearer oct_...` on every call.  
 Error shape: `{ "success": false, "message": "..." }` — HTTP 401/403/400.
 
 ---
@@ -226,4 +199,5 @@ Error shape: `{ "success": false, "message": "..." }` — HTTP 401/403/400.
 - RLCD poll ~2.5s when online
 - Prefer `invoke` for one-shots; deploy `loop` scripts only when edge autonomy is needed
 - Chinese text for cards is **server-rendered**; script `dialog` is ASCII/short title only
-- Public OpenAPI UI disabled; use this doc + `/api/agent/capabilities`
+- Public OpenAPI UI disabled; use `/api/agent/skill.md` + `/api/agent/capabilities`
+- Agents must not use passwords; humans mint `oct_` tokens in the web UI

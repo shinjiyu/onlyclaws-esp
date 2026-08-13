@@ -121,15 +121,16 @@
         </div>
         <form id="registerForm" class="row" style="margin-top:12px;align-items:flex-end">
           <div style="flex:1;min-width:140px">
-            <label for="regDeviceId">绑定设备 ID（MAC 后缀）</label>
-            <input id="regDeviceId" placeholder="a4cb8fdf8440" style="margin-bottom:0" />
+            <label for="regDeviceId">绑定设备 ID（MAC 后缀，必填）</label>
+            <input id="regDeviceId" value="a4cb8fdf8440" placeholder="a4cb8fdf8440" required minlength="4" style="margin-bottom:0" />
           </div>
           <div style="flex:1;min-width:120px">
             <label for="regName">名称（可选）</label>
             <input id="regName" placeholder="我的 RLCD" style="margin-bottom:0" />
           </div>
-          <button type="submit" id="regBtn">绑定并生成 Token</button>
+          <button type="submit" id="regBtn">绑定并生成设备 Token</button>
         </form>
+        <p class="muted" style="margin:8px 0 0">这里生成的是给<strong>板子固件</strong>用的 device_token。给 Aki 用的是下方「Agent 控制 Token」。</p>
         <p id="regMsg" class="ok hidden" style="word-break:break-all"></p>
         <p id="regErr" class="err hidden"></p>
       </div>
@@ -184,10 +185,24 @@
       </div>
 
       <div class="panel">
-        <strong>Agent 接入</strong>
-        <p class="muted" style="margin:8px 0">功能调用文档需 kuroneko 登录后访问。</p>
-        <div class="row" style="gap:10px;flex-wrap:wrap">
-          <a class="secondary" href="/epaper/api/agent/docs" target="_blank" rel="noopener">打开文档</a>
+        <strong>Agent 控制 Token</strong>
+        <p class="muted" style="margin:8px 0">
+          给 Aki 等 Agent 用的凭证（<code>oct_…</code>）。人类登录后签发；Agent <strong>不要</strong>使用帐密。
+          公开技能：<a href="/epaper/api/agent/skill.md" target="_blank" rel="noopener">/api/agent/skill.md</a>
+        </p>
+        <form id="agentTokenForm" class="row" style="align-items:flex-end;margin-bottom:10px">
+          <div style="flex:1;min-width:140px">
+            <label for="agentTokenName">名称</label>
+            <input id="agentTokenName" placeholder="aki" value="aki" style="margin-bottom:0" />
+          </div>
+          <button type="submit" id="agentTokenBtn">生成 Token</button>
+          <button type="button" class="secondary" id="agentTokenRefreshBtn">刷新列表</button>
+        </form>
+        <p id="agentTokenOnce" class="ok hidden" style="word-break:break-all"></p>
+        <p id="agentTokenErr" class="err hidden"></p>
+        <div id="agentTokenList" class="muted mono">加载中…</div>
+        <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px">
+          <a class="secondary" href="/epaper/api/agent/docs" target="_blank" rel="noopener">完整文档</a>
           <a class="secondary" href="/epaper/api/agent/capabilities" target="_blank" rel="noopener">capabilities JSON</a>
         </div>
       </div>
@@ -269,7 +284,76 @@
       setText("whoami", user.email || "");
       refreshDevices();
       refreshMessages();
+      refreshAgentTokens();
     }
+
+    async function refreshAgentTokens() {
+      const box = document.getElementById("agentTokenList");
+      if (!box) return;
+      try {
+        const data = await api("/epaper/api/agent-tokens");
+        const list = data.tokens || [];
+        if (!list.length) {
+          box.textContent = "还没有 Token — 点上方生成";
+          return;
+        }
+        box.innerHTML = list
+          .map((t) => {
+            const status = t.revoked
+              ? '<span class="err">已吊销</span>'
+              : '<span class="ok">有效</span>';
+            const revoke = t.revoked
+              ? ""
+              : ` <button type="button" class="secondary" data-revoke="${t.id}">吊销</button>`;
+            return (
+              `<div class="msg row" style="justify-content:space-between">` +
+              `<span>${t.name} · ${t.token_prefix}… · ${t.created_at || ""}${t.last_used_at ? " · used " + t.last_used_at : ""}</span>` +
+              `<span>${status}${revoke}</span></div>`
+            );
+          })
+          .join("");
+        box.querySelectorAll("[data-revoke]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            if (!confirm("吊销后 Agent 将无法再用此 Token，确定？")) return;
+            await api("/epaper/api/agent-tokens/" + btn.getAttribute("data-revoke"), {
+              method: "DELETE",
+            });
+            await refreshAgentTokens();
+          });
+        });
+      } catch (ex) {
+        box.textContent = ex.message || "加载失败";
+      }
+    }
+
+    document.getElementById("agentTokenForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const once = document.getElementById("agentTokenOnce");
+      const err = document.getElementById("agentTokenErr");
+      show(once, false); show(err, false);
+      const btn = document.getElementById("agentTokenBtn");
+      btn.disabled = true;
+      try {
+        const data = await api("/epaper/api/agent-tokens", {
+          method: "POST",
+          body: JSON.stringify({
+            name: document.getElementById("agentTokenName").value.trim() || "agent",
+          }),
+        });
+        once.textContent =
+          "Token（只显示一次，请立刻复制给 Agent）: " + data.token;
+        show(once, true);
+        await refreshAgentTokens();
+      } catch (ex) {
+        err.textContent = ex.message || "生成失败";
+        show(err, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    document.getElementById("agentTokenRefreshBtn").addEventListener("click", () => {
+      refreshAgentTokens();
+    });
 
     document.getElementById("loginForm").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -304,18 +388,24 @@
       const ok = document.getElementById("regMsg");
       const err = document.getElementById("regErr");
       show(ok, false); show(err, false);
+      const deviceId = document.getElementById("regDeviceId").value.trim();
+      if (deviceId.length < 4) {
+        err.textContent = "请填写设备 ID（至少 4 位，例如 a4cb8fdf8440）";
+        show(err, true);
+        return;
+      }
       const btn = document.getElementById("regBtn");
       btn.disabled = true;
       try {
         const data = await api("/epaper/api/devices/register", {
           method: "POST",
           body: JSON.stringify({
-            device_id: document.getElementById("regDeviceId").value.trim(),
+            device_id: deviceId,
             name: document.getElementById("regName").value.trim(),
           }),
         });
         ok.textContent =
-          "已绑定 " + data.device.id + " · device_token（只显示一次）: " + data.device_token;
+          "已绑定 " + data.device.id + " · device_token（只显示一次，写入板子）: " + data.device_token;
         show(ok, true);
         await refreshDevices();
       } catch (ex) {

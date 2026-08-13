@@ -108,6 +108,7 @@ def init_db() -> None:
         ensure_column(conn, "devices", "owner_email", "TEXT")
         ensure_column(conn, "devices", "token_hash", "TEXT")
         ensure_column(conn, "devices", "claimed_at", "TEXT")
+        tenancy.ensure_agent_tokens_table(conn)
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS scripts (
@@ -252,7 +253,10 @@ class StatusIn(BaseModel):
 
 class ScriptCreateIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
-    source: Any
+    source: Any  # Lua source string
+    language: str = "lua"
+    mode: str = "loop"  # once | loop
+    every_ms: int = 1000
     device_id: Optional[str] = None
 
 
@@ -260,7 +264,6 @@ class ScriptDeployIn(BaseModel):
     device_id: Optional[str] = None
     mode: Optional[str] = None  # once | loop
     every_ms: Optional[int] = None
-    max_iters: Optional[int] = None
 
 
 class ScriptStopIn(BaseModel):
@@ -279,25 +282,49 @@ class DeviceEventIn(BaseModel):
     script_id: Optional[str] = None
 
 
-SCRIPT_SOURCE_MAX = 12000
+SCRIPT_SOURCE_MAX = 24000
 
 
-def normalize_script_source(source: Any) -> str:
-    if isinstance(source, str):
-        text = source.strip()
-    else:
-        text = json.dumps(source, ensure_ascii=False, separators=(",", ":"))
-    if not text:
+def normalize_script_record(
+    source: Any,
+    *,
+    language: str = "lua",
+    mode: str = "loop",
+    every_ms: int = 1000,
+) -> dict[str, Any]:
+    lang = (language or "lua").strip().lower()
+    if lang != "lua":
+        raise HTTPException(status_code=400, detail="only language=lua is supported")
+    if not isinstance(source, str):
+        raise HTTPException(status_code=400, detail="lua source must be a string")
+    text = source.strip("\n")
+    if not text.strip():
         raise HTTPException(status_code=400, detail="empty script source")
     if len(text) > SCRIPT_SOURCE_MAX:
         raise HTTPException(status_code=400, detail="script too large")
+    m = mode if mode in ("once", "loop") else "loop"
+    ev = max(50, min(int(every_ms or 1000), 3_600_000))
+    return {"language": "lua", "mode": m, "every_ms": ev, "source": text}
+
+
+def script_record_from_row(raw: str) -> dict[str, Any]:
     try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"invalid script json: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise HTTPException(status_code=400, detail="script must be a JSON object")
-    return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+        obj = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        # Legacy: treat whole blob as lua
+        return {"language": "lua", "mode": "loop", "every_ms": 1000, "source": raw or ""}
+    if isinstance(obj, dict) and "source" in obj:
+        if obj.get("language", "lua") != "lua" and isinstance(obj.get("source"), dict):
+            raise HTTPException(status_code=400, detail="legacy JSON tools scripts are retired; use Lua")
+        return {
+            "language": "lua",
+            "mode": obj.get("mode") if obj.get("mode") in ("once", "loop") else "loop",
+            "every_ms": int(obj.get("every_ms") or 1000),
+            "source": obj["source"] if isinstance(obj["source"], str) else str(obj["source"]),
+        }
+    if isinstance(obj, dict):
+        raise HTTPException(status_code=400, detail="invalid script record; expected Lua source string")
+    return {"language": "lua", "mode": "loop", "every_ms": 1000, "source": str(obj)}
 
 
 def enqueue_control_message(
@@ -388,10 +415,68 @@ def read_session(request: Request) -> Optional[dict[str, Any]]:
 
 
 async def require_user(request: Request) -> dict[str, Any]:
+    """Human session cookie OR Agent control token (oct_…). Never password for agents."""
     sess = read_session(request)
-    if not sess:
-        raise HTTPException(status_code=401, detail="login required")
-    return sess
+    if sess:
+        return sess
+    bearer = tenancy.extract_bearer(request)
+    if bearer and tenancy.is_agent_control_token(bearer):
+        with db() as conn:
+            return tenancy.verify_agent_control_token(conn, bearer)
+    raise HTTPException(
+        status_code=401,
+        detail="login required (session cookie) or Authorization: Bearer <oct_… agent token>",
+    )
+
+
+class AgentTokenCreateIn(BaseModel):
+    name: str = Field(default="agent", max_length=80)
+
+
+@app.post("/api/agent-tokens")
+async def create_agent_token(
+    body: AgentTokenCreateIn,
+    sess: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Mint a control-plane token for Agents. Requires human session (or existing token)."""
+    # Prefer minting only from browser session so a stolen agent token cannot mint more.
+    if sess.get("auth") == "agent_token":
+        raise HTTPException(
+            status_code=403,
+            detail="mint agent tokens from the web UI after password login, not with an agent token",
+        )
+    email = tenancy.session_email(sess)
+    with db() as conn:
+        created = tenancy.create_agent_control_token(conn, email=email, name=body.name)
+        conn.commit()
+    return {"success": True, **created}
+
+
+@app.get("/api/agent-tokens")
+async def list_agent_tokens(
+    sess: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    email = tenancy.session_email(sess)
+    with db() as conn:
+        tokens = tenancy.list_agent_control_tokens(conn, email)
+    return {"success": True, "tokens": tokens}
+
+
+@app.delete("/api/agent-tokens/{token_id}")
+async def revoke_agent_token(
+    token_id: str,
+    sess: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    if sess.get("auth") == "agent_token":
+        raise HTTPException(
+            status_code=403,
+            detail="revoke agent tokens from the web UI after password login",
+        )
+    email = tenancy.session_email(sess)
+    with db() as conn:
+        tenancy.revoke_agent_control_token(conn, email=email, token_id=token_id)
+        conn.commit()
+    return {"success": True, "id": token_id, "revoked": True}
 
 
 def user_owns_device(device_id: str, sess: dict[str, Any]) -> str:
@@ -722,7 +807,12 @@ async def list_devices(sess: dict[str, Any] = Depends(require_user)) -> dict[str
 
 
 class DeviceRegisterIn(BaseModel):
-    device_id: str = Field(..., min_length=4, max_length=32)
+    device_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=32,
+        description="Device id / MAC suffix, e.g. a4cb8fdf8440",
+    )
     name: str = ""
 
 
@@ -733,8 +823,13 @@ async def register_device(
     """Claim a device id for the current user and issue a fresh per-device token."""
     email = tenancy.session_email(sess)
     device_id = body.device_id.strip().lower()
+    if len(device_id) < 4:
+        raise HTTPException(
+            status_code=400,
+            detail="请填写设备 ID（至少 4 位，例如 a4cb8fdf8440）",
+        )
     if not device_id.isalnum():
-        raise HTTPException(status_code=400, detail="device_id must be alphanumeric")
+        raise HTTPException(status_code=400, detail="device_id 只能是字母和数字")
     name = body.name.strip() or panel_for(device_id)[2]
     token = tenancy.new_device_token()
     th = tenancy.hash_token(token)
@@ -935,7 +1030,10 @@ async def device_action(
 async def create_script(
     body: ScriptCreateIn, sess: dict[str, Any] = Depends(require_user)
 ) -> dict[str, Any]:
-    source = normalize_script_source(body.source)
+    record = normalize_script_record(
+        body.source, language=body.language, mode=body.mode, every_ms=body.every_ms
+    )
+    source = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
     script_id = uuid.uuid4().hex
     now = utc_now()
     with db() as conn:
@@ -959,7 +1057,10 @@ async def create_script(
         "script": {
             "id": script_id,
             "name": body.name.strip(),
-            "source": json.loads(source),
+            "language": "lua",
+            "mode": record["mode"],
+            "every_ms": record["every_ms"],
+            "source": record["source"],
             "created_at": now,
         },
     }
@@ -993,8 +1094,12 @@ async def list_scripts(
     for r in rows:
         d = dict(r)
         try:
-            d["source"] = json.loads(d["source"])
-        except (TypeError, json.JSONDecodeError):
+            rec = script_record_from_row(d["source"])
+            d["language"] = rec["language"]
+            d["mode"] = rec["mode"]
+            d["every_ms"] = rec["every_ms"]
+            d["source"] = rec["source"]
+        except HTTPException:
             pass
         scripts.append(d)
     return {"success": True, "scripts": scripts}
@@ -1015,7 +1120,11 @@ async def get_script(
     if owner != tenancy.session_email(sess):
         raise HTTPException(status_code=403, detail="script not owned by you")
     d = dict(row)
-    d["source"] = json.loads(d["source"])
+    rec = script_record_from_row(d["source"])
+    d["language"] = rec["language"]
+    d["mode"] = rec["mode"]
+    d["every_ms"] = rec["every_ms"]
+    d["source"] = rec["source"]
     return {"success": True, "script": d}
 
 
@@ -1035,15 +1144,13 @@ async def deploy_script(
     owner = (row["owner_email"] or row["created_by"] or "").lower()
     if owner != tenancy.session_email(sess):
         raise HTTPException(status_code=403, detail="script not owned by you")
-    source_obj = json.loads(row["source"])
+    record = script_record_from_row(row["source"])
     if body.mode in ("once", "loop"):
-        source_obj["mode"] = body.mode
+        record["mode"] = body.mode
     if body.every_ms is not None:
-        source_obj["every_ms"] = max(200, min(int(body.every_ms), 3_600_000))
-    if body.max_iters is not None:
-        source_obj["max_iters"] = max(0, int(body.max_iters))
-    source = json.dumps(source_obj, ensure_ascii=False, separators=(",", ":"))
-    if len(source) > SCRIPT_SOURCE_MAX:
+        record["every_ms"] = max(50, min(int(body.every_ms), 3_600_000))
+    source = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+    if len(source) > SCRIPT_SOURCE_MAX + 512:
         raise HTTPException(status_code=400, detail="script too large after overrides")
     device_id = resolve_user_device_id(body.device_id, sess)
     now = utc_now()
@@ -1063,12 +1170,18 @@ async def deploy_script(
                 device_id,
                 script_id,
                 source,
-                source_obj.get("mode") or "once",
+                record.get("mode") or "loop",
                 now,
             ),
         )
     envelope = json.dumps(
-        {"script_id": script_id, "source": source_obj},
+        {
+            "script_id": script_id,
+            "language": "lua",
+            "mode": record["mode"],
+            "every_ms": record["every_ms"],
+            "source": record["source"],
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -1083,6 +1196,7 @@ async def deploy_script(
         "success": True,
         "device_id": device_id,
         "script_id": script_id,
+        "language": "lua",
         "message": msg,
     }
 
@@ -1391,9 +1505,21 @@ async def get_voice_audio_gone(clip_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=410, detail="voice playback-from-upload removed")
 
 
+@app.get("/api/agent/skill.md")
+async def agent_skill_md() -> Response:
+    """Public agent skill — drive ESP with a control token (never passwords)."""
+    path = STATIC_DIR / "agent-skill.md"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="skill missing")
+    return Response(
+        content=path.read_text(encoding="utf-8"),
+        media_type="text/markdown; charset=utf-8",
+    )
+
+
 @app.get("/api/agent/docs")
 async def agent_docs(_: dict[str, Any] = Depends(require_user)) -> Response:
-    """Human-readable agent function-call guide (kuroneko session required)."""
+    """Human-readable agent function-call guide (session or agent token)."""
     path = STATIC_DIR / "agent-api.md"
     if not path.exists():
         raise HTTPException(status_code=404, detail="docs missing")
@@ -1431,14 +1557,17 @@ async def agent_capabilities(
         "success": True,
         "public_base": PUBLIC_BASE,
         "auth": {
-            "type": "kuroneko.chat session; each user owns their devices",
-            "login": "POST /api/auth/login",
-            "me": "GET /api/auth/me",
-            "logout": "POST /api/auth/logout",
+            "preferred": "Agent control token (oct_…)",
+            "agent_token_header": "Authorization: Bearer <oct_…>",
+            "mint": "Human web login → POST /api/agent-tokens (session cookie only)",
+            "list": "GET /api/agent-tokens",
+            "revoke": "DELETE /api/agent-tokens/{id}",
+            "human_session": "Cookie after POST /api/auth/login — humans only; Agents must NOT use passwords",
             "cookie": SESSION_COOKIE,
             "cookie_path": "/epaper",
+            "skill": "GET /api/agent/skill.md (public)",
             "allowlist": "optional EPD_ALLOWLIST (* or empty = open)",
-            "device_token": "per-device bearer from /api/devices/register",
+            "device_token": "per-device bearer for ESP wire protocol only — not for Agents",
         },
         "devices": [
             {"id": did, "name": name, "width": w, "height": h}
@@ -1446,23 +1575,17 @@ async def agent_capabilities(
         ],
         "tools": [
             {
-                "name": "onlyclaws_login",
-                "method": "POST",
-                "path": "/api/auth/login",
-                "body": {"email": "string", "password": "string"},
-            },
-            {
                 "name": "onlyclaws_list_devices",
                 "method": "GET",
                 "path": "/api/devices",
-                "notes": "Only devices owned by the session user",
+                "notes": "Only devices owned by the agent-token owner",
             },
             {
                 "name": "onlyclaws_register_device",
                 "method": "POST",
                 "path": "/api/devices/register",
                 "body": {"device_id": "string", "name": "string?"},
-                "notes": "Returns device_token once",
+                "notes": "Returns device_token once (firmware; not for Agents)",
             },
             {
                 "name": "onlyclaws_rotate_token",
@@ -1567,6 +1690,12 @@ async def agent_capabilities(
                 "method": "GET",
                 "path": "/api/events",
                 "query": {"device_id": "string?", "limit": "int"},
+            },
+            {
+                "name": "onlyclaws_agent_skill",
+                "method": "GET",
+                "path": "/api/agent/skill.md",
+                "notes": "Public; no auth",
             },
             {
                 "name": "onlyclaws_agent_docs",
