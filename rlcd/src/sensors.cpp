@@ -40,8 +40,10 @@ bool sensorsBegin() {
   // Wake SHTC3
   shtcWriteCmd(0x3517);
   delay(2);
-  pinMode(PIN_BAT_ADC, INPUT);
-  analogReadResolution(12);
+  if (PIN_BAT_ADC >= 0) {
+    pinMode(PIN_BAT_ADC, INPUT);
+    analogReadResolution(12);
+  }
   ready = true;
   return true;
 }
@@ -67,7 +69,12 @@ bool sensorsRead(SensorReading &out) {
     }
   }
 
-  // Battery: 3x divider on GPIO4. Average a few samples.
+  // Battery: 3x divider (RLCD). Skip when pin not wired (ePaper map).
+  if (PIN_BAT_ADC < 0) {
+    out.batteryV = NAN;
+    out.batteryPct = -1;
+    return out.okTemp || out.okBattery;
+  }
   uint32_t sum = 0;
   const int n = 8;
   for (int i = 0; i < n; ++i) {

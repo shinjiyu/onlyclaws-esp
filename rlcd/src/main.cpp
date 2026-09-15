@@ -22,18 +22,27 @@
 #include "http_pad.h"
 #include "cloud_config.h"
 #include "device_secrets.h"
+#include "panel_display.h"
 #include "script_engine.h"
 #include "sensors.h"
+#ifdef BOARD_PANEL_EPAPER
+#include "epd397_panel.h"
+#else
 #include "st7305_rlcd.h"
+#endif
 #include "wifi_ap_prov.h"
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "rlcd-runtime-0.12.4";
+constexpr const char *FW_VERSION = "agent-runtime-0.13.1";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
+#ifdef BOARD_PANEL_EPAPER
+Epd397Panel display;
+#else
 St7305Rlcd display;
+#endif
 WiFiClientSecure tls;
 uint8_t *frameBuf = nullptr;
 String lastShownId;
@@ -98,7 +107,7 @@ void drawStatus(const char *title, const char *line2, const char *line3 = nullpt
   display.print(macSuffix());
   display.setCursor(24, 216);
   display.print(FW_VERSION);
-  display.display();
+  display.flush();
 }
 
 void drawRuntimeHud(bool forceSensors = false) {
@@ -113,14 +122,14 @@ void drawRuntimeHud(bool forceSensors = false) {
 }
 
 void drawPortalHint() {
-  drawStatus("WiFi Setup", "1) Join RLCD-Setup-*", "2) http://192.168.4.1/");
+  drawStatus("WiFi Setup", "1) Join OC-Setup-*", "2) http://192.168.4.1/");
 }
 
 void drawBitmapFrame() {
   if (!frameBuf) return;
   // 1-bit framebuffer already matches panel geometry.
   display.drawBitmap(0, 0, frameBuf, LCD_WIDTH, LCD_HEIGHT, 1, 0);
-  display.display();
+  display.flush();
 }
 
 bool connectWifiWith(const WifiCreds &c, uint32_t timeoutMs = 20000) {
@@ -442,7 +451,7 @@ bool handlePayload(const String &json) {
     scriptEngineStop("remote stop");
     statusLine1 = "OnlyClaws";
     statusLine2 = "script stopped";
-    drawRuntimeHud(true);
+    if (!display.slowPanel()) drawRuntimeHud(true);
     postStatus();
     ok = true;
   } else if (!strcmp(type, "script")) {
@@ -452,7 +461,8 @@ bool handlePayload(const String &json) {
     if (ok) {
       statusLine1 = "script";
       statusLine2 = scriptId.length() ? scriptId : "running";
-      drawRuntimeHud(false);
+      // Skip HUD overlay on slow panels — script will paint next tick.
+      if (!display.slowPanel()) drawRuntimeHud(false);
       if (audioIsReady()) audioPlayBeep(660, 80);
       postStatus();
     }
@@ -540,16 +550,19 @@ void setupImpl() {
   Serial.println();
   Serial.println("=== OnlyClaws ESP runtime (Lua) ===");
   apiConfigBegin();
-  Serial.printf("fw=%s device=%s cloud=%s%s heap=%u\n", FW_VERSION,
-                apiConfigGet().deviceId.c_str(), apiConfigGet().host.c_str(),
-                apiConfigGet().pathPrefix.c_str(), ESP.getFreeHeap());
+  Serial.printf("fw=%s panel=%s device=%s cloud=%s%s heap=%u\n", FW_VERSION,
+                display.panelName(), apiConfigGet().deviceId.c_str(),
+                apiConfigGet().host.c_str(), apiConfigGet().pathPrefix.c_str(),
+                ESP.getFreeHeap());
 
   pinMode(PIN_KEY_BTN, INPUT_PULLUP);
   pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_KEY_BTN), onKeyIsr, CHANGE);
 
   display.begin();
+#ifndef BOARD_PANEL_EPAPER
   ensureFrameBuf();
+#endif
   sensorsBegin();
 
   ScriptHost host{};
@@ -576,7 +589,12 @@ void setupImpl() {
 
   // ESP32 requires WiFi modem sleep when BLE is also on (else abort).
   WiFi.setSleep(true);
+#ifndef BOARD_PANEL_EPAPER
+  // NimBLE + TLS + 800x480 panel leave too little internal heap for mbedTLS.
   bleCtrlBegin("OC-Snake");
+#else
+  Serial.println("[ble] skipped on ePaper (heap)");
+#endif
   httpPadBegin(80);
 
   statusLine1 = "OnlyClaws";
@@ -584,7 +602,11 @@ void setupImpl() {
   drawRuntimeHud(true);
   postStatus();
 
-  Serial.printf("ready. pad http://%s/  BLE=OC-Snake\n", WiFi.localIP().toString().c_str());
+  Serial.printf("ready. pad http://%s/", WiFi.localIP().toString().c_str());
+#ifndef BOARD_PANEL_EPAPER
+  Serial.print("  BLE=OC-Snake");
+#endif
+  Serial.println();
   xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 1, nullptr, 0);
 }
 

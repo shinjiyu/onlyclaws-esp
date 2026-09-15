@@ -39,14 +39,18 @@ bash scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem101
 pio device monitor -b 115200
 ```
 
-## Runtime notes (`rlcd-runtime-0.12.x`)
+## Runtime notes (`agent-runtime-0.13.x`)
 
-Platform APIs (firmware):
+Shared Lua/pad runtime; panel via `PanelDisplay`:
 
-- `http.get` / `http.post` / `http.request` — arbitrary hosts (no device bearer)
-- On-device LAN D-pad: `http://<board-ip>/` (`http_pad` + `pad_ctrl`)
-- Optional BLE peripheral `OC-Snake` (same pad state)
-- `gfx.qr(x, y, scale, text)` — QR modules for demos
-- Lua: `ble.dir` / `ble.restart` / `ble.connected` (pad-backed)
+| PlatformIO env | Panel |
+|----------------|--------|
+| `esp32-s3-rlcd-42` | ST7305 RLCD 400×300 |
+| `esp32-s3-epaper-397` | GxEPD2 3.97" 800×480 |
 
-Application demos (hot-deploy Lua only): [`../demos/`](../demos/).
+APIs: `http.*`, LAN pad `http://<ip>/`, BLE, `gfx.qr`, `gfx.slow()` (true on e-ink).
+
+```bash
+pio run -e esp32-s3-rlcd-42
+pio run -e esp32-s3-epaper-397 -t upload --upload-port /dev/cu.usbmodem*
+```

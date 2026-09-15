@@ -4,11 +4,11 @@
 
 #include "sensors.h"
 
-class St7305Rlcd;
+class PanelDisplay;
 
 // Pure runtime host — expose board capabilities to Lua (no product UI).
 struct ScriptHost {
-  St7305Rlcd *display = nullptr;
+  PanelDisplay *display = nullptr;
 
   bool (*readSensors)(SensorReading &out) = nullptr;
   bool (*beep)(uint16_t freqHz, uint16_t ms) = nullptr;

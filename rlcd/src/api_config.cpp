@@ -41,7 +41,20 @@ void loadOverrides() {
 }
 }  // namespace
 
-void apiConfigBegin() { loadOverrides(); }
+void apiConfigBegin() {
+  loadOverrides();
+  // Non-empty flash secrets refresh NVS (token update without wiping Wi‑Fi NVS).
+  const String flashId = String(EPD_DEVICE_ID);
+  const String flashTok = String(EPD_DEVICE_TOKEN);
+  if (flashTok.length() && flashId.length()) {
+    if (gCfg.deviceId != flashId || gCfg.deviceToken != flashTok) {
+      gCfg.deviceId = flashId;
+      gCfg.deviceToken = flashTok;
+      apiConfigSave(gCfg);
+      Serial.printf("[cloud] refreshed NVS creds for device=%s\n", flashId.c_str());
+    }
+  }
+}
 
 const ApiConfig &apiConfigGet() { return gCfg; }
 

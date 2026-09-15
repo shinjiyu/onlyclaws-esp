@@ -163,7 +163,7 @@ bool wifiApProvision(uint32_t timeoutMs) {
   done = false;
   statusMsg = "";
   deviceId = makeDeviceId();
-  apSsid = String("RLCD-Setup-") + deviceId.substring(8);
+  apSsid = String("OC-Setup-") + deviceId.substring(8);
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_AP_STA);

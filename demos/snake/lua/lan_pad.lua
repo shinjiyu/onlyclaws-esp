@@ -155,5 +155,9 @@ end
 function on_loop()
   step()
   draw()
+  -- e-ink needs much slower ticks; RLCD stays snappy.
+  if gfx.slow and gfx.slow() then
+    return 900
+  end
   return 140
 end

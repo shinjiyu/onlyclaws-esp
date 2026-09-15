@@ -55,10 +55,12 @@ Deploy a demo with `POST /api/scripts` (see demo README).
 
 | Path | Role |
 |------|------|
-| `rlcd/` | ESP32-S3-RLCD runtime (`rlcd-runtime-0.12.x`, Lua) |
-| `server/` | FastAPI control plane (+ optional `/snake` phone UI helpers) |
+| `rlcd/` | Shared agent runtime (`agent-runtime-0.13.x`, Lua + pad) |
+| `rlcd` env `esp32-s3-rlcd-42` | ST7305 RLCD 400×300 |
+| `rlcd` env `esp32-s3-epaper-397` | GxEPD2 ePaper 800×480 |
+| `server/` | FastAPI control plane (+ optional `/snake` helpers) |
 | `demos/` | Application demos (Lua scripts + notes) |
-| `src/` | Legacy ePaper firmware |
+| `src/` | Legacy ePaper-only firmware (pre-unified runtime) |
 
 ### Build
 

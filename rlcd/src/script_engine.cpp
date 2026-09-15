@@ -11,7 +11,7 @@
 #include "board_pins.h"
 #include "ble_ctrl.h"
 #include "pad_ctrl.h"
-#include "st7305_rlcd.h"
+#include "panel_display.h"
 
 #include <qrcode.h>
 
@@ -40,7 +40,7 @@ void setError(const char *msg) {
   Serial.printf("[lua] error: %s\n", gError.c_str());
 }
 
-St7305Rlcd *lcd() { return gHost.display; }
+PanelDisplay *lcd() { return gHost.display; }
 
 int b64Val(char c) {
   if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -325,14 +325,14 @@ int l_gfx_h(lua_State *L) {
 }
 
 int l_gfx_clear(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   d->fillScreen((uint16_t)luaL_optinteger(L, 1, 0));
   return 0;
 }
 
 int l_gfx_pixel(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   d->drawPixel((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
                (uint16_t)luaL_optinteger(L, 3, 1));
@@ -340,7 +340,7 @@ int l_gfx_pixel(lua_State *L) {
 }
 
 int l_gfx_line(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   d->drawLine((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
               (int16_t)luaL_checkinteger(L, 3), (int16_t)luaL_checkinteger(L, 4),
@@ -349,7 +349,7 @@ int l_gfx_line(lua_State *L) {
 }
 
 int l_gfx_rect(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   d->drawRect((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
               (int16_t)luaL_checkinteger(L, 3), (int16_t)luaL_checkinteger(L, 4),
@@ -358,7 +358,7 @@ int l_gfx_rect(lua_State *L) {
 }
 
 int l_gfx_fill_rect(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   d->fillRect((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
               (int16_t)luaL_checkinteger(L, 3), (int16_t)luaL_checkinteger(L, 4),
@@ -367,7 +367,7 @@ int l_gfx_fill_rect(lua_State *L) {
 }
 
 int l_gfx_circle(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   d->drawCircle((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
                 (int16_t)luaL_checkinteger(L, 3), (uint16_t)luaL_optinteger(L, 4, 1));
@@ -375,7 +375,7 @@ int l_gfx_circle(lua_State *L) {
 }
 
 int l_gfx_fill_circle(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   d->fillCircle((int16_t)luaL_checkinteger(L, 1), (int16_t)luaL_checkinteger(L, 2),
                 (int16_t)luaL_checkinteger(L, 3), (uint16_t)luaL_optinteger(L, 4, 1));
@@ -383,7 +383,7 @@ int l_gfx_fill_circle(lua_State *L) {
 }
 
 int l_gfx_text(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   int16_t x = (int16_t)luaL_checkinteger(L, 1);
   int16_t y = (int16_t)luaL_checkinteger(L, 2);
@@ -398,15 +398,21 @@ int l_gfx_text(lua_State *L) {
 
 int l_gfx_flush(lua_State *L) {
   (void)L;
-  St7305Rlcd *d = lcd();
-  if (d) d->display();
+  PanelDisplay *d = lcd();
+  if (d) d->flush();
   return 0;
+}
+
+int l_panel_slow(lua_State *L) {
+  PanelDisplay *d = lcd();
+  lua_pushboolean(L, (d && d->slowPanel()) ? 1 : 0);
+  return 1;
 }
 
 // gfx_qr(x, y, scale, text [, color=1]) -> modules (0 on fail)
 // Encodes text as QR. Uses ECC_M + 4-module quiet zone (WeChat-friendly).
 int l_gfx_qr(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) {
     lua_pushinteger(L, 0);
     return 1;
@@ -478,7 +484,7 @@ int l_gfx_qr(lua_State *L) {
 
 // Full-frame 1bpp MONO_HLSB (400x300/8 = 15000 bytes), base64.
 int l_gfx_blit_b64(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) {
     lua_pushboolean(L, 0);
     return 1;
@@ -501,7 +507,7 @@ int l_gfx_blit_b64(lua_State *L) {
 
 // Convenience: two-line status (still available).
 int l_display(lua_State *L) {
-  St7305Rlcd *d = lcd();
+  PanelDisplay *d = lcd();
   if (!d) return 0;
   const char *a = luaL_optstring(L, 1, "");
   const char *b = luaL_optstring(L, 2, "");
@@ -513,7 +519,7 @@ int l_display(lua_State *L) {
   d->print(a);
   d->setCursor(24, 84);
   d->print(b);
-  d->display();
+  d->flush();
   return 0;
 }
 
@@ -552,6 +558,7 @@ bool bindApis() {
   ok &= gLua->registerFunction("gfx_fill_circle", l_gfx_fill_circle);
   ok &= gLua->registerFunction("gfx_text", l_gfx_text);
   ok &= gLua->registerFunction("gfx_flush", l_gfx_flush);
+  ok &= gLua->registerFunction("panel_slow", l_panel_slow);
   ok &= gLua->registerFunction("gfx_qr", l_gfx_qr);
   ok &= gLua->registerFunction("gfx_blit", l_gfx_blit_b64);
 
@@ -591,6 +598,7 @@ gfx.rect = gfx_rect; gfx.fill_rect = gfx_fill_rect
 gfx.circle = gfx_circle; gfx.fill_circle = gfx_fill_circle
 gfx.text = gfx_text; gfx.flush = gfx_flush; gfx.blit = gfx_blit
 gfx.qr = gfx_qr
+gfx.slow = panel_slow
 )LUA";
   ok &= gLua->executeScript(boot);
   return ok;
@@ -755,7 +763,7 @@ bool scriptEngineInvokeJson(const char *json) {
     }
     if (!strcmp(tool, "display")) {
       // Use convenience two-line helper via temporary lua-less path
-      St7305Rlcd *d = lcd();
+      PanelDisplay *d = lcd();
       if (!d) return false;
       d->fillScreen(0);
       d->setFont(&FreeMonoBold12pt7b);
@@ -764,11 +772,11 @@ bool scriptEngineInvokeJson(const char *json) {
       d->print(step["title"] | step["line1"] | "");
       d->setCursor(24, 84);
       d->print(step["line2"] | "");
-      d->display();
+      d->flush();
       return true;
     }
     if (!strcmp(tool, "gfx.flush")) {
-      if (lcd()) lcd()->display();
+      if (lcd()) lcd()->flush();
       return true;
     }
     if (!strcmp(tool, "gfx.clear")) {

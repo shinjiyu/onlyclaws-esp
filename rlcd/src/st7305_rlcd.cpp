@@ -8,7 +8,9 @@ namespace {
 constexpr uint32_t kSpiHz = 20000000;
 }
 
-St7305Rlcd::St7305Rlcd() : Adafruit_GFX(LCD_WIDTH, LCD_HEIGHT) {}
+St7305Rlcd::St7305Rlcd() : PanelDisplay(LCD_WIDTH, LCD_HEIGHT) {}
+
+bool St7305Rlcd::begin() { return begin(&SPI); }
 
 bool St7305Rlcd::begin(SPIClass *spi) {
   spi_ = spi ? spi : &SPI;
