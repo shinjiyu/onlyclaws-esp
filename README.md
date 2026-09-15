@@ -20,7 +20,9 @@ No character UI, no on-device LLM — Agents drive hardware over the network and
 
 ### Lua on device
 
-Full board surface (not a text demo): **gfx**, **PCM audio**, sensors, buttons, Wi‑Fi.
+Full board surface: **gfx** (incl. `gfx.qr`), **PCM audio**, sensors, buttons, Wi‑Fi,
+**`http.get` / `http.post`**, optional **BLE pad**, and an **on-device HTTP D-pad**
+at `http://<board-ip>/` (any phone browser on the same LAN).
 
 ```lua
 function on_start()
@@ -28,40 +30,34 @@ function on_start()
   gfx.fill_circle(200, 120, 50, 1)
   gfx.flush()
   audio.beep(1000, 80)
-  -- audio.play_pcm(b64_int16_le) for real samples
 end
 
 function on_loop()
-  local s = sensors()
-  if s.temp_c and s.temp_c > 35 then
-    emit("hot", { temp = s.temp_c })
-  end
-  return 10000
+  local d = ble.dir()  -- shared with LAN pad / BLE writers
+  -- ...
+  return 200
 end
 ```
 
-APIs: `gfx.*` (pixel/line/rect/circle/text/blit/flush, 400×300 1bpp) · `audio.beep` / `play_pcm` / `pa` · `sensors` · `emit` · `input.key`/`boot` · `net.rssi`/`ip`/`ssid` · `log`/`sleep`/`stop`/`millis` · `display` (two-line helper). Also under `oc.*`.
+Local build: [`rlcd/DEV.md`](rlcd/DEV.md).
 
-Deploy:
+### Demo apps
 
-```http
-POST /api/scripts
-{
-  "name": "hot-alert",
-  "language": "lua",
-  "mode": "loop",
-  "every_ms": 10000,
-  "device_id": "a4cb8fdf8440",
-  "source": "function on_loop() ... end"
-}
-```
+Demos are **edge Lua applications**, not the platform itself:
+
+| Demo | Path |
+|------|------|
+| Snake (KEY / LAN pad + QR / remote HTTP) | [`demos/snake/`](demos/snake/) |
+
+Deploy a demo with `POST /api/scripts` (see demo README).
 
 ### Layout
 
 | Path | Role |
 |------|------|
-| `rlcd/` | ESP32-S3-RLCD runtime (`rlcd-runtime-0.10.x`, Lua) |
-| `server/` | FastAPI control plane |
+| `rlcd/` | ESP32-S3-RLCD runtime (`rlcd-runtime-0.12.x`, Lua) |
+| `server/` | FastAPI control plane (+ optional `/snake` phone UI helpers) |
+| `demos/` | Application demos (Lua scripts + notes) |
 | `src/` | Legacy ePaper firmware |
 
 ### Build
@@ -71,6 +67,7 @@ cd rlcd
 cp include/device_secrets.h.example include/device_secrets.h
 pio run -e esp32-s3-rlcd-42
 pio run -t upload -e esp32-s3-rlcd-42
+# keep NVS tokens: rlcd/scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem*
 ```
 
 ---
@@ -81,7 +78,7 @@ pio run -t upload -e esp32-s3-rlcd-42
 ### 定位
 
 纯框架：**远端 Agent 控板** + 可选 **设备端 Lua 脚本**。  
-不做角色 UI，不在板子上跑大模型。
+不做角色 UI，不在板子上跑大模型。应用 demo（如贪食蛇）在 [`demos/`](demos/) 下，与平台分离。
 
 ### 多租户
 
@@ -89,7 +86,8 @@ kuroneko 登录后只能管自己的设备；每台板独立 `device_token`。
 
 ### Lua
 
-板端暴露完整能力：`gfx.*` 像素绘图、`audio.play_pcm` / `beep`、传感器、按键、Wi‑Fi。详见 `/api/agent/skill.md`。
+板端暴露完整能力：`gfx.*` / `gfx.qr`、`audio.*`、传感器、按键、Wi‑Fi、`http.*`、
+本机控制页 `http://板IP/`、可选 BLE。详见 `/api/agent/skill.md`。
 
 ### 编译烧录
 

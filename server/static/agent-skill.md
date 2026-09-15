@@ -51,7 +51,11 @@ Firmware exposes **graphics, PCM audio, sensors, buttons, WiFi** — not a text-
 
 ### Other
 
-`sensors()` · `emit(name, table?)` · `input.key()` / `boot()` · `net.rssi()` / `ip()` / `ssid()` · `log` / `sleep` / `stop` / `millis` · `display(l1,l2)` convenience
+`sensors()` · `emit(name, table?)` · `input.key()` / `boot()` · `net.rssi()` / `ip()` / `ssid()` ·
+`http.get(url [, timeout_ms])` / `http.post(url, body [, timeout_ms])` / `http.request(method, url [, body [, timeout_ms]])`
+→ `status, body` (arbitrary host; no device bearer) ·
+`gfx.qr(x, y, scale, text)` · `ble.dir()` / `ble.restart()` / `ble.connected()` (LAN pad / BLE) ·
+`log` / `sleep` / `stop` / `millis` · `display(l1,l2)` convenience
 
 ### Deploy example
 

@@ -2,7 +2,7 @@
 # Resume PlatformIO dependency downloads overnight, then install packages.
 set -u
 cd "$HOME/.platformio/.cache/downloads" || exit 1
-LOG="$HOME/Documents/esp32/scripts/overnight_pio_deps.log"
+LOG="$HOME/Documents/onlyclaws-esp/scripts/overnight_pio_deps.log"
 exec >>"$LOG" 2>&1
 
 echo "==== $(date) overnight deps start ===="

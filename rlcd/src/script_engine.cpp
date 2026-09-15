@@ -9,7 +9,11 @@
 #include <string.h>
 
 #include "board_pins.h"
+#include "ble_ctrl.h"
+#include "pad_ctrl.h"
 #include "st7305_rlcd.h"
+
+#include <qrcode.h>
 
 namespace {
 ScriptHost gHost{};
@@ -253,6 +257,62 @@ int l_wifi_ssid(lua_State *L) {
   return 1;
 }
 
+// http_request(method, url [, body [, timeout_ms]]) -> status, body
+// status is HTTP code, or -1 on transport / missing host hook.
+int l_http_request(lua_State *L) {
+  const char *method = luaL_checkstring(L, 1);
+  const char *url = luaL_checkstring(L, 2);
+  const char *body = luaL_optstring(L, 3, "");
+  uint32_t timeoutMs = (uint32_t)luaL_optinteger(L, 4, 8000);
+  if (timeoutMs < 500) timeoutMs = 500;
+  if (timeoutMs > 30000) timeoutMs = 30000;
+
+  if (!gHost.httpRequest) {
+    lua_pushinteger(L, -1);
+    lua_pushstring(L, "http unavailable");
+    return 2;
+  }
+
+  int status = -1;
+  String resp;
+  bool ok = gHost.httpRequest(method, url, body, &status, &resp, timeoutMs);
+  if (!ok && status >= 0) {
+    // Host may set status even when treating non-2xx as failure; still return it.
+  }
+  if (!ok && status < 0) {
+    lua_pushinteger(L, -1);
+    lua_pushstring(L, resp.length() ? resp.c_str() : "http failed");
+    return 2;
+  }
+  // Cap what we push into Lua (PSRAM devices can still OOM on huge pages).
+  const size_t kMax = 8192;
+  if (resp.length() > kMax) resp.remove(kMax);
+  lua_pushinteger(L, status);
+  lua_pushlstring(L, resp.c_str(), resp.length());
+  return 2;
+}
+
+int l_ble_dir(lua_State *L) {
+  char d = padCtrlDir();
+  if (d == 0) {
+    lua_pushnil(L);
+  } else {
+    lua_pushlstring(L, &d, 1);
+  }
+  return 1;
+}
+
+int l_ble_connected(lua_State *L) {
+  // true if BLE linked OR LAN pad was used recently / any link flag
+  lua_pushboolean(L, (bleCtrlConnected() || padCtrlLinked()) ? 1 : 0);
+  return 1;
+}
+
+int l_ble_restart(lua_State *L) {
+  lua_pushboolean(L, padCtrlTakeRestart() ? 1 : 0);
+  return 1;
+}
+
 // ---- graphics ----
 
 int l_gfx_w(lua_State *L) {
@@ -343,6 +403,79 @@ int l_gfx_flush(lua_State *L) {
   return 0;
 }
 
+// gfx_qr(x, y, scale, text [, color=1]) -> modules (0 on fail)
+// Encodes text as QR. Uses ECC_M + 4-module quiet zone (WeChat-friendly).
+int l_gfx_qr(lua_State *L) {
+  St7305Rlcd *d = lcd();
+  if (!d) {
+    lua_pushinteger(L, 0);
+    return 1;
+  }
+  int16_t ox = (int16_t)luaL_checkinteger(L, 1);
+  int16_t oy = (int16_t)luaL_checkinteger(L, 2);
+  int scale = (int)luaL_optinteger(L, 3, 6);
+  const char *text = luaL_checkstring(L, 4);
+  uint16_t fg = (uint16_t)luaL_optinteger(L, 5, 1);
+  uint16_t bg = fg ? 0 : 1;
+  if (scale < 2) scale = 2;
+  if (scale > 14) scale = 14;
+  if (!text || !text[0]) {
+    lua_pushinteger(L, 0);
+    return 1;
+  }
+
+  // Prefer medium ECC so reflective LCD noise / camera blur still decode.
+  QRCode qr;
+  uint8_t *buf = nullptr;
+  int ver = 0;
+  for (int v = 2; v <= 6; ++v) {
+    size_t need = (size_t)qrcode_getBufferSize(v);
+    uint8_t *tmp = (uint8_t *)malloc(need);
+    if (!tmp) break;
+    if (qrcode_initText(&qr, tmp, v, ECC_MEDIUM, text) == 0) {
+      buf = tmp;
+      ver = v;
+      break;
+    }
+    free(tmp);
+  }
+  // Fallback: ECC_LOW if text is long.
+  if (!buf) {
+    for (int v = 1; v <= 8; ++v) {
+      size_t need = (size_t)qrcode_getBufferSize(v);
+      uint8_t *tmp = (uint8_t *)malloc(need);
+      if (!tmp) break;
+      if (qrcode_initText(&qr, tmp, v, ECC_LOW, text) == 0) {
+        buf = tmp;
+        ver = v;
+        break;
+      }
+      free(tmp);
+    }
+  }
+  if (!buf || ver == 0) {
+    lua_pushinteger(L, 0);
+    return 1;
+  }
+
+  // Spec quiet zone is 4 modules; WeChat is picky if this is too thin.
+  const int quiet = 4;
+  const int side = qr.size + quiet * 2;
+  const int16_t px = (int16_t)(side * scale);
+  // Light pad behind QR (critical for scanners).
+  d->fillRect(ox, oy, px, px, bg);
+  for (uint8_t y = 0; y < qr.size; ++y) {
+    for (uint8_t x = 0; x < qr.size; ++x) {
+      if (!qrcode_getModule(&qr, x, y)) continue;
+      d->fillRect((int16_t)(ox + (x + quiet) * scale),
+                  (int16_t)(oy + (y + quiet) * scale), (int16_t)scale, (int16_t)scale, fg);
+    }
+  }
+  free(buf);
+  lua_pushinteger(L, qr.size);
+  return 1;
+}
+
 // Full-frame 1bpp MONO_HLSB (400x300/8 = 15000 bytes), base64.
 int l_gfx_blit_b64(lua_State *L) {
   St7305Rlcd *d = lcd();
@@ -403,6 +536,10 @@ bool bindApis() {
   ok &= gLua->registerFunction("wifi_rssi", l_wifi_rssi);
   ok &= gLua->registerFunction("wifi_ip", l_wifi_ip);
   ok &= gLua->registerFunction("wifi_ssid", l_wifi_ssid);
+  ok &= gLua->registerFunction("http_request", l_http_request);
+  ok &= gLua->registerFunction("ble_dir", l_ble_dir);
+  ok &= gLua->registerFunction("ble_connected", l_ble_connected);
+  ok &= gLua->registerFunction("ble_restart", l_ble_restart);
   ok &= gLua->registerFunction("display", l_display);
   ok &= gLua->registerFunction("gfx_w", l_gfx_w);
   ok &= gLua->registerFunction("gfx_h", l_gfx_h);
@@ -415,6 +552,7 @@ bool bindApis() {
   ok &= gLua->registerFunction("gfx_fill_circle", l_gfx_fill_circle);
   ok &= gLua->registerFunction("gfx_text", l_gfx_text);
   ok &= gLua->registerFunction("gfx_flush", l_gfx_flush);
+  ok &= gLua->registerFunction("gfx_qr", l_gfx_qr);
   ok &= gLua->registerFunction("gfx_blit", l_gfx_blit_b64);
 
   const char *boot = R"LUA(
@@ -423,6 +561,7 @@ gfx = gfx or {}
 audio = audio or {}
 input = input or {}
 net = net or {}
+ble = ble or {}
 
 oc.sensors = sensors; oc.log = log; oc.millis = millis; oc.sleep = sleep
 oc.stop = stop; oc.emit = emit; oc.display = display
@@ -433,13 +572,25 @@ audio.pa = pa; audio.play_pcm = play_pcm
 
 input.key = key; input.boot = boot
 
+ble.dir = ble_dir; ble.connected = ble_connected; ble.restart = ble_restart
+
 net.rssi = wifi_rssi; net.ip = wifi_ip; net.ssid = wifi_ssid
+net.http = http_request
+http = http or {}
+http.request = http_request
+http.get = function(url, timeout_ms)
+  return http_request("GET", url, "", timeout_ms or 8000)
+end
+http.post = function(url, body, timeout_ms)
+  return http_request("POST", url, body or "", timeout_ms or 8000)
+end
 
 gfx.W = gfx_w(); gfx.H = gfx_h()
 gfx.clear = gfx_clear; gfx.pixel = gfx_pixel; gfx.line = gfx_line
 gfx.rect = gfx_rect; gfx.fill_rect = gfx_fill_rect
 gfx.circle = gfx_circle; gfx.fill_circle = gfx_fill_circle
 gfx.text = gfx_text; gfx.flush = gfx_flush; gfx.blit = gfx_blit
+gfx.qr = gfx_qr
 )LUA";
   ok &= gLua->executeScript(boot);
   return ok;

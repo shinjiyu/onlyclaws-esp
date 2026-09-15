@@ -22,6 +22,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
 import render as epd_render
+import snake_ctrl
 import tenancy
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -211,6 +212,7 @@ app = FastAPI(
     openapi_url=None,
 )
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
+app.include_router(snake_ctrl.router)
 
 
 class LoginIn(BaseModel):

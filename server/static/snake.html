@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Snake Control</title>
+  <style>
+    :root {
+      --bg0: #0c1210;
+      --bg1: #152018;
+      --ink: #e8f0ea;
+      --muted: #8aa090;
+      --pad: #1e2e24;
+      --pad-active: #3d7a52;
+      --accent: #6bcf8e;
+      --danger: #c45c4a;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; height: 100%;
+      background:
+        radial-gradient(120% 80% at 50% -10%, #24352a 0%, transparent 55%),
+        linear-gradient(165deg, var(--bg1), var(--bg0));
+      color: var(--ink);
+      font-family: "SF Pro Rounded", "Avenir Next", "Segoe UI", sans-serif;
+      user-select: none;
+      touch-action: none;
+    }
+    main {
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: max(20px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom));
+      gap: 24px;
+    }
+    header { text-align: center; }
+    .brand {
+      font-size: clamp(2rem, 9vw, 2.8rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin: 0;
+    }
+    .sub { margin: 8px 0 0; color: var(--muted); font-size: 0.95rem; }
+    .status {
+      display: flex; gap: 16px; justify-content: center;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted); font-size: 0.9rem;
+    }
+    .status b { color: var(--accent); font-weight: 600; }
+    .pad {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(72px, 22vw));
+      grid-template-rows: repeat(3, minmax(72px, 22vw));
+      gap: 12px;
+      max-width: 320px;
+    }
+    .pad button {
+      border: 0; border-radius: 18px;
+      background: var(--pad);
+      color: var(--ink);
+      font-size: 1.6rem; font-weight: 700;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .pad button:active, .pad button.active { background: var(--pad-active); transform: scale(0.96); }
+    .pad .u { grid-column: 2; grid-row: 1; }
+    .pad .l { grid-column: 1; grid-row: 2; }
+    .pad .r { grid-column: 3; grid-row: 2; }
+    .pad .d { grid-column: 2; grid-row: 3; }
+    .actions { width: min(320px, 100%); display: flex; gap: 12px; }
+    .actions button {
+      flex: 1; border: 0; border-radius: 14px; padding: 16px 12px;
+      font-size: 1rem; font-weight: 600; color: var(--ink);
+      background: #243028;
+    }
+    .actions .restart { background: var(--danger); }
+    .hint { color: var(--muted); font-size: 0.8rem; text-align: center; max-width: 280px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1 class="brand">Snake</h1>
+      <p class="sub">手机遥控 · 屏幕上的蛇</p>
+      <div class="status">
+        <span>方向 <b id="dir">R</b></span>
+        <span>分 <b id="score">0</b></span>
+        <span id="aliveLabel">运行中</span>
+      </div>
+    </header>
+
+    <div class="pad" id="pad">
+      <button class="u" data-dir="U" aria-label="上">▲</button>
+      <button class="l" data-dir="L" aria-label="左">◀</button>
+      <button class="r" data-dir="R" aria-label="右">▶</button>
+      <button class="d" data-dir="D" aria-label="下">▼</button>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="restart" id="restart">重新开始</button>
+    </div>
+    <p class="hint">公网控制 · 点方向键转向（板端低频拉取，减少卡顿）</p>
+  </main>
+  <script>
+    const BASE = location.pathname.endsWith("/") ? location.pathname : (location.pathname.replace(/\/[^/]*$/, "/") || "/");
+    const dirEl = document.getElementById("dir");
+    const scoreEl = document.getElementById("score");
+    const aliveLabel = document.getElementById("aliveLabel");
+
+    async function postDir(d) {
+      dirEl.textContent = d;
+      try {
+        await fetch(BASE + "dir", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dir: d }),
+        });
+      } catch (_) {}
+    }
+
+    document.getElementById("pad").addEventListener("pointerdown", (e) => {
+      const btn = e.target.closest("button[data-dir]");
+      if (!btn) return;
+      e.preventDefault();
+      btn.classList.add("active");
+      postDir(btn.dataset.dir);
+    });
+    document.getElementById("pad").addEventListener("pointerup", (e) => {
+      const btn = e.target.closest("button[data-dir]");
+      if (btn) btn.classList.remove("active");
+    });
+    document.getElementById("pad").addEventListener("pointerleave", (e) => {
+      const btn = e.target.closest("button[data-dir]");
+      if (btn) btn.classList.remove("active");
+    });
+
+    document.getElementById("restart").addEventListener("click", async () => {
+      try {
+        await fetch(BASE + "restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      } catch (_) {}
+    });
+
+    const map = { ArrowUp: "U", ArrowDown: "D", ArrowLeft: "L", ArrowRight: "R", w: "U", s: "D", a: "L", d: "R" };
+    window.addEventListener("keydown", (e) => {
+      const d = map[e.key] || map[e.key.toLowerCase()];
+      if (!d) return;
+      e.preventDefault();
+      postDir(d);
+    });
+
+    async function pollState() {
+      try {
+        const r = await fetch(BASE + "state");
+        const s = await r.json();
+        if (s.dir) dirEl.textContent = s.dir;
+        if (typeof s.score === "number") scoreEl.textContent = String(s.score);
+        aliveLabel.textContent = s.alive === false ? "Game Over" : "运行中";
+        aliveLabel.style.color = s.alive === false ? "var(--danger)" : "var(--muted)";
+      } catch (_) {}
+    }
+    setInterval(pollState, 800);
+    pollState();
+  </script>
+</body>
+</html>

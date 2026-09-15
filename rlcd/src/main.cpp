@@ -17,7 +17,9 @@
 
 #include "api_config.h"
 #include "audio_es8311.h"
+#include "ble_ctrl.h"
 #include "board_pins.h"
+#include "http_pad.h"
 #include "cloud_config.h"
 #include "device_secrets.h"
 #include "script_engine.h"
@@ -27,7 +29,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "rlcd-runtime-0.10.0";
+constexpr const char *FW_VERSION = "rlcd-runtime-0.12.4";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
@@ -197,6 +199,82 @@ bool httpJson(const char *method, const String &url, const String &body, String 
   }
   httpUnlock();
   return ok;
+}
+
+// Lua-facing HTTP: any URL, no OnlyClaws device bearer. Returns false only on
+// transport failure (statusOut stays < 0). Non-2xx still returns true with code.
+bool hostHttpRequest(const char *method, const char *url, const char *reqBody, int *statusOut,
+                     String *respOut, uint32_t timeoutMs) {
+  if (statusOut) *statusOut = -1;
+  if (respOut) *respOut = "";
+  if (!method || !url || !url[0]) {
+    if (respOut) *respOut = "bad args";
+    return false;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    if (respOut) *respOut = "wifi down";
+    return false;
+  }
+  if (!httpLock()) {
+    if (respOut) *respOut = "http busy";
+    return false;
+  }
+
+  HTTPClient http;
+  http.setTimeout(timeoutMs);
+  http.setReuse(false);
+
+  const bool isHttps = strncmp(url, "https://", 8) == 0;
+  const bool isHttp = strncmp(url, "http://", 7) == 0;
+  bool began = false;
+  if (isHttps) {
+    tls.setInsecure();
+    tls.setTimeout(timeoutMs);
+    began = http.begin(tls, url);
+  } else if (isHttp) {
+    began = http.begin(url);
+  } else {
+    httpUnlock();
+    if (respOut) *respOut = "url must be http(s)";
+    return false;
+  }
+
+  bool transportOk = false;
+  if (began) {
+    String m = method;
+    m.toUpperCase();
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("User-Agent", "OnlyClaws-ESP-Lua/1");
+    int code = -1;
+    if (m == "GET") {
+      code = http.GET();
+    } else if (m == "POST") {
+      code = http.POST(reqBody ? reqBody : "");
+    } else if (m == "PUT") {
+      code = http.PUT(reqBody ? reqBody : "");
+    } else if (m == "DELETE") {
+      code = http.sendRequest("DELETE", (uint8_t *)nullptr, 0);
+    } else {
+      http.end();
+      httpUnlock();
+      if (respOut) *respOut = "method not allowed";
+      return false;
+    }
+    String body = http.getString();
+    http.end();
+    if (code > 0) {
+      transportOk = true;
+      if (statusOut) *statusOut = code;
+      if (respOut) *respOut = body;
+    } else {
+      if (respOut) *respOut = "http transport error";
+    }
+    Serial.printf("lua-http %s %d %s\n", m.c_str(), code, url);
+  } else {
+    if (respOut) *respOut = "http begin failed";
+  }
+  httpUnlock();
+  return transportOk;
 }
 
 bool downloadAsset(const String &url) {
@@ -487,6 +565,7 @@ void setupImpl() {
   host.wifiRssi = hostWifiRssi;
   host.wifiIp = hostWifiIp;
   host.wifiSsid = hostWifiSsid;
+  host.httpRequest = hostHttpRequest;
   host.emitEvent = emitDeviceEvent;
   host.onSensors = hostOnSensors;
   scriptEngineBegin(host);
@@ -495,12 +574,17 @@ void setupImpl() {
 
   while (!ensureWifiConnected()) delay(1000);
 
+  // ESP32 requires WiFi modem sleep when BLE is also on (else abort).
+  WiFi.setSleep(true);
+  bleCtrlBegin("OC-Snake");
+  httpPadBegin(80);
+
   statusLine1 = "OnlyClaws";
-  statusLine2 = "online";
+  statusLine2 = WiFi.localIP().toString();
   drawRuntimeHud(true);
   postStatus();
 
-  Serial.println("ready. KEY short=beep; hold=WiFi; cloud=invoke/Lua script.");
+  Serial.printf("ready. pad http://%s/  BLE=OC-Snake\n", WiFi.localIP().toString().c_str());
   xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 1, nullptr, 0);
 }
 

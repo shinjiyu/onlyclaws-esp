@@ -24,6 +24,11 @@ struct ScriptHost {
   void (*wifiIp)(char *out, size_t n) = nullptr;
   void (*wifiSsid)(char *out, size_t n) = nullptr;
 
+  // Arbitrary HTTP(S) for edge scripts (custom control servers).
+  // Does NOT inject the OnlyClaws device bearer. statusOut < 0 on transport error.
+  bool (*httpRequest)(const char *method, const char *url, const char *reqBody,
+                      int *statusOut, String *respOut, uint32_t timeoutMs) = nullptr;
+
   bool (*emitEvent)(const char *name, const char *jsonData) = nullptr;
   void (*onSensors)(const SensorReading &r) = nullptr;
 };
