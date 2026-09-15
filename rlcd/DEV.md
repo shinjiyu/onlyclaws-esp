@@ -1,56 +1,59 @@
-# RLCD firmware — local dev
+# 固件本地开发（`rlcd/`）
 
-## Prerequisites (macOS arm64)
+统一运行时：`agent-runtime-0.13.x`。用 PlatformIO 环境选择面板。
+
+## 环境（macOS arm64）
 
 ```bash
 python3 -m pip install -U platformio --user
-export PATH="$HOME/Library/Python/3.9/bin:$PATH"   # adjust if needed
-pio --version   # expect 6.x
+export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+pio --version   # 期望 6.x
 ```
 
-Repo path used here: `~/Documents/onlyclaws-esp`.
+仓库路径示例：`~/Documents/onlyclaws-esp`。
 
-## Secrets
+## 密钥
 
 ```bash
 cd rlcd
 cp include/device_secrets.h.example include/device_secrets.h
-# edit EPD_DEVICE_ID / EPD_DEVICE_TOKEN for your board
+# 编辑 EPD_DEVICE_ID / EPD_DEVICE_TOKEN
 ```
 
-`device_secrets.h` is gitignored. Prefer NVS tokens in the field; use
-[`scripts/safe_upload_keep_nvs.sh`](scripts/safe_upload_keep_nvs.sh) so flash does not wipe them.
+`device_secrets.h` 已 gitignore。量产/日常烧录优先用 NVS 里的 token，配合：
 
-## Build
+[`scripts/safe_upload_keep_nvs.sh`](scripts/safe_upload_keep_nvs.sh)
+
+空 token 刷机时不会覆盖 NVS；**非空** flash 凭证会在启动时写回 NVS。
+
+## 构建与烧录
+
+| 环境 | 面板 |
+|------|------|
+| `esp32-s3-rlcd-42` | ST7305 RLCD 400×300 |
+| `esp32-s3-epaper-397` | GxEPD2 ePaper 3.97" 800×480 |
 
 ```bash
 cd rlcd
-pio run -e esp32-s3-rlcd-42
-```
 
-China / slow networks: see [`../scripts/install_from_cn_mirrors.sh`](../scripts/install_from_cn_mirrors.sh).
-
-## Upload
-
-```bash
+# RLCD
 pio run -e esp32-s3-rlcd-42 -t upload --upload-port /dev/cu.usbmodem*
-# or keep NVS:
+
+# ePaper
+pio run -e esp32-s3-epaper-397 -t upload --upload-port /dev/cu.usbmodem*
+
+# 保留 NVS（Wi‑Fi / token）
 bash scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem101
 pio device monitor -b 115200
 ```
 
-## Runtime notes (`agent-runtime-0.13.x`)
+国内网络慢：[`../scripts/install_from_cn_mirrors.sh`](../scripts/install_from_cn_mirrors.sh)。
 
-Shared Lua/pad runtime; panel via `PanelDisplay`:
+## 运行时要点
 
-| PlatformIO env | Panel |
-|----------------|--------|
-| `esp32-s3-rlcd-42` | ST7305 RLCD 400×300 |
-| `esp32-s3-epaper-397` | GxEPD2 3.97" 800×480 |
+- `PanelDisplay`：Lua / Pad / 云端路径两块屏共用  
+- `http.*`、本机 Pad `http://<ip>/`、`gfx.qr`、`gfx.slow()`（墨水屏为 true）  
+- ePaper 默认 **不开 BLE**（给 mbedTLS 留内部堆）；RLCD 可开 `OC-Snake`  
+- 墨水屏以 **局刷** 为主；全刷会闪黑白，仅偶尔清残影  
 
-APIs: `http.*`, LAN pad `http://<ip>/`, BLE, `gfx.qr`, `gfx.slow()` (true on e-ink).
-
-```bash
-pio run -e esp32-s3-rlcd-42
-pio run -e esp32-s3-epaper-397 -t upload --upload-port /dev/cu.usbmodem*
-```
+总览见仓库根目录 [`README.md`](../README.md)。
