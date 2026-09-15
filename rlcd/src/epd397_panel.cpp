@@ -25,6 +25,11 @@ bool Epd397Panel::begin() {
   epd_.init(115200);
   epd_.epd2.selectFastFullUpdate(true);
   epd_.setRotation(0);
+  // One clean full refresh at boot (expected single flash).
+  memset(fb_, 0x00, bytes_);  // all background
+  epd_.setFullWindow();
+  epd_.writeImage(fb_, 0, 0, LCD_WIDTH, LCD_HEIGHT, true);
+  epd_.refresh(false);
   Serial.printf("[epd] %s %dx%d ready heap=%u psram=%u\n", panelName(), LCD_WIDTH,
                 LCD_HEIGHT, ESP.getFreeHeap(), ESP.getFreePsram());
   return true;
@@ -57,15 +62,20 @@ bool Epd397Panel::showGxBitmap(const uint8_t *gx, size_t n) {
 void Epd397Panel::flush() {
   if (!fb_) return;
 
-  // Mostly partial refresh for demos; full refresh every 6 frames to clear ghosting.
-  const bool full = (flushCount_ % 6) == 0;
+  // Always partial during gameplay. Full refresh flashes black/white and looks
+  // like a polarity invert (~every N frames if interleaved).
   flushCount_++;
-
+  epd_.setPartialWindow(0, 0, LCD_WIDTH, LCD_HEIGHT);
   // Canvas is 1=ink; GxEPD2 writeImage expects 1=white → invert in-driver.
-  epd_.setFullWindow();
   epd_.writeImage(fb_, 0, 0, LCD_WIDTH, LCD_HEIGHT, true /*invert*/);
-  epd_.refresh(!full);  // true = partial update mode
-  if (full) {
+  epd_.refresh(true);  // partial
+
+  // Very rare full refresh to clear ghosting (not every few frames).
+  if (flushCount_ >= 80) {
+    flushCount_ = 0;
+    epd_.setFullWindow();
+    epd_.writeImage(fb_, 0, 0, LCD_WIDTH, LCD_HEIGHT, true);
+    epd_.refresh(false);
     Serial.printf("[epd] full refresh heap=%u\n", ESP.getFreeHeap());
   }
 }
