@@ -1,6 +1,8 @@
 #include "api_config.h"
 
 #include <Preferences.h>
+#include <esp_mac.h>
+#include <stdio.h>
 
 #include "cloud_config.h"
 #include "device_secrets.h"
@@ -9,6 +11,15 @@ namespace {
 Preferences prefs;
 ApiConfig gCfg;
 constexpr const char *NS = "cloud";
+
+String chipMacId() {
+  uint8_t mac[6] = {};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  char buf[13];
+  snprintf(buf, sizeof(buf), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2],
+           mac[3], mac[4], mac[5]);
+  return String(buf);
+}
 
 void applyDefaults() {
   gCfg.host = CLOUD_API_HOST;
@@ -43,16 +54,28 @@ void loadOverrides() {
 
 void apiConfigBegin() {
   loadOverrides();
-  // Non-empty flash secrets refresh NVS (token update without wiping Wi‑Fi NVS).
+  // device_secrets.h is per-workstation, not per-board. Only apply flash
+  // creds when they belong to this chip's MAC, and drop NVS creds copied
+  // from another board.
+  const String mac = chipMacId();
   const String flashId = String(EPD_DEVICE_ID);
   const String flashTok = String(EPD_DEVICE_TOKEN);
-  if (flashTok.length() && flashId.length()) {
-    if (gCfg.deviceId != flashId || gCfg.deviceToken != flashTok) {
-      gCfg.deviceId = flashId;
-      gCfg.deviceToken = flashTok;
-      apiConfigSave(gCfg);
-      Serial.printf("[cloud] refreshed NVS creds for device=%s\n", flashId.c_str());
-    }
+  const bool placeholder = !flashTok.length() || flashTok == "your_device_token";
+  const bool flashForChip = !placeholder && flashId.equalsIgnoreCase(mac);
+
+  if (!gCfg.deviceId.equalsIgnoreCase(mac)) {
+    Serial.printf("[cloud] ignore creds id=%s (this mac=%s)\n", gCfg.deviceId.c_str(),
+                  mac.c_str());
+    gCfg.deviceId = mac;
+    gCfg.deviceToken = "";
+  }
+
+  if (flashForChip &&
+      (!gCfg.deviceId.equalsIgnoreCase(flashId) || gCfg.deviceToken != flashTok)) {
+    gCfg.deviceId = flashId;
+    gCfg.deviceToken = flashTok;
+    apiConfigSave(gCfg);
+    Serial.printf("[cloud] refreshed NVS creds for device=%s\n", flashId.c_str());
   }
 }
 

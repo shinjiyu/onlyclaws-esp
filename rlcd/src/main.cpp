@@ -34,7 +34,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.13.2";
+constexpr const char *FW_VERSION = "agent-runtime-0.13.4";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
@@ -43,7 +43,9 @@ Epd397Panel display;
 #else
 St7305Rlcd display;
 #endif
-WiFiClientSecure tls;
+// Separate TLS sessions: Lua http.* must not starve cloud pending/status.
+WiFiClientSecure tlsCloud;
+WiFiClientSecure tlsLua;
 uint8_t *frameBuf = nullptr;
 String lastShownId;
 uint32_t lastSensorMs = 0;
@@ -177,27 +179,30 @@ bool ensureWifiConnected() {
 String apiUrl(const char *suffix) { return apiDeviceUrl(suffix); }
 String absoluteUrl(const char *pathOrUrl) { return apiAbsoluteUrl(pathOrUrl); }
 
-SemaphoreHandle_t httpMutex = nullptr;
-bool httpLock() {
-  if (!httpMutex) httpMutex = xSemaphoreCreateMutex();
-  return httpMutex && xSemaphoreTake(httpMutex, pdMS_TO_TICKS(60000)) == pdTRUE;
+SemaphoreHandle_t httpCloudMutex = nullptr;
+SemaphoreHandle_t httpLuaMutex = nullptr;
+
+bool httpChannelLock(SemaphoreHandle_t *slot, uint32_t waitMs) {
+  if (!slot) return false;
+  if (!*slot) *slot = xSemaphoreCreateMutex();
+  return *slot && xSemaphoreTake(*slot, pdMS_TO_TICKS(waitMs)) == pdTRUE;
 }
-void httpUnlock() {
-  if (httpMutex) xSemaphoreGive(httpMutex);
+void httpChannelUnlock(SemaphoreHandle_t slot) {
+  if (slot) xSemaphoreGive(slot);
 }
 
 bool httpJson(const char *method, const String &url, const String &body, String &out,
               uint32_t timeoutMs) {
   if (WiFi.status() != WL_CONNECTED) return false;
-  if (!httpLock()) return false;
+  if (!httpChannelLock(&httpCloudMutex, 20000)) return false;
   HTTPClient http;
   http.setTimeout(timeoutMs);
   http.setReuse(false);
-  tls.setInsecure();
-  tls.setTimeout(timeoutMs);
+  tlsCloud.setInsecure();
+  tlsCloud.setTimeout(timeoutMs);
   Serial.printf("%s heap=%u %s\n", method, ESP.getFreeHeap(), url.c_str());
   bool ok = false;
-  if (http.begin(tls, url)) {
+  if (http.begin(tlsCloud, url)) {
     http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
     http.addHeader("Content-Type", "application/json");
     int code = (strcmp(method, "GET") == 0) ? http.GET() : http.POST(body);
@@ -206,7 +211,7 @@ bool httpJson(const char *method, const String &url, const String &body, String 
     if (code < 200 || code >= 300) Serial.printf("HTTP %d\n", code);
     else ok = true;
   }
-  httpUnlock();
+  httpChannelUnlock(httpCloudMutex);
   return ok;
 }
 
@@ -224,7 +229,8 @@ bool hostHttpRequest(const char *method, const char *url, const char *reqBody, i
     if (respOut) *respOut = "wifi down";
     return false;
   }
-  if (!httpLock()) {
+  // Lua channel is independent of cloud pending/status (own TLS + mutex).
+  if (!httpChannelLock(&httpLuaMutex, 5000)) {
     if (respOut) *respOut = "http busy";
     return false;
   }
@@ -237,13 +243,13 @@ bool hostHttpRequest(const char *method, const char *url, const char *reqBody, i
   const bool isHttp = strncmp(url, "http://", 7) == 0;
   bool began = false;
   if (isHttps) {
-    tls.setInsecure();
-    tls.setTimeout(timeoutMs);
-    began = http.begin(tls, url);
+    tlsLua.setInsecure();
+    tlsLua.setTimeout(timeoutMs);
+    began = http.begin(tlsLua, url);
   } else if (isHttp) {
     began = http.begin(url);
   } else {
-    httpUnlock();
+    httpChannelUnlock(httpLuaMutex);
     if (respOut) *respOut = "url must be http(s)";
     return false;
   }
@@ -265,7 +271,7 @@ bool hostHttpRequest(const char *method, const char *url, const char *reqBody, i
       code = http.sendRequest("DELETE", (uint8_t *)nullptr, 0);
     } else {
       http.end();
-      httpUnlock();
+      httpChannelUnlock(httpLuaMutex);
       if (respOut) *respOut = "method not allowed";
       return false;
     }
@@ -282,20 +288,20 @@ bool hostHttpRequest(const char *method, const char *url, const char *reqBody, i
   } else {
     if (respOut) *respOut = "http begin failed";
   }
-  httpUnlock();
+  httpChannelUnlock(httpLuaMutex);
   return transportOk;
 }
 
 bool downloadAsset(const String &url) {
   if (!ensureFrameBuf() || WiFi.status() != WL_CONNECTED) return false;
-  if (!httpLock()) return false;
+  if (!httpChannelLock(&httpCloudMutex, 20000)) return false;
   HTTPClient http;
   http.setTimeout(45000);
   http.setReuse(false);
-  tls.setInsecure();
-  tls.setTimeout(30000);
+  tlsCloud.setInsecure();
+  tlsCloud.setTimeout(30000);
   bool ok = false;
-  if (http.begin(tls, url)) {
+  if (http.begin(tlsCloud, url)) {
     http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
     if (http.GET() == 200) {
       WiFiClient *stream = http.getStreamPtr();
@@ -315,7 +321,7 @@ bool downloadAsset(const String &url) {
     }
     http.end();
   }
-  httpUnlock();
+  httpChannelUnlock(httpCloudMutex);
   return ok;
 }
 

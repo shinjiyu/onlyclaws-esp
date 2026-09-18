@@ -52,6 +52,8 @@ pio device monitor -b 115200
 ## 运行时要点
 
 - `PanelDisplay`：Lua / Pad / 云端路径两块屏共用  
+- **双 HTTP 通道**（`0.13.3+`）：云端 `pending/status/ack/asset` 用 `tlsCloud`；Lua `http.*` 用 `tlsLua`，互不堵锁  
+- **设备身份**（`0.13.4+`）：`device_secrets.h` 只在与本机 MAC 一致时写回 NVS，避免一块板的凭证盖掉另一块  
 - `http.*`、本机 Pad `http://<ip>/`、`gfx.qr`、`gfx.slow()`（墨水屏为 true）  
 - ePaper 默认 **不开 BLE**（给 mbedTLS 留内部堆）；RLCD 可开 `OC-Snake`  
 - 墨水屏以 **局刷** 为主；全刷会闪黑白，仅偶尔清残影  
