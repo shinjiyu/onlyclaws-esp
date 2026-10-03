@@ -32,18 +32,27 @@ On `401`, ask the human to mint/rotate a token at https://onlyclaws.world/epaper
 | List my devices | `GET /api/devices` |
 | Invoke one-shot tools | `POST /api/invoke` |
 | Push text / bitmap | `POST /api/push` |
+| **Named bitmap** | `POST /api/bitmaps` then Lua `gfx.image(name, x, y)` |
 | Beep action | `POST /api/action` |
-| **Deploy Lua** | `POST /api/scripts` (`language=lua`, `source` = Lua string) |
+| **Deploy Lua** | `POST /api/scripts` (`language=lua`, `source` = Lua string, max 24000 bytes) |
 | Events from `emit()` | `GET /api/events` |
 
 ## Lua on device (full board)
 
 Firmware exposes **graphics, PCM audio, sensors, buttons, WiFi** — not a text-only demo.
 
-### Graphics (400×300, 1bpp)
+### Graphics (1bpp)
 
-`gfx.clear` / `pixel` / `line` / `rect` / `fill_rect` / `circle` / `fill_circle` / `text` / `blit(b64)` / `flush`  
-`gfx.W`=400, `gfx.H`=300. Color `0`/`1`. Call `gfx.flush()` after draw ops.
+`gfx.clear` / `pixel` / `line` / `rect` / `fill_rect` / `circle` / `fill_circle` / `text` / `flush`  
+`gfx.W` / `gfx.H` come from the panel (RLCD 400×300, ePaper 800×480). Color `0`/`1`. Call `gfx.flush()` after draw ops.
+
+Bitmaps (Gx MONO_HLSB: 1=white, 0=black, MSB left, width multiple of 8):
+
+- `gfx.blit(b64)` — full frame, exact `W*H/8` bytes, flushes
+- `gfx.blit(x, y, w, h, b64)` — sprite, raw ≤ 16KB, does not flush
+- `gfx.image(name [, x [, y]])` — named asset from `POST /api/bitmaps`, does not flush
+
+Do not embed an 800×480 frame in Lua. Script source max is 24000 bytes; one full ePaper frame is 48000 raw bytes. Upload it with `POST /api/bitmaps` (`encoding` `png` or `gx`) and draw it with `gfx.image`.
 
 ### Audio
 

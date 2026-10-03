@@ -29,6 +29,15 @@ struct ScriptHost {
   bool (*httpRequest)(const char *method, const char *url, const char *reqBody,
                       int *statusOut, String *respOut, uint32_t timeoutMs) = nullptr;
 
+  // Named cloud bitmap. `data` stays valid until the next fetchBitmap call.
+  struct BitmapView {
+    int w = 0;
+    int h = 0;
+    const uint8_t *data = nullptr;
+    size_t n = 0;
+  };
+  bool (*fetchBitmap)(const char *name, BitmapView *out) = nullptr;
+
   bool (*emitEvent)(const char *name, const char *jsonData) = nullptr;
   void (*onSensors)(const SensorReading &r) = nullptr;
 };

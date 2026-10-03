@@ -8,6 +8,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <Wire.h>
+#include <esp_heap_caps.h>
 #include <esp_mac.h>
 #include <esp_netif.h>
 #include <freertos/FreeRTOS.h>
@@ -34,7 +35,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.13.4";
+constexpr const char *FW_VERSION = "agent-runtime-0.13.5";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
@@ -325,6 +326,129 @@ bool downloadAsset(const String &url) {
   return ok;
 }
 
+bool bitmapNameOk(const char *name) {
+  if (!name || !name[0]) return false;
+  const size_t n = strlen(name);
+  if (n > 64) return false;
+  for (size_t i = 0; i < n; ++i) {
+    const char c = name[i];
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '_' || c == '-';
+    if (!ok) return false;
+  }
+  return true;
+}
+
+struct CachedBmp {
+  char name[65] = {0};
+  int w = 0;
+  int h = 0;
+  uint8_t *data = nullptr;
+  size_t n = 0;
+  uint32_t used = 0;
+};
+
+CachedBmp gBmpCache[8];
+uint32_t gBmpClock = 1;
+
+CachedBmp *cacheFind(const char *name) {
+  for (auto &c : gBmpCache) {
+    if (c.data && strcmp(c.name, name) == 0) {
+      c.used = ++gBmpClock;
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+CachedBmp *cacheVictim() {
+  CachedBmp *oldest = &gBmpCache[0];
+  for (auto &c : gBmpCache) {
+    if (!c.data) return &c;
+    if (c.used < oldest->used) oldest = &c;
+  }
+  return oldest;
+}
+
+bool hostFetchBitmap(const char *name, ScriptHost::BitmapView *out) {
+  if (out) *out = {};
+  if (!out || !bitmapNameOk(name) || WiFi.status() != WL_CONNECTED) return false;
+  if (CachedBmp *hit = cacheFind(name)) {
+    out->w = hit->w;
+    out->h = hit->h;
+    out->data = hit->data;
+    out->n = hit->n;
+    return true;
+  }
+  if (!httpChannelLock(&httpCloudMutex, 20000)) return false;
+
+  bool ok = false;
+  int w = 0, h = 0;
+  uint8_t *raw = nullptr;
+  size_t got = 0;
+  HTTPClient http;
+  http.setTimeout(20000);
+  http.setReuse(false);
+  tlsCloud.setInsecure();
+  tlsCloud.setTimeout(20000);
+  const String path = String("/bitmaps/") + name;
+  const String url = apiUrl(path.c_str());
+  Serial.printf("GET bitmap %s\n", url.c_str());
+  if (http.begin(tlsCloud, url)) {
+    const char *hdrKeys[] = {"X-Width", "X-Height"};
+    http.collectHeaders(hdrKeys, 2);
+    http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
+    const int code = http.GET();
+    if (code == 200) {
+      w = http.header("X-Width").toInt();
+      h = http.header("X-Height").toInt();
+      const bool dimsOk = w >= 8 && h >= 1 && w <= 800 && h <= 480 && (w % 8) == 0;
+      const size_t need = dimsOk ? (size_t)w / 8 * (size_t)h : 0;
+      if (need > 0 && need <= (800 * 480 / 8)) {
+        raw = (uint8_t *)heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!raw) raw = (uint8_t *)malloc(need);
+        WiFiClient *stream = http.getStreamPtr();
+        const uint32_t t0 = millis();
+        while (raw && got < need && millis() - t0 < 20000) {
+          const size_t avail = stream->available();
+          if (!avail) {
+            if (!http.connected()) break;
+            delay(2);
+            yield();
+            continue;
+          }
+          got += stream->readBytes(raw + got, min(avail, need - got));
+        }
+        ok = raw && got == need;
+      }
+    } else {
+      Serial.printf("bitmap HTTP %d\n", code);
+    }
+    http.end();
+  }
+  httpChannelUnlock(httpCloudMutex);
+  if (!ok) {
+    free(raw);
+    return false;
+  }
+
+  CachedBmp *slot = cacheVictim();
+  if (slot->data) free(slot->data);
+  strncpy(slot->name, name, sizeof(slot->name) - 1);
+  slot->name[sizeof(slot->name) - 1] = 0;
+  slot->w = w;
+  slot->h = h;
+  slot->data = raw;
+  slot->n = got;
+  slot->used = ++gBmpClock;
+  out->w = w;
+  out->h = h;
+  out->data = raw;
+  out->n = got;
+  Serial.printf("[bmp] %s %dx%d %u\n", name, w, h, (unsigned)got);
+  return true;
+}
+
 bool emitDeviceEvent(const char *name, const char *jsonData) {
   DynamicJsonDocument doc(768);
   doc["name"] = name ? name : "event";
@@ -585,6 +709,7 @@ void setupImpl() {
   host.wifiIp = hostWifiIp;
   host.wifiSsid = hostWifiSsid;
   host.httpRequest = hostHttpRequest;
+  host.fetchBitmap = hostFetchBitmap;
   host.emitEvent = emitDeviceEvent;
   host.onSensors = hostOnSensors;
   scriptEngineBegin(host);

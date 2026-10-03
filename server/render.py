@@ -129,6 +129,55 @@ def render_uploaded_image(
     return image_to_gx_bitmap(canvas, width, height)
 
 
+MAX_BITMAP_W = 800
+MAX_BITMAP_H = 480
+
+
+def _check_bitmap_dims(width: int, height: int) -> None:
+    if (
+        width < 8
+        or height < 1
+        or width > MAX_BITMAP_W
+        or height > MAX_BITMAP_H
+        or (width % 8) != 0
+    ):
+        raise ValueError(
+            "width must be a multiple of 8 in 8..800; height must be 1..480"
+        )
+
+
+def decode_named_bitmap(
+    payload: bytes,
+    *,
+    encoding: str,
+    width: int | None,
+    height: int | None,
+) -> Tuple[bytes, int, int]:
+    """Return Gx MONO_HLSB bytes plus pixel size.
+
+    encoding=gx: payload is already packed (1=white, 0=black, MSB left).
+    encoding=png: payload is a PNG; converted without letterboxing.
+    """
+    enc = (encoding or "gx").strip().lower()
+    if enc == "png":
+        img = Image.open(io.BytesIO(payload))
+        img.load()
+        w = int(width or img.width)
+        h = int(height or img.height)
+        _check_bitmap_dims(w, h)
+        return image_to_gx_bitmap(img, w, h), w, h
+    if enc != "gx":
+        raise ValueError("encoding must be gx or png")
+    if width is None or height is None:
+        raise ValueError("gx encoding requires width and height")
+    w, h = int(width), int(height)
+    _check_bitmap_dims(w, h)
+    need = w * h // 8
+    if len(payload) != need:
+        raise ValueError(f"gx bitmap is {len(payload)} bytes, expected {need}")
+    return payload, w, h
+
+
 def save_bitmap(path: Path, data: bytes) -> Tuple[int, int]:
     n = len(data)
     known = {

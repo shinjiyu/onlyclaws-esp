@@ -482,17 +482,54 @@ int l_gfx_qr(lua_State *L) {
   return 1;
 }
 
-// Full-frame 1bpp MONO_HLSB (400x300/8 = 15000 bytes), base64.
+// Embedded sprites stay small: a full 800x480 frame is 48KB and will not fit
+// in the 24KB Lua source cap. Use gfx.image() for those.
+constexpr size_t kSpriteMax = 16384;
+
+uint8_t *allocBitmap(size_t n) {
+  uint8_t *raw = (uint8_t *)heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!raw) raw = (uint8_t *)malloc(n);
+  return raw;
+}
+
+// gfx.blit(b64)                         full frame, Gx 1bpp, flushes
+// gfx.blit(x, y, w, h, b64)             sprite, no flush, raw <= 16KB
 int l_gfx_blit_b64(lua_State *L) {
   PanelDisplay *d = lcd();
   if (!d) {
     lua_pushboolean(L, 0);
     return 1;
   }
+  if (lua_gettop(L) >= 5) {
+    const int16_t x = (int16_t)luaL_checkinteger(L, 1);
+    const int16_t y = (int16_t)luaL_checkinteger(L, 2);
+    const int w = (int)luaL_checkinteger(L, 3);
+    const int h = (int)luaL_checkinteger(L, 4);
+    const char *b64 = luaL_checkstring(L, 5);
+    if (w < 8 || h < 1 || (w & 7) || w > 800 || h > 480) {
+      lua_pushboolean(L, 0);
+      return 1;
+    }
+    const size_t need = (size_t)w / 8 * (size_t)h;
+    if (need == 0 || need > kSpriteMax) {
+      lua_pushboolean(L, 0);
+      return 1;
+    }
+    uint8_t *raw = allocBitmap(need);
+    if (!raw) {
+      lua_pushboolean(L, 0);
+      return 1;
+    }
+    const size_t n = b64Decode(b64, raw, need);
+    const bool ok = n == need && d->blitGx(x, y, (int16_t)w, (int16_t)h, raw, n);
+    free(raw);
+    lua_pushboolean(L, ok ? 1 : 0);
+    return 1;
+  }
+
   const char *b64 = luaL_checkstring(L, 1);
   const size_t need = d->frameBytes();
-  uint8_t *raw = (uint8_t *)heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!raw) raw = (uint8_t *)malloc(need);
+  uint8_t *raw = allocBitmap(need);
   if (!raw) {
     lua_pushboolean(L, 0);
     return 1;
@@ -501,6 +538,27 @@ int l_gfx_blit_b64(lua_State *L) {
   bool ok = false;
   if (n == need) ok = d->showGxBitmap(raw, n);
   free(raw);
+  lua_pushboolean(L, ok ? 1 : 0);
+  return 1;
+}
+
+// gfx.image(name [, x [, y]]) — named cloud bitmap, no flush.
+int l_gfx_image(lua_State *L) {
+  PanelDisplay *d = lcd();
+  if (!d || !gHost.fetchBitmap) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  const char *name = luaL_checkstring(L, 1);
+  const int16_t x = (int16_t)luaL_optinteger(L, 2, 0);
+  const int16_t y = (int16_t)luaL_optinteger(L, 3, 0);
+  ScriptHost::BitmapView view;
+  bool ok = gHost.fetchBitmap(name, &view);
+  if (!ok || !view.data || !view.n || view.w < 8 || view.h < 1) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  ok = d->blitGx(x, y, (int16_t)view.w, (int16_t)view.h, view.data, view.n);
   lua_pushboolean(L, ok ? 1 : 0);
   return 1;
 }
@@ -561,6 +619,7 @@ bool bindApis() {
   ok &= gLua->registerFunction("panel_slow", l_panel_slow);
   ok &= gLua->registerFunction("gfx_qr", l_gfx_qr);
   ok &= gLua->registerFunction("gfx_blit", l_gfx_blit_b64);
+  ok &= gLua->registerFunction("gfx_image", l_gfx_image);
 
   const char *boot = R"LUA(
 oc = oc or {}
@@ -597,6 +656,7 @@ gfx.clear = gfx_clear; gfx.pixel = gfx_pixel; gfx.line = gfx_line
 gfx.rect = gfx_rect; gfx.fill_rect = gfx_fill_rect
 gfx.circle = gfx_circle; gfx.fill_circle = gfx_fill_circle
 gfx.text = gfx_text; gfx.flush = gfx_flush; gfx.blit = gfx_blit
+gfx.image = gfx_image
 gfx.qr = gfx_qr
 gfx.slow = panel_slow
 )LUA";

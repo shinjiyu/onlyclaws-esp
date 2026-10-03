@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -30,7 +33,9 @@ DATA_DIR = Path(os.environ.get("EPD_DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / "epaper.db"
 STATIC_DIR = BASE_DIR / "static"
 ASSET_DIR = DATA_DIR / "assets"
+BITMAP_DIR = DATA_DIR / "bitmaps"
 VOICE_DIR = DATA_DIR / "voice"
+BITMAP_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 KURONEKO_BASE = os.environ.get("KURONEKO_BASE", "https://kuroneko.chat").rstrip("/")
 SESSION_SECRET = os.environ.get("EPD_SESSION_SECRET", "")
@@ -77,6 +82,7 @@ def ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) 
 def init_db() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
+    BITMAP_DIR.mkdir(parents=True, exist_ok=True)
     with db() as conn:
         conn.executescript(
             """
@@ -135,6 +141,18 @@ def init_db() -> None:
               name TEXT NOT NULL,
               data TEXT,
               created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS bitmaps (
+              id TEXT PRIMARY KEY,
+              device_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              width INTEGER NOT NULL,
+              height INTEGER NOT NULL,
+              bytes INTEGER NOT NULL,
+              path TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              created_by TEXT,
+              UNIQUE(device_id, name)
             );
             """
         )
@@ -251,6 +269,15 @@ class StatusIn(BaseModel):
     rssi: Optional[int] = None
     fw: Optional[str] = None
     meta: Optional[dict[str, Any]] = None
+
+
+class BitmapIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    device_id: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    encoding: str = "gx"  # gx = raw MONO_HLSB, png = PNG bytes
+    data_b64: str = Field(..., min_length=4, max_length=1_500_000)
 
 
 class ScriptCreateIn(BaseModel):
@@ -1028,6 +1055,120 @@ async def device_action(
     return {"success": True, "message": msg}
 
 
+def _bitmap_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "device_id": row["device_id"],
+        "name": row["name"],
+        "width": row["width"],
+        "height": row["height"],
+        "bytes": row["bytes"],
+        "encoding": "gx",
+        "created_at": row["created_at"],
+    }
+
+
+@app.post("/api/bitmaps")
+async def put_bitmap(
+    body: BitmapIn, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    """Store a named 1bpp bitmap the device can draw with gfx.image(name)."""
+    name = body.name.strip()
+    if not BITMAP_NAME_RE.match(name):
+        raise HTTPException(
+            status_code=400, detail="name must match [A-Za-z0-9_-]{1,64}"
+        )
+    packed = "".join(body.data_b64.split())
+    packed += "=" * ((-len(packed)) % 4)
+    try:
+        payload = base64.b64decode(packed, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="data_b64 is not valid base64") from exc
+    try:
+        raw, width, height = epd_render.decode_named_bitmap(
+            payload,
+            encoding=body.encoding,
+            width=body.width,
+            height=body.height,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    device_id = resolve_user_device_id(body.device_id, sess)
+    if not re.fullmatch(r"[a-z0-9]{4,32}", device_id):
+        raise HTTPException(status_code=400, detail="bad device id")
+    dest_dir = BITMAP_DIR / device_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    path = dest_dir / f"{name}.bin"
+    path.write_bytes(raw)
+    now = utc_now()
+    email = tenancy.session_email(sess)
+    bitmap_id = uuid.uuid4().hex
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO bitmaps
+              (id, device_id, name, width, height, bytes, path, created_at, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(device_id, name) DO UPDATE SET
+              width=excluded.width,
+              height=excluded.height,
+              bytes=excluded.bytes,
+              path=excluded.path,
+              created_at=excluded.created_at,
+              created_by=excluded.created_by
+            """,
+            (bitmap_id, device_id, name, width, height, len(raw), str(path), now, email),
+        )
+        row = conn.execute(
+            "SELECT * FROM bitmaps WHERE device_id=? AND name=?",
+            (device_id, name),
+        ).fetchone()
+    return {"success": True, "bitmap": _bitmap_row(row)}
+
+
+@app.get("/api/bitmaps")
+async def list_bitmaps(
+    device_id: Optional[str] = None, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    did = resolve_user_device_id(device_id, sess)
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM bitmaps WHERE device_id=?
+            ORDER BY name
+            """,
+            (did,),
+        ).fetchall()
+    return {"success": True, "bitmaps": [_bitmap_row(r) for r in rows]}
+
+
+@app.delete("/api/bitmaps/{name}")
+async def delete_bitmap(
+    name: str,
+    device_id: Optional[str] = None,
+    sess: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    if not BITMAP_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="bad bitmap name")
+    did = resolve_user_device_id(device_id, sess)
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM bitmaps WHERE device_id=? AND name=?",
+            (did, name),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="bitmap not found")
+        conn.execute(
+            "DELETE FROM bitmaps WHERE device_id=? AND name=?",
+            (did, name),
+        )
+    try:
+        Path(row["path"]).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return {"success": True, "name": name, "device_id": did}
+
+
 @app.post("/api/scripts")
 async def create_script(
     body: ScriptCreateIn, sess: dict[str, Any] = Depends(require_user)
@@ -1392,6 +1533,38 @@ async def device_pending(
     return {"success": True, "message": None}
 
 
+@app.get("/api/v1/device/{device_id}/bitmaps/{name}")
+async def device_named_bitmap(
+    device_id: str, name: str, _: str = Depends(require_known_device)
+) -> RawResponse:
+    if not BITMAP_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="bad bitmap name")
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM bitmaps WHERE device_id=? AND name=?",
+            (device_id.strip().lower(), name),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="bitmap not found")
+    path = Path(row["path"])
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="bitmap file missing")
+    data = path.read_bytes()
+    if len(data) != int(row["bytes"]):
+        raise HTTPException(status_code=500, detail="corrupt bitmap")
+    return RawResponse(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Length": str(len(data)),
+            "Cache-Control": "no-store",
+            "X-Width": str(row["width"]),
+            "X-Height": str(row["height"]),
+            "X-Format": "gx-mono-hlsb",
+        },
+    )
+
+
 @app.get("/api/v1/device/{device_id}/asset/{asset_name}")
 async def device_asset(
     device_id: str, asset_name: str, _: str = Depends(require_known_device)
@@ -1667,6 +1840,32 @@ async def agent_capabilities(
                 },
             },
             {
+                "name": "onlyclaws_put_bitmap",
+                "method": "POST",
+                "path": "/api/bitmaps",
+                "body": {
+                    "name": "string",
+                    "device_id": "string?",
+                    "width": "int? (required for encoding=gx)",
+                    "height": "int?",
+                    "encoding": "gx|png",
+                    "data_b64": "base64",
+                },
+                "notes": "Named 1bpp asset for Lua gfx.image(name,x,y). Not inside the 24KB script cap. Gx MONO_HLSB: 1=white, 0=black, MSB left, width multiple of 8, max 800x480.",
+            },
+            {
+                "name": "onlyclaws_list_bitmaps",
+                "method": "GET",
+                "path": "/api/bitmaps",
+                "query": {"device_id": "string?"},
+            },
+            {
+                "name": "onlyclaws_delete_bitmap",
+                "method": "DELETE",
+                "path": "/api/bitmaps/{name}",
+                "query": {"device_id": "string?"},
+            },
+            {
                 "name": "onlyclaws_stop_script",
                 "method": "POST",
                 "path": "/api/script/stop",
@@ -1722,8 +1921,10 @@ async def agent_capabilities(
                 "gfx.fill_circle",
                 "gfx.text",
                 "gfx.blit",
+                "gfx.image",
                 "gfx.flush",
             ],
+            "bitmap": "POST /api/bitmaps then gfx.image(name,x,y). gfx.blit(b64) is full frame and flushes; gfx.blit(x,y,w,h,b64) is a sprite <=16KB and does not flush. Lua source max 24000 bytes.",
             "audio": [
                 "audio.beep",
                 "audio.play_pcm",

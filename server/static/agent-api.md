@@ -111,7 +111,7 @@ Also: `POST /api/scripts/{id}/deploy`, `POST /api/script/stop`, `GET /api/script
 
 ### 4.2 Lua API (full board surface)
 
-Color: `0` = off / white plane, `1` = on / black. Display is **400×300** 1bpp (`gfx.W` / `gfx.H`).
+Color: `0` = off / white plane, `1` = on / black. Size is runtime `gfx.W` × `gfx.H` (RLCD **400×300**, ePaper **800×480**), 1bpp. Lua `source` max is **24000** bytes.
 
 #### Sensors / control
 
@@ -138,10 +138,41 @@ Color: `0` = off / white plane, `1` = on / black. Display is **400×300** 1bpp (
 | `gfx.circle(x,y,r,color?)` | |
 | `gfx.fill_circle(x,y,r,color?)` | |
 | `gfx.text(x,y,str,color?)` | FreeMonoBold 12pt |
-| `gfx.blit(b64)` | full-frame MONO_HLSB 15000 bytes, base64 |
+| `gfx.blit(b64)` | full-frame Gx MONO_HLSB (`W*H/8` bytes), base64; flushes |
+| `gfx.blit(x,y,w,h,b64)` | sprite, width multiple of 8, raw ≤ 16KB; no flush |
+| `gfx.image(name, x?, y?)` | named cloud bitmap from `POST /api/bitmaps`; no flush |
 | `gfx.flush()` | push framebuffer to panel |
 
-Drawing is buffered — call `gfx.flush()` after changes (except `display()` / `gfx.blit` which flush).
+Drawing is buffered — call `gfx.flush()` after changes (except `display()` / one-arg `gfx.blit`, which flush).
+
+Gx packing: 1=white, 0=black, MSB is the leftmost pixel. An 800×480 frame is 48000 bytes and does not fit in a script; upload it and call `gfx.image`.
+
+#### Named bitmaps
+
+```http
+POST /api/bitmaps
+Authorization: Bearer oct_...
+
+{
+  "name": "garden",
+  "device_id": "441bf6923320",
+  "encoding": "png",
+  "data_b64": "<base64 PNG>"
+}
+```
+
+`encoding` is `png` (size taken from the image, or pass `width`/`height` to scale) or `gx` (raw bytes, `width` and `height` required). Same name replaces the previous asset. `GET /api/bitmaps` lists them. `DELETE /api/bitmaps/{name}` removes one.
+
+```lua
+function on_start()
+  gfx.clear(0)
+  if gfx.image("garden", 0, 0) then
+    gfx.flush()
+  end
+end
+```
+
+The device downloads the bytes with its own token and caches a few images. Call `gfx.image` when the picture changes, not on every tick.
 
 #### Audio (`audio.*`)
 

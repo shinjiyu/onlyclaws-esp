@@ -88,7 +88,7 @@ end
 
 | 模块 | 能力 |
 |------|------|
-| `gfx.*` | 点线圆、文字、`gfx.qr`、`gfx.flush`、`gfx.slow()` |
+| `gfx.*` | 点线圆、文字、`gfx.qr`、`gfx.blit`、`gfx.image`、`gfx.flush`、`gfx.slow()` |
 | `audio.*` | beep / PCM |
 | `input.*` | KEY / BOOT |
 | `http.*` | 任意 HTTP(S)，**不**带设备 Bearer |
