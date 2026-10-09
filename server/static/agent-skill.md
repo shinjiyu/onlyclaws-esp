@@ -1,8 +1,8 @@
 # OnlyClaws ESP — Agent Skill
 
-Base: `https://onlyclaws.world/epaper`
+Base: `https://onlyclaws.world`
 
-**Agents never use kuroneko email/password.**  
+**Agents never use a human's email/password.**  
 A human logs into the web UI, mints an **Agent control token** (`oct_…`), and gives that token to the Agent.
 
 ## Auth
@@ -15,12 +15,12 @@ Authorization: Bearer oct_...
 - Capabilities: `GET /api/agent/capabilities` — needs token
 - Full docs: `GET /api/agent/docs.md` — needs token
 
-On `401`, ask the human to mint/rotate a token at https://onlyclaws.world/epaper — do **not** ask for their password.
+On `401`, ask the human to mint/rotate a token at https://onlyclaws.world/console/ — do **not** ask for their password.
 
 ## Mint (humans only)
 
-1. Open https://onlyclaws.world/epaper and log in with kuroneko.chat
-2. **Agent 控制 Token** → create (e.g. name `aki`)
+1. Open https://onlyclaws.world/console/ and sign in (no access yet? apply at https://onlyclaws.world/apply/)
+2. **Agent tokens / Agent 令牌** tab → create (e.g. name `aki`)
 3. Copy the `oct_…` value once; store in Agent secret vault
 4. Revoke anytime from the same UI
 

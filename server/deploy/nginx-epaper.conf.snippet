@@ -1,6 +1,25 @@
 # Paste inside the onlyclaws.world server { } HTTPS block.
+# Site, console and API live at the domain root (EPD_PUBLIC_BASE=https://onlyclaws.world).
+# /epaper/ stays as a legacy prefix: shipped firmware polls /epaper/api/v1/device/…
 
-    location = /epaper { return 301 /epaper/; }
+    location / {
+        proxy_pass         http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        client_max_body_size 8m;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_request_buffering off;
+        proxy_buffering    off;
+    }
+
+    location = /epaper { return 301 /; }
+    location = /epaper/ { return 301 /; }
+    location = /epaper/console/ { return 301 /console/; }
+    location = /epaper/apply/ { return 301 /apply/$is_args$args; }
 
     location /epaper/ {
         proxy_pass         http://127.0.0.1:8787/;
@@ -13,4 +32,5 @@
         proxy_read_timeout 120s;
         proxy_send_timeout 120s;
         proxy_request_buffering off;
+        proxy_buffering    off;
     }

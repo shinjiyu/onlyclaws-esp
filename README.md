@@ -1,191 +1,165 @@
+<div align="center">
+
 # OnlyClaws ESP
 
-开源协议：[MIT](LICENSE)。`esp32-s3-epaper-397` 固件链接 [GxEPD2](https://github.com/ZinggJM/GxEPD2)（GPL-3.0），该环境的固件按 GPL-3.0 发布。详见 [NOTICE](NOTICE)。
+**Give your agent a claw in the real world.**
 
-远端 Agent 控板 + ESP32 端 Lua 运行时。  
-云端下发指令 / 热部署脚本，板子负责显示、按键、音频、本机控制页等能力。
+Flash an ESP32-S3 once. After that your AI agent sends Lua over HTTP,<br>
+and the board draws, plays sound, reads sensors and reports back.
 
-**线上：** [onlyclaws.world/epaper](https://onlyclaws.world/epaper)  
-**Agent 文档：** [/api/agent/docs](https://onlyclaws.world/epaper/api/agent/docs) · [skill.md](https://onlyclaws.world/epaper/api/agent/skill.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-1c1d17)](LICENSE)
+![ESP32-S3](https://img.shields.io/badge/chip-ESP32--S3-e2432a)
+![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.13-1c1d17)
+![Lua](https://img.shields.io/badge/apps-Lua-2c2d72)
+[![Agent skill](https://img.shields.io/badge/agent-skill.md-1c1d17)](https://onlyclaws.world/api/agent/skill.md)
 
-[English](#english) · [中文](#中文)
+[Website](https://onlyclaws.world/) · [Console](https://onlyclaws.world/console/) · [Agent API](https://onlyclaws.world/api/agent/docs) · [中文](README.zh-CN.md)
 
----
+<img src="docs/assets/hero.png" alt="Three apps the agent deployed to the same board: Snake, a stock ticker, and a travel-frog postcard" width="100%">
 
-<a id="中文"></a>
-## 中文
+<sub>Three apps, one firmware. Each one is a Lua script the agent deployed. (Rendered from the website simulator; board photos coming.)</sub>
 
-### 定位
+</div>
 
-这是一套 **设备框架**，不是某个具体 App：
+## Why
 
-| 做什么 | 不做什么 |
-|--------|----------|
-| 多租户设备注册与鉴权 | 板端角色 UI / 大模型 |
-| 远端 invoke、事件、脚本热部署 | 把 demo 写死进固件 |
-| 统一 Lua 运行时 + 屏幕适配层 | 每块屏各写一套业务逻辑 |
+Agents are good at deciding *what* should happen. They have no hands. OnlyClaws turns a cheap ESP32-S3 board into a peripheral an agent can program on its own:
 
-应用（例如贪食蛇）放在 [`demos/`](demos/)，通过云端 `POST /api/scripts` 下发即可。
+- **Flash once.** No more rebuilding firmware for every new screen or game. Apps are Lua scripts, swapped in seconds.
+- **No model on the board.** The agent thinks in the cloud; the board runs the script and reports events.
+- **Safe to hand over.** The agent holds a scoped `oct_…` token, never your password. Each board has its own `device_token`.
+- **Same Lua everywhere.** Panel and audio are compile-time plugins. On a bare module, `gfx.*` and `audio.*` safely do nothing.
 
-### 架构
+## How it works
 
-```
-┌─────────────┐     HTTPS      ┌──────────────────┐
-│ 远端 Agent  │ ─────────────► │ onlyclaws.world  │
-│ / 控制台    │ ◄───────────── │ 控制面 + 消息队列 │
-└─────────────┘   status/event └────────┬─────────┘
-                                        │ poll / deploy
-                               ┌────────▼─────────┐
-                               │  ESP32 运行时     │
-                               │  Lua · gfx · pad  │
-                               └────────┬─────────┘
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    ▼                   ▼                   ▼
-              RLCD 400×300         ePaper 800×480      手机浏览器
-              ST7305 快刷          墨水屏局刷          http://板IP/
+```mermaid
+flowchart LR
+    A["AI agent<br/>reads skill.md"] -- "deploy Lua<br/>oct_ token" --> C["Control plane<br/>FastAPI · MIT"]
+    C -- "events" --> A
+    C -- "script<br/>long-poll" --> B["ESP32-S3<br/>Lua runtime"]
+    B -- "emit()" --> C
+    B --- P["panel · audio · sensors · keys · HTTP"]
 ```
 
-1. **远端 Agent（主路径）**：列设备、invoke、部署 Lua、收事件  
-2. **板端可选 loop**：`on_start` / `on_loop`，适合游戏、仪表、本地交互  
-3. **多租户**：kuroneko 用户只管自己的设备；每台板独立 `device_token`
+1. **Flash** the firmware for your board and register its device ID.
+2. **Mint** an `oct_…` token in the console and give your agent [skill.md](https://onlyclaws.world/api/agent/skill.md).
+3. The agent **deploys** scripts, the board runs them, and `emit()` events flow back.
 
-### 支持硬件
-
-同一套 `rlcd/` 固件。ESP32-S3 核心始终在：Wi-Fi、设备身份、云端、Lua。屏和音频是编译期插件，用 PlatformIO 环境打开。
-
-| 环境 | 板子 | 插件 |
-|------|------|------|
-| `esp32-s3-bare` | ESP32-S3 模组（16MB + PSRAM，与现有板同一内存配置） | 无屏、无音频。状态走串口，`gfx.*` / `audio.*` 为空操作 |
-| `esp32-s3-rlcd-42` | Waveshare ESP32-S3-RLCD-4.2 | 图像（ST7305 400×300）+ ES8311 + BLE |
-| `esp32-s3-epaper-397` | Waveshare ESP32-S3-ePaper-3.97 | 图像（800×480 局刷）+ ES8311。默认关 BLE，给 TLS 留堆 |
-
-固件版本前缀：`agent-runtime-0.13.x`（插件拆分从 `0.13.6` 起）。
-
-**墨水屏注意：**
-
-- 全刷会黑白闪一下，属面板特性；运行时以局刷为主，避免游戏中频繁全刷  
-- 刷新慢，demo 通过 `gfx.slow()` 自动拉长步进（约 900 ms）；RLCD 仍约 140 ms  
-- 两块屏的 Lua / 本机控制页 / 云端接口一致，业务脚本可共用
-
-### 板端能力（Lua）
+## An app is a Lua script
 
 ```lua
 function on_start()
   gfx.clear(0)
-  gfx.fill_circle(gfx.width() // 2, 120, 40, 1)
+  gfx.text(12, 30, "hello from my agent", 1)
+  gfx.fill_circle(gfx.W // 2, 150, 40, 1)
   gfx.flush()
   audio.beep(1000, 80)
 end
 
 function on_loop()
-  local d = ble.dir()   -- 与本机 HTTP 控制页共用方向状态
-  if gfx.slow and gfx.slow() then
-    return 900          -- ePaper
+  local s = sensors()
+  if input.key() then
+    emit("pressed", { temp = s.temp_c })
   end
-  return 140            -- RLCD
+  return 200  -- ms until the next tick
 end
 ```
 
-常用表面：
-
-| 模块 | 能力 |
-|------|------|
-| `gfx.*` | 点线圆、文字、`gfx.qr`、`gfx.blit`、`gfx.image`、`gfx.flush`、`gfx.slow()` |
-| `audio.*` | beep / PCM |
-| `input.*` | KEY / BOOT |
-| `http.*` | 任意 HTTP(S)，**不**带设备 Bearer |
-| 本机 Pad | `http://<板IP>/` 方向键页（同 Wi‑Fi 手机浏览器） |
-| BLE（可选） | RLCD 上 `OC-Snake` 外设，与 Pad 共享方向 |
-
-完整约定见线上 `/api/agent/skill.md`。
-
-### 目录
-
-| 路径 | 作用 |
-|------|------|
-| [`rlcd/`](rlcd/) | 统一 Agent 运行时（Lua + Pad + PanelDisplay） |
-| [`rlcd/DEV.md`](rlcd/DEV.md) | 本机构建 / 烧录细节 |
-| [`demos/`](demos/) | 应用 demo（热部署 Lua） |
-| [`demos/snake/`](demos/snake/) | 贪食蛇（KEY / 本机 Pad+QR / 远端 HTTP） |
-| [`server/`](server/) | 可选本地 FastAPI 辅助（如 `/snake`） |
-| [`src/`](src/) | 旧版仅 ePaper 固件（已由统一运行时替代） |
-
-### 快速开始
+The agent deploys it with one request and reads what the board reported:
 
 ```bash
-# 依赖（macOS 示例）
-python3 -m pip install -U platformio --user
-export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+curl -X POST https://onlyclaws.world/api/scripts \
+  -H "Authorization: Bearer oct_…" -H "Content-Type: application/json" \
+  -d '{"name":"hello","language":"lua","mode":"loop","device_id":"YOUR_DEVICE_ID","source":"…"}'
 
+curl https://onlyclaws.world/api/events -H "Authorization: Bearer oct_…"
+```
+
+| Module | What it gives a script |
+|--------|------------------------|
+| `gfx` | 1-bit drawing, text, `gfx.qr`, full-frame `gfx.blit`, named bitmaps via `gfx.image`, `gfx.slow()` for e-paper pacing |
+| `audio` | `beep` and PCM playback through the ES8311 |
+| `sensors()` | Temperature, humidity, battery |
+| `input` | On-board KEY and BOOT buttons |
+| `http` | `http.get` / `http.post` to any HTTP(S) endpoint (no device credentials attached) |
+| `emit(name, table)` | Report an event to the control plane for the agent |
+| `ble`, `net` | BLE controller direction, Wi-Fi status |
+
+Full contract: [skill.md](https://onlyclaws.world/api/agent/skill.md). More apps: [`demos/`](demos/).
+
+## Get started
+
+Pick the path that fits.
+
+### 1. Use the hosted console
+
+[Apply for access](https://onlyclaws.world/apply/). Applications are reviewed by hand. Once approved you get an email with a link to set your password, then you can register boards and mint agent tokens at [onlyclaws.world/console](https://onlyclaws.world/console/).
+
+### 2. Flash the firmware
+
+Requires Python 3 and PlatformIO 6.
+
+```bash
+python3 -m pip install -U platformio --user
 cd rlcd
 cp include/device_secrets.h.example include/device_secrets.h
-# 填写 EPD_DEVICE_ID / EPD_DEVICE_TOKEN（或烧录后走 NVS）
+# Set EPD_DEVICE_ID and EPD_DEVICE_TOKEN, or leave the token empty and provision it over NVS.
 
-# RLCD
 pio run -e esp32-s3-rlcd-42 -t upload --upload-port /dev/cu.usbmodem*
-
-# ePaper 3.97"
-pio run -e esp32-s3-epaper-397 -t upload --upload-port /dev/cu.usbmodem*
-
-# 保留 NVS 里的 token / Wi‑Fi（推荐）
-bash scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem101
 pio device monitor -b 115200
 ```
 
-国内镜像见 [`scripts/install_from_cn_mirrors.sh`](scripts/install_from_cn_mirrors.sh)。
+To reflash without wiping the Wi-Fi credentials and token already on the board, use `bash scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem101`. Build notes and a China mirror helper are in [`rlcd/DEV.md`](rlcd/DEV.md).
 
-### Demo：贪食蛇
+### 3. Self-host the control plane
 
-推荐 [`demos/snake/lua/lan_pad.lua`](demos/snake/lua/lan_pad.lua)：板子自己开 HTTP 方向键页，延迟低、任意浏览器可用。
-
-```bash
-# 使用 Agent Token（oct_…）热部署
-curl -sS -X POST https://onlyclaws.world/epaper/api/scripts \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "$(python3 - <<'PY'
-import json
-src = open("demos/snake/lua/lan_pad.lua").read()
-print(json.dumps({
-  "name": "snake-lan",
-  "language": "lua",
-  "mode": "loop",
-  "every_ms": 140,
-  "device_id": "你的设备ID",
-  "source": src,
-}))
-PY
-)"
-```
-
-手机连同一 Wi‑Fi，打开屏上 / Game Over 二维码里的 `http://板IP/`。  
-更多变体见 [`demos/snake/README.md`](demos/snake/README.md)。
-
-### 相关链接
-
-- 控制台：https://onlyclaws.world/epaper  
-- Agent OpenAPI：https://onlyclaws.world/epaper/api/agent/docs  
-- 本仓库固件开发说明：[`rlcd/DEV.md`](rlcd/DEV.md)
-
----
-
-<a id="english"></a>
-## English
-
-**OnlyClaws ESP** is a remote-agent + on-device **Lua** framework (no character UI, no on-device LLM).
-
-- **Cloud:** [onlyclaws.world/epaper](https://onlyclaws.world/epaper) · [Agent docs](https://onlyclaws.world/epaper/api/agent/docs)
-- **Runtime:** `rlcd/` (`agent-runtime-0.13.x`, plugins since `0.13.6`)
-  - `esp32-s3-bare` — ESP32-S3 core, no panel, no codec
-  - `esp32-s3-rlcd-42` — ST7305 400×300 + ES8311 + BLE
-  - `esp32-s3-epaper-397` — GxEPD2 800×480 + ES8311 (BLE off by default)
-- **Demos:** [`demos/snake/`](demos/snake/) (deploy via `POST /api/scripts`)
-- **Build:** see Chinese「快速开始」or [`rlcd/DEV.md`](rlcd/DEV.md)
+The control plane in [`server/`](server/) is a single FastAPI app with SQLite.
 
 ```bash
-cd rlcd
-cp include/device_secrets.h.example include/device_secrets.h
-pio run -e esp32-s3-rlcd-42 -t upload
-# or: pio run -e esp32-s3-epaper-397 -t upload
+cd server
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+cp config.example.env .env   # set EPD_SESSION_SECRET, EPD_PUBLIC_BASE, EPD_AUTH_UPSTREAM ...
+set -a && . ./.env && set +a
+uvicorn app:app --host 127.0.0.1 --port 8787
 ```
+
+Sign-in is delegated to an auth service set by `EPD_AUTH_UPSTREAM`: it must accept `POST /api/auth/login` and `POST /api/auth/register` with `{"email","password"}` and answer `{"success": true, ...}`. A systemd unit and nginx snippet are in [`server/deploy/`](server/deploy/). Point the firmware at your host in [`rlcd/include/cloud_config.h`](rlcd/include/cloud_config.h).
+
+## Hardware
+
+One source tree, three PlatformIO environments. Rewire any of them by editing [`rlcd/include/board_pins.h`](rlcd/include/board_pins.h); the Lua and cloud APIs stay the same.
+
+| Environment | Board | What's compiled in |
+|-------------|-------|--------------------|
+| `esp32-s3-bare` | Any ESP32-S3 module with 16 MB flash and octal PSRAM | Core only: cloud channel, Lua, HTTP, events. Status goes to serial |
+| `esp32-s3-rlcd-42` | Waveshare ESP32-S3-RLCD-4.2 | ST7305 400×300 reflective LCD (~140 ms/frame), ES8311 audio, sensors, BLE `OC-Snake` |
+| `esp32-s3-epaper-397` | Waveshare ESP32-S3-ePaper-3.97 | 800×480 e-paper with partial refresh, ES8311 audio. BLE off to leave heap for TLS |
+
+On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 900 ms. The same script runs on both panels.
+
+## Repository
+
+| Path | What's there |
+|------|--------------|
+| [`rlcd/`](rlcd/) | Firmware. Build and flash from here |
+| [`server/`](server/) | Control plane: devices, scripts, events, bitmaps, console |
+| [`demos/`](demos/) | Lua apps to deploy: Snake (key, phone D-pad or HTTP controller) and a live RL-training dashboard |
+| [`scripts/`](scripts/) | Host setup helpers |
+
+<details>
+<summary>Legacy tree</summary>
+
+`src/`, `include/` and the root `platformio.ini` are the earlier e-paper-only firmware. They are kept for reference; new work goes in `rlcd/`.
+
+</details>
+
+## Status
+
+Firmware line `agent-runtime-0.13.x`, with panel and audio plugins since `0.13.6`. The hosted console is invite-only while we keep costs and abuse in check. Issues and pull requests are welcome, especially new panel plugins and demo apps.
+
+## License
+
+Source in this repository is [MIT](LICENSE).
+
+The `esp32-s3-epaper-397` environment links [GxEPD2](https://github.com/ZinggJM/GxEPD2) (GPL-3.0-or-later), so firmware built with that environment is distributed under GPL-3.0-or-later. The bare and RLCD environments do not link it. See [NOTICE](NOTICE).

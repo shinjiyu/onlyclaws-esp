@@ -1,8 +1,8 @@
 -- Snake: direction from OnlyClaws public control UI (not LAN).
--- Phone: https://onlyclaws.world/epaper/snake/
+-- Phone: https://onlyclaws.world/snake/
 -- Poll infrequently: every-frame HTTPS stalls the game and fights cloud pending.
 
-local CTRL = "https://onlyclaws.world/epaper/snake"
+local CTRL = "https://onlyclaws.world/snake"
 local CELL = 10
 local COLS = math.floor(gfx.W / CELL)
 local ROWS = math.floor(gfx.H / CELL)

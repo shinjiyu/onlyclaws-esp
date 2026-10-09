@@ -15,7 +15,7 @@ DEVICE_ID=a4cb8fdf8440
 # ePaper
 # DEVICE_ID=441bf6923320
 
-curl -sS -X POST https://onlyclaws.world/epaper/api/scripts \
+curl -sS -X POST https://onlyclaws.world/api/scripts \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(python3 - <<PY

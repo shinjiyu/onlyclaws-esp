@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Console · OnlyClaws</title>
+  <meta name="robots" content="noindex" />
+  <meta name="theme-color" content="#f3f0e8" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23e5482d' d='M2 3h2v6H2zM7 1h2v8H7zM12 3h2v6h-2zM2 9h12v2H2zM4 11h8v4H4z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="../assets/oc.css" />
+  <style>
+    .login-wrap { min-height: calc(100vh - 60px); display: grid; place-items: center; padding: 40px 20px; }
+    .login { width: 100%; max-width: 400px; }
+    .login h1 { font-size: 1.5rem; margin: 0 0 6px; letter-spacing: -.01em; }
+    .login .sub { color: var(--muted); margin: 0 0 22px; font-size: .9rem; }
+    .login .btn { width: 100%; }
+    .login .alt { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); font-size: .88rem; color: var(--muted); }
+
+    .devpick { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .devpick select { width: auto; max-width: 240px; padding: 5px 30px 5px 10px; font-size: .86rem; }
+    .who { font-size: .82rem; color: var(--muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 760px) { .who { display: none; } }
+
+    .shell { display: grid; grid-template-columns: 200px 1fr; gap: 28px; padding-top: 28px; padding-bottom: 60px; }
+    .side { position: sticky; top: 88px; align-self: start; display: flex; flex-direction: column; gap: 2px; }
+    .side button { font: inherit; text-align: left; font-size: .9rem; color: var(--ink-2); background: none; border: 0; border-radius: 6px; padding: 8px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .side button:hover { background: var(--paper-2); }
+    .side button.on { background: var(--ink); color: var(--paper); }
+    .side .sep { height: 1px; background: var(--line); margin: 10px 4px; }
+    .badge { margin-left: auto; font-size: .72rem; font-weight: 700; background: var(--accent); color: #fff; border-radius: 999px; padding: 0 7px; line-height: 1.6; }
+    .side .docs { font-size: .8rem; color: var(--muted); padding: 4px 12px; text-decoration: none; }
+    .side .docs:hover { color: var(--accent); }
+    @media (max-width: 860px) {
+      .shell { grid-template-columns: 1fr; gap: 16px; padding-top: 16px; }
+      .side { position: static; flex-direction: row; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+      .side button { white-space: nowrap; }
+      .side .sep, .side .docs { display: none; }
+    }
+
+    .panel-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+    .panel-head h2 { margin: 0; font-size: 1.35rem; letter-spacing: -.01em; }
+    .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: .88rem; }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; }
+    @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+    .stat { background: var(--card); padding: 14px 16px; }
+    .stat .k { font-size: .74rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .stat .v { font-size: 1.05rem; font-weight: 700; margin-top: 2px; font-family: var(--mono); word-break: break-all; }
+    .stat .v.sm { font-size: .86rem; }
+
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
+    .two .card + .card { margin-top: 0; }
+
+    .onboard { display: grid; gap: 12px; margin-top: 8px; }
+    .onboard .item { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+    .onboard .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-family: var(--mono); font-size: .82rem; border: 1px solid var(--line-2); }
+    .onboard .item.done .n { background: var(--green); color: #fff; border-color: var(--green); }
+    .onboard b { display: block; font-size: .94rem; }
+    .onboard span { font-size: .84rem; color: var(--muted); }
+
+    .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; padding: 2px; background: var(--card); }
+    .seg button { font: inherit; font-size: .84rem; border: 0; background: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; color: var(--ink-2); }
+    .seg button.on { background: var(--ink); color: var(--paper); }
+    .seg .c { font-family: var(--mono); font-size: .74rem; opacity: .7; margin-left: 4px; }
+
+    pre.json { margin: 6px 0 0; font-size: .76rem; background: var(--paper-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow: auto; max-height: 160px; white-space: pre-wrap; word-break: break-all; }
+    .app-card { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; padding: 16px; }
+    .app-card + .app-card { margin-top: 12px; }
+    .app-card .use { white-space: pre-wrap; font-size: .9rem; margin: 10px 0; color: var(--ink-2); }
+    .app-card .meta { font-size: .78rem; color: var(--muted); font-family: var(--mono); word-break: break-all; }
+    .app-card .act { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .app-card .act input { flex: 1; min-width: 160px; padding: 6px 10px; font-size: .86rem; }
+    .script-status { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: .86rem; }
+  </style>
+</head>
+<body data-title-key="console.doc_title">
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="../">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="#e5482d" d="M2 3h2v6H2zM7 1h2v8H7zM12 3h2v6h-2zM2 9h12v2H2zM4 11h8v4H4z"/></svg>
+        OnlyClaws <small data-i18n="console.badge">Console</small>
+      </a>
+      <div class="devpick hidden" id="devPick">
+        <span class="dot" id="navDot"></span>
+        <select id="deviceSelect" aria-label="device"></select>
+      </div>
+      <span class="spacer"></span>
+      <button class="lang-btn" data-lang-toggle type="button">EN</button>
+      <span class="who hidden" id="whoami"></span>
+      <button class="btn sm ghost hidden" type="button" id="logoutBtn" data-i18n="console.logout">退出</button>
+    </div>
+  </header>
+
+  <!-- ===== login ===== -->
+  <div id="loginView" class="login-wrap hidden">
+    <form id="loginForm" class="card login">
+      <h1 data-i18n="login.title">登录控制台</h1>
+      <p class="sub" data-i18n="login.sub">用申请时的邮箱登录</p>
+      <div class="field">
+        <label for="email" data-i18n="login.email">邮箱</label>
+        <input id="email" type="email" autocomplete="username" required placeholder="you@example.com" />
+      </div>
+      <div class="field">
+        <label for="password" data-i18n="login.password">密码</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+      </div>
+      <button class="btn" type="submit" id="loginBtn" data-i18n="login.submit">登录</button>
+      <div id="loginErr" class="note err hidden"></div>
+      <p class="sub" style="margin:14px 0 0"><a href="#" id="forgotLink" data-i18n="login.forgot">忘记密码 / 还没设置密码？</a></p>
+      <div class="alt" data-i18n-html="login.alt"></div>
+    </form>
+
+    <form id="forgotForm" class="card login hidden">
+      <h1 data-i18n="forgot.title">设置或重置密码</h1>
+      <p class="sub" data-i18n="forgot.sub">输入申请时用的邮箱，我们会发一个设置密码的链接。</p>
+      <div class="field">
+        <label for="forgotEmail" data-i18n="login.email">邮箱</label>
+        <input id="forgotEmail" type="email" autocomplete="username" required placeholder="you@example.com" />
+      </div>
+      <button class="btn" type="submit" id="forgotBtn" data-i18n="forgot.submit">发送链接</button>
+      <div id="forgotMsg" class="note hidden"></div>
+      <p class="sub" style="margin:14px 0 0"><a href="#" data-back-login data-i18n="forgot.back">返回登录</a></p>
+    </form>
+
+    <form id="setpwForm" class="card login hidden">
+      <h1 id="setpwTitle" data-i18n="setpw.title">设置登录密码</h1>
+      <p class="sub" id="setpwSub"></p>
+      <input type="email" id="setpwEmail" autocomplete="username" class="hidden" readonly />
+      <div class="field">
+        <label for="setpwPw" data-i18n="setpw.pw">新密码</label>
+        <input id="setpwPw" type="password" autocomplete="new-password" minlength="8" required />
+      </div>
+      <div class="field">
+        <label for="setpwPw2" data-i18n="setpw.pw2">再输入一次</label>
+        <input id="setpwPw2" type="password" autocomplete="new-password" minlength="8" required />
+      </div>
+      <button class="btn" type="submit" id="setpwBtn" data-i18n="setpw.submit">保存并登录</button>
+      <div id="setpwErr" class="note err hidden"></div>
+      <p class="sub" style="margin:14px 0 0"><a href="#" data-back-login data-i18n="forgot.back">返回登录</a></p>
+    </form>
+  </div>
+
+  <!-- ===== app ===== -->
+  <div id="appView" class="hidden">
+    <div class="wrap shell">
+      <aside class="side" id="side">
+        <button type="button" data-tab="overview" data-i18n="tab.overview">概览</button>
+        <button type="button" data-tab="scripts" data-i18n="tab.scripts">脚本</button>
+        <button type="button" data-tab="push" data-i18n="tab.push">推送</button>
+        <button type="button" data-tab="events" data-i18n="tab.events">事件</button>
+        <div class="sep"></div>
+        <button type="button" data-tab="devices" data-i18n="tab.devices">设备</button>
+        <button type="button" data-tab="tokens" data-i18n="tab.tokens">Agent 令牌</button>
+        <button type="button" data-tab="review" class="hidden" id="reviewTabBtn"><span data-i18n="tab.review">申请审核</span><span class="badge hidden" id="reviewBadge"></span></button>
+        <div class="sep"></div>
+        <a class="docs" href="../api/agent/skill.md" target="_blank" rel="noopener">skill.md ↗</a>
+        <a class="docs" href="../api/agent/docs" target="_blank" rel="noopener" data-i18n="side.docs">Agent 文档 ↗</a>
+      </aside>
+
+      <main>
+        <!-- overview -->
+        <section data-panel="overview" class="hidden">
+          <div class="panel-head">
+            <div><h2 data-i18n="ov.title">概览</h2><p id="ovSub"></p></div>
+            <button class="btn sm ghost" type="button" data-refresh data-i18n="common.refresh">刷新</button>
+          </div>
+
+          <div id="ovEmpty" class="card hidden">
+            <h3 data-i18n="ob.title">三步接入你的第一块板子</h3>
+            <p class="hint" data-i18n="ob.hint"></p>
+            <div class="onboard">
+              <div class="item" id="ob1"><span class="n">1</span><div><b data-i18n="ob.1.t"></b><span data-i18n-html="ob.1.b"></span></div><button class="btn sm" type="button" data-goto="devices" data-i18n="ob.1.btn">登记设备</button></div>
+              <div class="item"><span class="n">2</span><div><b data-i18n="ob.2.t"></b><span data-i18n-html="ob.2.b"></span></div><a class="btn sm ghost" href="https://github.com/shinjiyu/onlyclaws-esp#quick-start" target="_blank" rel="noopener" data-i18n="ob.2.btn">烧录说明</a></div>
+              <div class="item" id="ob3"><span class="n">3</span><div><b data-i18n="ob.3.t"></b><span data-i18n-html="ob.3.b"></span></div><button class="btn sm ghost" type="button" data-goto="tokens" data-i18n="ob.3.btn">签发令牌</button></div>
+            </div>
+          </div>
+
+          <div id="ovDevice" class="hidden">
+            <div class="stats" id="ovStats"></div>
+            <div class="two">
+              <div class="card">
+                <div class="row" style="justify-content:space-between;margin-bottom:10px">
+                  <h3 data-i18n="ov.script">正在运行的脚本</h3>
+                  <button class="btn sm danger" type="button" id="ovStop" data-i18n="scripts.stop">停止脚本</button>
+                </div>
+                <div id="ovScript" class="muted small"></div>
+              </div>
+              <div class="card">
+                <div class="row" style="justify-content:space-between;margin-bottom:10px">
+                  <h3 data-i18n="ov.events">最近事件</h3>
+                  <button class="btn sm ghost" type="button" data-goto="events" data-i18n="common.all">全部</button>
+                </div>
+                <div id="ovEvents"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:16px">
+              <div class="row" style="justify-content:space-between;margin-bottom:10px">
+                <h3 data-i18n="ov.messages">最近投递</h3>
+                <button class="btn sm ghost" type="button" data-goto="push" data-i18n="ov.pushnew">新推送</button>
+              </div>
+              <div id="ovMessages"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- scripts -->
+        <section data-panel="scripts" class="hidden">
+          <div class="panel-head">
+            <div><h2 data-i18n="scripts.title">Lua 脚本</h2><p data-i18n="scripts.sub"></p></div>
+          </div>
+          <div class="card">
+            <div class="script-status" id="scriptStatus"></div>
+          </div>
+          <form class="card" id="scriptForm">
+            <h3 data-i18n="scripts.editor">编辑器</h3>
+            <p class="hint" data-i18n-html="scripts.editor.hint"></p>
+            <div class="grid-2">
+              <div class="field">
+                <label for="sName" data-i18n="scripts.name">名称</label>
+                <input id="sName" type="text" maxlength="120" value="hello" required />
+              </div>
+              <div class="grid-2" style="gap:10px">
+                <div class="field">
+                  <label for="sMode" data-i18n="scripts.mode">模式</label>
+                  <select id="sMode"><option value="loop">loop</option><option value="once">once</option></select>
+                </div>
+                <div class="field">
+                  <label for="sEvery">every_ms</label>
+                  <input id="sEvery" type="number" min="50" max="3600000" value="1000" />
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label for="sSource">source.lua <span class="muted" id="sBytes" style="font-weight:400"></span></label>
+              <textarea id="sSource" class="code" spellcheck="false"></textarea>
+            </div>
+            <div class="row">
+              <button class="btn accent" type="submit" id="sDeployBtn" data-i18n="scripts.deploy">保存并部署到当前设备</button>
+              <button class="btn ghost" type="button" id="sSaveBtn" data-i18n="scripts.save">仅保存</button>
+            </div>
+            <div id="sMsg" class="note hidden"></div>
+          </form>
+          <div class="card">
+            <div class="row" style="justify-content:space-between;margin-bottom:8px">
+              <h3 data-i18n="scripts.saved">已保存的脚本</h3>
+              <button class="btn sm ghost" type="button" data-refresh data-i18n="common.refresh">刷新</button>
+            </div>
+            <div id="scriptList"></div>
+          </div>
+        </section>
+
+        <!-- push -->
+        <section data-panel="push" class="hidden">
+          <div class="panel-head">
+            <div><h2 data-i18n="push.title">推送到屏幕</h2><p data-i18n="push.sub"></p></div>
+            <div class="seg" id="pushSeg">
+              <button type="button" class="on" data-mode="text" data-i18n="push.text">文字</button>
+              <button type="button" data-mode="image" data-i18n="push.image">图片</button>
+            </div>
+          </div>
+          <form class="card" id="textForm">
+            <div class="field">
+              <label for="pTitle" data-i18n="push.ttl">标题（可选）</label>
+              <input id="pTitle" type="text" maxlength="80" />
+            </div>
+            <div class="field">
+              <label for="pBody" data-i18n="push.body">正文</label>
+              <textarea id="pBody" maxlength="4000" data-i18n-ph="push.body.ph"></textarea>
+            </div>
+            <div class="row" style="margin-bottom:14px">
+              <label class="check"><input type="checkbox" id="pFull" /> <span data-i18n="push.full">强制全刷</span></label>
+              <label class="check"><input type="checkbox" id="pBeep" checked /> <span data-i18n="push.beep">到达时提示音</span></label>
+            </div>
+            <button class="btn accent" type="submit" id="pBtn" data-i18n="push.send">投递</button>
+            <div id="pMsg" class="note hidden"></div>
+          </form>
+          <form class="card hidden" id="imageForm">
+            <div class="field">
+              <label for="iFile" data-i18n="push.file">图片（JPG / PNG / WebP，&lt; 5MB）</label>
+              <input id="iFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif" />
+              <div class="help" id="iHint" data-i18n="push.file.help"></div>
+            </div>
+            <div class="grid-2">
+              <div class="field">
+                <label for="iTitle" data-i18n="push.ttl">标题（可选）</label>
+                <input id="iTitle" type="text" maxlength="80" />
+              </div>
+              <div class="field">
+                <label for="iFit" data-i18n="push.fit">适配</label>
+                <select id="iFit">
+                  <option value="contain" data-i18n="push.contain">完整放入（留白）</option>
+                  <option value="cover" data-i18n="push.cover">铺满裁剪</option>
+                </select>
+              </div>
+            </div>
+            <div class="row" style="margin-bottom:14px">
+              <label class="check"><input type="checkbox" id="iFull" /> <span data-i18n="push.full">强制全刷</span></label>
+            </div>
+            <button class="btn accent" type="submit" id="iBtn" data-i18n="push.sendimg">投递图片</button>
+            <div id="iMsg" class="note hidden"></div>
+          </form>
+          <div class="card">
+            <div class="row" style="justify-content:space-between;margin-bottom:8px">
+              <h3 data-i18n="ov.messages">最近投递</h3>
+              <button class="btn sm ghost" type="button" data-refresh data-i18n="common.refresh">刷新</button>
+            </div>
+            <div id="msgList"></div>
+          </div>
+        </section>
+
+        <!-- events -->
+        <section data-panel="events" class="hidden">
+          <div class="panel-head">
+            <div><h2 data-i18n="events.title">设备事件</h2><p data-i18n-html="events.sub"></p></div>
+            <button class="btn sm ghost" type="button" data-refresh data-i18n="common.refresh">刷新</button>
+          </div>
+          <div class="card"><div id="eventList"></div></div>
+        </section>
+
+        <!-- devices -->
+        <section data-panel="devices" class="hidden">
+          <div class="panel-head">
+            <div><h2 data-i18n="dev.title">设备</h2><p data-i18n="dev.sub"></p></div>
+          </div>
+          <form class="card" id="regForm">
+            <h3 data-i18n="dev.reg">登记设备</h3>
+            <p class="hint" data-i18n-html="dev.reg.hint"></p>
+            <div class="grid-2">
+              <div class="field">
+                <label for="rId" data-i18n="dev.id">设备 ID</label>
+                <input id="rId" type="text" required minlength="4" maxlength="32" placeholder="a4cb8fdf8440" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="rName" data-i18n="dev.name">名称（可选）</label>
+                <input id="rName" type="text" maxlength="60" data-i18n-ph="dev.name.ph" />
+              </div>
+            </div>
+            <button class="btn accent" type="submit" id="rBtn" data-i18n="dev.reg.btn">登记并生成设备令牌</button>
+            <div id="rMsg" class="note hidden"></div>
+          </form>
+          <div class="card">
+            <h3 data-i18n="dev.mine">我的设备</h3>
+            <div id="devList" style="margin-top:8px"></div>
+            <div id="rotMsg" class="note hidden"></div>
+          </div>
+        </section>
+
+        <!-- tokens -->
+        <section data-panel="tokens" class="hidden">
+          <div class="panel-head">
+            <div><h2 data-i18n="tok.title">Agent 令牌</h2><p data-i18n-html="tok.sub"></p></div>
+          </div>
+          <form class="card" id="tokForm">
+            <h3 data-i18n="tok.new">签发新令牌</h3>
+            <p class="hint" data-i18n="tok.new.hint"></p>
+            <div class="row" style="align-items:flex-end">
+              <div class="field" style="flex:1;min-width:180px;margin:0">
+                <label for="tName" data-i18n="tok.name">名称</label>
+                <input id="tName" type="text" maxlength="60" value="my-agent" />
+              </div>
+              <button class="btn accent" type="submit" id="tBtn" data-i18n="tok.create">生成</button>
+            </div>
+            <div id="tMsg" class="note hidden"></div>
+          </form>
+          <div class="card">
+            <div class="row" style="justify-content:space-between;margin-bottom:8px">
+              <h3 data-i18n="tok.list">已签发</h3>
+              <button class="btn sm ghost" type="button" data-refresh data-i18n="common.refresh">刷新</button>
+            </div>
+            <div id="tokList"></div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="tok.howto">交给 Agent</h3>
+            <p class="hint" data-i18n="tok.howto.hint"></p>
+            <pre class="codeblock" id="tokPrompt"></pre>
+            <div class="row" style="margin-top:10px"><button class="btn sm ghost" type="button" id="copyPrompt" data-i18n="common.copy">复制</button></div>
+          </div>
+        </section>
+
+        <!-- review -->
+        <section data-panel="review" class="hidden">
+          <div class="panel-head">
+            <div><h2 data-i18n="rv.title">申请审核</h2><p data-i18n="rv.sub"></p></div>
+            <div class="seg" id="rvSeg">
+              <button type="button" class="on" data-status="pending"><span data-i18n="rv.pending">待审</span><span class="c" data-c="pending"></span></button>
+              <button type="button" data-status="approved"><span data-i18n="rv.approved">已通过</span><span class="c" data-c="approved"></span></button>
+              <button type="button" data-status="rejected"><span data-i18n="rv.rejected">已拒绝</span><span class="c" data-c="rejected"></span></button>
+            </div>
+          </div>
+          <div id="rvMail" class="note info hidden" style="margin:0 0 14px"></div>
+          <div id="rvList"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/oc.js"></script>
+  <script>
+    OC.addStrings({
+      zh: {
+        "console.doc_title": "控制台 · OnlyClaws",
+        "console.badge": "控制台", "console.logout": "退出",
+        "common.refresh": "刷新", "common.all": "全部", "common.none": "—",
+        "login.title": "登录控制台", "login.sub": "用申请时的邮箱登录",
+        "login.email": "邮箱", "login.password": "密码", "login.submit": "登录", "login.busy": "登录中…",
+        "login.forgot": "忘记密码 / 还没设置密码？",
+        "login.bad": "邮箱或密码不对。还没设置过密码？点下面的“忘记密码”获取链接。",
+        "login.slow": "尝试次数太多，请过一会儿再试。",
+        "login.unavailable": "登录服务暂时不可用，请稍后再试。",
+        "forgot.title": "设置或重置密码", "forgot.sub": "输入申请时用的邮箱，我们会发一个设置密码的链接。审核通过的邮件里也有这个链接。",
+        "forgot.submit": "发送链接", "forgot.busy": "发送中…", "forgot.back": "返回登录",
+        "forgot.sent": "如果这个邮箱已开通控制台，设置密码的链接已经发出，几分钟内会到（也看看垃圾箱）。",
+        "setpw.title": "设置登录密码",
+        "setpw.sub": "账号：{email}", "setpw.pw": "新密码（至少 8 位，含字母和数字）", "setpw.pw2": "再输入一次",
+        "setpw.submit": "保存并登录", "setpw.busy": "保存中…",
+        "setpw.mismatch": "两次输入的密码不一样。", "setpw.short": "密码至少 8 位。",
+        "setpw.checking": "正在验证链接…",
+        "setpw.expired": "链接已过期，请重新获取。", "setpw.used": "这个链接已经用过了。还要改密码的话，请重新获取链接。",
+        "setpw.invalid": "链接无效，请重新获取。",
+        "setpw.exists": "这个邮箱已经设置过密码，请直接登录。暂时无法在线重置，忘记密码请联系管理员。",
+        "setpw.letterdigit": "密码需要同时包含字母和数字。",
+        "setpw.rejected": "这个密码不能用，换一个试试（至少 8 位，含字母和数字）。", "setpw.failed": "设置失败，请稍后再试。",
+        "login.alt": "还没有权限？<a href=\"../apply/\">提交申请</a>，通过后会邮件通知你。",
+        "login.denied": "这个账号还没有开通控制台。<a href=\"../apply/\">去申请</a>，如果已经申请过，请等待审核邮件。",
+        "login.expired": "登录已过期，请重新登录",
+        "tab.overview": "概览", "tab.scripts": "脚本", "tab.push": "推送", "tab.events": "事件",
+        "tab.devices": "设备", "tab.tokens": "Agent 令牌", "tab.review": "申请审核", "side.docs": "Agent 文档 ↗",
+        "dev.none": "还没有设备",
+        "ov.title": "概览", "ov.script": "正在运行的脚本", "ov.events": "最近事件", "ov.messages": "最近投递", "ov.pushnew": "新推送",
+        "ov.sub": "{name} · 最后在线 {seen}",
+        "st.status": "状态", "st.online": "在线", "st.offline": "离线", "st.panel": "屏幕", "st.net": "网络", "st.fw": "固件", "st.sensors": "传感器",
+        "ob.title": "三步接入你的第一块板子",
+        "ob.hint": "完成后这里会显示设备状态、正在运行的脚本和最近事件。",
+        "ob.1.t": "登记设备", "ob.1.b": "填设备 ID（MAC 后缀，串口启动日志里能看到），拿到一次性 <code>device_token</code>。", "ob.1.btn": "登记设备",
+        "ob.2.t": "烧录固件", "ob.2.b": "把 ID 和令牌写进 <code>device_secrets.h</code> 或 NVS，烧录后板子会自动上线。", "ob.2.btn": "烧录说明",
+        "ob.3.t": "交给 Agent", "ob.3.b": "签发一个 <code>oct_</code> 令牌，把它和 skill.md 一起交给你的 Agent。", "ob.3.btn": "签发令牌",
+        "scripts.title": "Lua 脚本", "scripts.sub": "保存的脚本可以随时部署到当前选中的设备。",
+        "scripts.editor": "编辑器",
+        "scripts.editor.hint": "<code>on_start()</code> 运行一次；<code>on_loop()</code> 的返回值是下次调用前等待的毫秒数。API 见 <a href=\"../api/agent/skill.md\" target=\"_blank\" rel=\"noopener\">skill.md</a>。",
+        "scripts.name": "名称", "scripts.mode": "模式",
+        "scripts.deploy": "保存并部署到当前设备", "scripts.save": "仅保存", "scripts.saved": "已保存的脚本",
+        "scripts.stop": "停止脚本", "scripts.edit": "载入", "scripts.run": "部署",
+        "scripts.empty": "还没有保存过脚本。",
+        "scripts.ok.deploy": "已部署 {name}，设备拉取后开始运行（通常几秒内）。",
+        "scripts.ok.save": "已保存 {name}。",
+        "scripts.ok.stop": "已发送停止指令。",
+        "scripts.state": "脚本状态", "scripts.runtime": "云端记录", "scripts.err": "错误",
+        "scripts.nodev": "先登记一台设备才能部署。",
+        "scripts.bytes": "{n} / 24000 字节",
+        "push.title": "推送到屏幕", "push.sub": "服务端按设备分辨率渲染成 1-bit 位图后投递。",
+        "push.text": "文字", "push.image": "图片", "push.ttl": "标题（可选）", "push.body": "正文",
+        "push.body.ph": "支持中文。默认局刷，闪烁更少。",
+        "push.full": "强制全刷（残影明显时再勾）", "push.beep": "到达时提示音", "push.send": "投递",
+        "push.file": "图片（JPG / PNG / WebP，< 5MB）", "push.file.help": "会自动转成黑白 1-bit。iPhone 实况图 / HEIC 请先导出为 JPG。",
+        "push.file.help.dev": "会自动转成 {w}×{h} 黑白 1-bit。iPhone 实况图 / HEIC 请先导出为 JPG。",
+        "push.fit": "适配", "push.contain": "完整放入（留白）", "push.cover": "铺满裁剪", "push.sendimg": "投递图片",
+        "push.ok": "已入队 {id}…，设备拉取后显示。", "push.uploading": "正在上传 {name}（{kb} KB）…",
+        "push.err.empty": "标题和正文至少填一个", "push.err.nofile": "请先选择图片", "push.err.heic": "不支持 HEIC / 实况图，请先导出为 JPG",
+        "push.err.big": "图片 {mb}MB 太大，请压缩到 5MB 以内",
+        "msg.empty": "还没有投递记录。", "msg.full": "全刷", "msg.partial": "局刷",
+        "events.title": "设备事件", "events.sub": "Lua 里调用 <code>emit(name, table)</code> 产生的事件，Agent 用 <code>GET /api/events</code> 读取。",
+        "events.empty": "还没有事件。",
+        "dev.title": "设备", "dev.sub": "每台设备有独立令牌，只有你能看到和控制自己的设备。",
+        "dev.reg": "登记设备",
+        "dev.reg.hint": "设备 ID 是 MAC 后缀，板子串口启动日志里会打印。生成的 <code>device_token</code> 只显示一次，要写进固件的 <code>device_secrets.h</code> 或 NVS。",
+        "dev.id": "设备 ID", "dev.name": "名称（可选）", "dev.name.ph": "书桌上的 RLCD",
+        "dev.reg.btn": "登记并生成设备令牌", "dev.mine": "我的设备", "dev.rotate": "重置令牌",
+        "dev.rotate.confirm": "重置后旧令牌立刻失效，需要把新令牌写回板子。确定？",
+        "dev.token.once": "设备 {id} 的令牌（只显示这一次，请立即写入板子）：",
+        "dev.err.id": "设备 ID 至少 4 位，只能是字母和数字", "dev.claimed": "这台设备已被其他账号绑定",
+        "dev.seen": "最后在线 {t}", "dev.never": "从未上线",
+        "tok.title": "Agent 令牌",
+        "tok.sub": "给 Agent 用的 <code>oct_…</code> 凭证。只能由人登录后签发，Agent 不需要也不应该知道你的密码。",
+        "tok.new": "签发新令牌", "tok.new.hint": "按用途命名，方便以后单独吊销，例如 claude-desktop、home-server。",
+        "tok.name": "名称", "tok.create": "生成", "tok.list": "已签发",
+        "tok.once": "新令牌（只显示这一次，请立即保存到 Agent 的密钥里）：",
+        "tok.empty": "还没有令牌。", "tok.active": "有效", "tok.revoked": "已吊销", "tok.revoke": "吊销",
+        "tok.revoke.confirm": "吊销后使用这个令牌的 Agent 会立刻失去权限。确定？",
+        "tok.used": "最近使用 {t}", "tok.unused": "尚未使用",
+        "tok.howto": "交给 Agent", "tok.howto.hint": "把下面这段话连同令牌发给你的 Agent（Claude、ChatGPT、Cursor 或你自己的服务）：",
+        "tok.prompt": "你可以控制我的 OnlyClaws ESP32 设备。\n先读接口说明：{base}/api/agent/skill.md\n调用时带上请求头：Authorization: Bearer <我给你的 oct_ 令牌>\n先 GET {base}/api/devices 看看有哪些设备，再部署 Lua 脚本。",
+        "rv.title": "申请审核", "rv.sub": "结果会邮件通知对方；通过的话，邮件里附带设置登录密码的链接。",
+        "rv.pending": "待审", "rv.approved": "已通过", "rv.rejected": "已拒绝",
+        "rv.empty": "这里没有申请。", "rv.note.ph": "备注（可选，拒绝时会发给申请人）",
+        "rv.approve": "通过", "rv.reject": "拒绝", "rv.reopen": "改为通过", "rv.revoke": "撤销通过",
+        "rv.mail.off": "邮件未配置：审核结果不会发邮件，请手动告知申请人，或在服务器上配置 MAIL_BACKEND / SMTP_*。",
+        "rv.by": "{who} 于 {t} 审核",
+        "rv.done": "已处理 {email}",
+        "hw.rlcd-42": "RLCD 4.2", "hw.epaper-397": "ePaper 3.97", "hw.bare-s3": "ESP32-S3 模组", "hw.other": "暂无硬件",
+      },
+      en: {
+        "console.doc_title": "Console · OnlyClaws",
+        "console.badge": "Console", "console.logout": "Sign out",
+        "common.refresh": "Refresh", "common.all": "All", "common.none": "—",
+        "login.title": "Sign in to the console", "login.sub": "Use the email you applied with",
+        "login.email": "Email", "login.password": "Password", "login.submit": "Sign in", "login.busy": "Signing in…",
+        "login.forgot": "Forgot password / never set one?",
+        "login.bad": "Wrong email or password. Never set one? Use \"Forgot password\" below.",
+        "login.slow": "Too many attempts. Please wait a bit and try again.",
+        "login.unavailable": "Sign-in is temporarily unavailable. Please try again shortly.",
+        "forgot.title": "Set or reset your password", "forgot.sub": "Enter the email you applied with and we'll send a link to set your password. Your approval email has one too.",
+        "forgot.submit": "Send link", "forgot.busy": "Sending…", "forgot.back": "Back to sign in",
+        "forgot.sent": "If this email has console access, a password link is on its way (check spam too).",
+        "setpw.title": "Set your password",
+        "setpw.sub": "Account: {email}", "setpw.pw": "New password (8+ chars, letters and digits)", "setpw.pw2": "Repeat password",
+        "setpw.submit": "Save and sign in", "setpw.busy": "Saving…",
+        "setpw.mismatch": "The passwords don't match.", "setpw.short": "Use at least 8 characters.",
+        "setpw.checking": "Checking link…",
+        "setpw.expired": "This link has expired. Request a new one.", "setpw.used": "This link was already used. Request a new one to change your password again.",
+        "setpw.invalid": "This link isn't valid. Request a new one.",
+        "setpw.exists": "This email already has a password. Just sign in. Online reset isn't available yet; contact the admin if you forgot it.",
+        "setpw.letterdigit": "Use both letters and digits.",
+        "setpw.rejected": "That password can't be used. Try another (8+ chars, letters and digits).", "setpw.failed": "Couldn't set the password. Please try again later.",
+        "login.alt": "No access yet? <a href=\"../apply/\">Apply here</a>. We'll email you when you're approved.",
+        "login.denied": "This account doesn't have console access yet. <a href=\"../apply/\">Apply</a>, or if you already did, watch for the review email.",
+        "login.expired": "Session expired. Please sign in again.",
+        "tab.overview": "Overview", "tab.scripts": "Scripts", "tab.push": "Push", "tab.events": "Events",
+        "tab.devices": "Devices", "tab.tokens": "Agent tokens", "tab.review": "Applications", "side.docs": "Agent docs ↗",
+        "dev.none": "No devices yet",
+        "ov.title": "Overview", "ov.script": "Running script", "ov.events": "Recent events", "ov.messages": "Recent pushes", "ov.pushnew": "New push",
+        "ov.sub": "{name} · last seen {seen}",
+        "st.status": "Status", "st.online": "Online", "st.offline": "Offline", "st.panel": "Panel", "st.net": "Network", "st.fw": "Firmware", "st.sensors": "Sensors",
+        "ob.title": "Connect your first board in three steps",
+        "ob.hint": "Once done, this page shows device status, the running script and recent events.",
+        "ob.1.t": "Register the device", "ob.1.b": "Enter the device ID (MAC suffix, printed in the serial boot log) and get a one-time <code>device_token</code>.", "ob.1.btn": "Register",
+        "ob.2.t": "Flash the firmware", "ob.2.b": "Put the ID and token in <code>device_secrets.h</code> or NVS. After flashing, the board comes online on its own.", "ob.2.btn": "Flash guide",
+        "ob.3.t": "Hand it to your agent", "ob.3.b": "Mint an <code>oct_</code> token and give it to your agent along with skill.md.", "ob.3.btn": "Mint token",
+        "scripts.title": "Lua scripts", "scripts.sub": "Saved scripts can be deployed to the selected device at any time.",
+        "scripts.editor": "Editor",
+        "scripts.editor.hint": "<code>on_start()</code> runs once. <code>on_loop()</code> returns how many ms to wait before the next call. API reference: <a href=\"../api/agent/skill.md\" target=\"_blank\" rel=\"noopener\">skill.md</a>.",
+        "scripts.name": "Name", "scripts.mode": "Mode",
+        "scripts.deploy": "Save and deploy to this device", "scripts.save": "Save only", "scripts.saved": "Saved scripts",
+        "scripts.stop": "Stop script", "scripts.edit": "Load", "scripts.run": "Deploy",
+        "scripts.empty": "No saved scripts yet.",
+        "scripts.ok.deploy": "Deployed {name}. It starts once the device picks it up (usually a few seconds).",
+        "scripts.ok.save": "Saved {name}.",
+        "scripts.ok.stop": "Stop command sent.",
+        "scripts.state": "Script state", "scripts.runtime": "Cloud record", "scripts.err": "Error",
+        "scripts.nodev": "Register a device before deploying.",
+        "scripts.bytes": "{n} / 24000 bytes",
+        "push.title": "Push to screen", "push.sub": "The server renders a 1-bit bitmap at the device's resolution, then queues it.",
+        "push.text": "Text", "push.image": "Image", "push.ttl": "Title (optional)", "push.body": "Body",
+        "push.body.ph": "Partial refresh by default, so less flicker.",
+        "push.full": "Force full refresh (if ghosting)", "push.beep": "Beep on arrival", "push.send": "Send",
+        "push.file": "Image (JPG / PNG / WebP, < 5MB)", "push.file.help": "Converted to 1-bit black and white. Export HEIC / Live Photos to JPG first.",
+        "push.file.help.dev": "Converted to {w}×{h} 1-bit. Export HEIC / Live Photos to JPG first.",
+        "push.fit": "Fit", "push.contain": "Contain (letterbox)", "push.cover": "Cover (crop)", "push.sendimg": "Send image",
+        "push.ok": "Queued {id}…; it shows once the device picks it up.", "push.uploading": "Uploading {name} ({kb} KB)…",
+        "push.err.empty": "Enter a title or a body", "push.err.nofile": "Choose an image first", "push.err.heic": "HEIC / Live Photos aren't supported. Export to JPG first.",
+        "push.err.big": "Image is {mb}MB. Keep it under 5MB.",
+        "msg.empty": "Nothing pushed yet.", "msg.full": "full", "msg.partial": "partial",
+        "events.title": "Device events", "events.sub": "Events from <code>emit(name, table)</code> in Lua. Agents read them with <code>GET /api/events</code>.",
+        "events.empty": "No events yet.",
+        "dev.title": "Devices", "dev.sub": "Each device has its own token. Only you can see and control your devices.",
+        "dev.reg": "Register a device",
+        "dev.reg.hint": "The device ID is the MAC suffix printed in the serial boot log. The <code>device_token</code> is shown once; put it in <code>device_secrets.h</code> or NVS.",
+        "dev.id": "Device ID", "dev.name": "Name (optional)", "dev.name.ph": "Desk RLCD",
+        "dev.reg.btn": "Register and create device token", "dev.mine": "My devices", "dev.rotate": "Rotate token",
+        "dev.rotate.confirm": "The old token stops working immediately and you'll need to flash the new one. Continue?",
+        "dev.token.once": "Token for {id} (shown once; write it to the board now):",
+        "dev.err.id": "Device ID must be 4+ letters or digits", "dev.claimed": "This device is already bound to another account",
+        "dev.seen": "last seen {t}", "dev.never": "never seen",
+        "tok.title": "Agent tokens",
+        "tok.sub": "<code>oct_…</code> credentials for your agents. Only a signed-in human can mint them; the agent never needs your password.",
+        "tok.new": "Mint a token", "tok.new.hint": "Name it after where it's used so you can revoke it alone later, e.g. claude-desktop or home-server.",
+        "tok.name": "Name", "tok.create": "Create", "tok.list": "Issued",
+        "tok.once": "New token (shown once; save it to your agent's secrets now):",
+        "tok.empty": "No tokens yet.", "tok.active": "active", "tok.revoked": "revoked", "tok.revoke": "Revoke",
+        "tok.revoke.confirm": "Any agent using this token loses access immediately. Continue?",
+        "tok.used": "last used {t}", "tok.unused": "never used",
+        "tok.howto": "Give it to your agent", "tok.howto.hint": "Send this to your agent (Claude, ChatGPT, Cursor or your own service) together with the token:",
+        "tok.prompt": "You can control my OnlyClaws ESP32 devices.\nRead the API first: {base}/api/agent/skill.md\nSend this header on every call: Authorization: Bearer <the oct_ token I give you>\nStart with GET {base}/api/devices, then deploy Lua scripts.",
+        "rv.title": "Applications", "rv.sub": "Applicants get an email either way. Approval emails include a link to set their password.",
+        "rv.pending": "Pending", "rv.approved": "Approved", "rv.rejected": "Rejected",
+        "rv.empty": "Nothing here.", "rv.note.ph": "Note (optional; sent to the applicant on reject)",
+        "rv.approve": "Approve", "rv.reject": "Reject", "rv.reopen": "Approve instead", "rv.revoke": "Revoke approval",
+        "rv.mail.off": "Mail isn't configured, so decisions won't be emailed. Tell applicants yourself or set MAIL_BACKEND / SMTP_* on the server.",
+        "rv.by": "reviewed by {who} {t}",
+        "rv.done": "Updated {email}",
+        "hw.rlcd-42": "RLCD 4.2", "hw.epaper-397": "ePaper 3.97", "hw.bare-s3": "ESP32-S3 module", "hw.other": "no hardware yet",
+      },
+    });
+    OC.apply();
+
+    const { $, $$, t, api } = OC;
+    const h = OC.escapeHtml;
+    const PUBLIC_BASE = location.origin + OC.BASE;
+    const DEVICE_KEY = "epd_device_id";
+    const TABS = ["overview", "scripts", "push", "events", "devices", "tokens", "review"];
+    const DEFAULT_LUA = [
+      "function on_start()",
+      "  gfx.clear(0)",
+      "  gfx.text(12, 30, \"hello, OnlyClaws\", 1)",
+      "  gfx.flush()",
+      "  audio.beep(1000, 80)",
+      "end",
+      "",
+      "function on_loop()",
+      "  if input.key() then",
+      "    emit(\"key\", { t = millis() })",
+      "  end",
+      "  return 200",
+      "end",
+      "",
+    ].join("\n");
+
+    const state = { me: null, devices: [], deviceId: localStorage.getItem(DEVICE_KEY) || "", tab: "overview", rvStatus: "pending", pushMode: "text" };
+
+    function note(el, kind, html) {
+      el.className = "note " + kind;
+      el.innerHTML = html;
+      el.classList.remove("hidden");
+    }
+    function hideNote(el) { el.classList.add("hidden"); }
+    function secretHtml(label, value) {
+      return `${h(label)}<div class="secret"><code>${h(value)}</code><button class="btn sm ghost" type="button" data-copy="${h(value)}">${h(t("common.copy"))}</button></div>`;
+    }
+    document.addEventListener("click", (e) => {
+      const c = e.target.closest("[data-copy]");
+      if (c) OC.copy(c.dataset.copy, c);
+      const g = e.target.closest("[data-goto]");
+      if (g) location.hash = g.dataset.goto;
+    });
+
+    function current() { return state.devices.find((d) => d.id === state.deviceId) || null; }
+    function onAuthError(ex) {
+      if (ex && ex.status === 401) { showLogin(t("login.expired")); return true; }
+      return false;
+    }
+
+    // ---- auth ----
+    function showAuthCard(id) {
+      state.me = null;
+      $("#appView").classList.add("hidden");
+      $("#loginView").classList.remove("hidden");
+      ["#devPick", "#whoami", "#logoutBtn"].forEach((s) => $(s).classList.add("hidden"));
+      ["#loginForm", "#forgotForm", "#setpwForm"].forEach((s) => $(s).classList.toggle("hidden", s !== id));
+    }
+    function showLogin(msg) {
+      showAuthCard("#loginForm");
+      if (msg) note($("#loginErr"), "err", h(msg));
+    }
+    function authErrText(ex) {
+      const map = {
+        invalid_credentials: "login.bad", too_many_attempts: "login.slow", login_unavailable: "login.unavailable",
+        link_expired: "setpw.expired", link_used: "setpw.used", link_invalid: "setpw.invalid",
+        password_too_short: "setpw.short", account_exists: "setpw.exists", password_needs_letter_digit: "setpw.letterdigit",
+        password_rejected: "setpw.rejected", setup_failed: "setpw.failed",
+      };
+      return map[ex && ex.code] ? h(t(map[ex.code])) : h((ex && ex.message) || "error");
+    }
+
+    $("#forgotLink").addEventListener("click", (e) => {
+      e.preventDefault();
+      $("#forgotEmail").value = $("#email").value.trim();
+      hideNote($("#forgotMsg"));
+      showAuthCard("#forgotForm");
+    });
+    $$("[data-back-login]").forEach((a) => a.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (location.hash.startsWith("#setpw=")) history.replaceState(null, "", location.pathname);
+      hideNote($("#loginErr"));
+      showLogin("");
+    }));
+
+    $("#forgotForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("#forgotBtn");
+      const msg = $("#forgotMsg");
+      btn.disabled = true;
+      btn.textContent = t("forgot.busy");
+      try {
+        await api("/api/auth/password/request", {
+          method: "POST",
+          body: { email: $("#forgotEmail").value.trim(), lang: OC.lang || "zh" },
+        });
+        note(msg, "ok", h(t("forgot.sent")));
+      } catch (ex) {
+        note(msg, "err", authErrText(ex));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = t("forgot.submit");
+      }
+    });
+
+    async function showSetpw(token) {
+      showAuthCard("#setpwForm");
+      const err = $("#setpwErr");
+      hideNote(err);
+      $("#setpwSub").textContent = t("setpw.checking");
+      $("#setpwBtn").disabled = true;
+      try {
+        const info = await api("/api/auth/password/link?token=" + encodeURIComponent(token));
+        state.setpwToken = token;
+        $("#setpwEmail").value = info.email;
+        $("#setpwSub").textContent = t("setpw.sub", { email: info.email });
+        $("#setpwBtn").disabled = false;
+        $("#setpwPw").focus();
+      } catch (ex) {
+        $("#setpwSub").textContent = "";
+        note(err, "err", authErrText(ex));
+      }
+    }
+
+    $("#setpwForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const err = $("#setpwErr");
+      const pw = $("#setpwPw").value;
+      hideNote(err);
+      if (pw.length < 8) { note(err, "err", h(t("setpw.short"))); return; }
+      if (!/[A-Za-z]/.test(pw) || !/\d/.test(pw)) { note(err, "err", h(t("setpw.letterdigit"))); return; }
+      if (pw !== $("#setpwPw2").value) { note(err, "err", h(t("setpw.mismatch"))); return; }
+      const btn = $("#setpwBtn");
+      btn.disabled = true;
+      btn.textContent = t("setpw.busy");
+      try {
+        const data = await api("/api/auth/password/set", {
+          method: "POST",
+          body: { token: state.setpwToken, password: pw },
+        });
+        $("#setpwPw").value = $("#setpwPw2").value = "";
+        history.replaceState(null, "", location.pathname + "#overview");
+        await enter(data.user);
+      } catch (ex) {
+        if (ex.code === "access_not_granted") note(err, "err", t("login.denied"));
+        else note(err, "err", authErrText(ex));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = t("setpw.submit");
+      }
+    });
+
+    async function enter(user) {
+      state.me = user;
+      $("#loginView").classList.add("hidden");
+      $("#appView").classList.remove("hidden");
+      $("#whoami").textContent = user.email || "";
+      ["#whoami", "#logoutBtn"].forEach((s) => $(s).classList.remove("hidden"));
+      $("#reviewTabBtn").classList.toggle("hidden", !user.is_admin);
+      $("#tokPrompt").textContent = t("tok.prompt", { base: PUBLIC_BASE });
+      await refreshDevices();
+      route();
+      if (user.is_admin) refreshReviewBadge();
+    }
+
+    $("#loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("#loginBtn");
+      const err = $("#loginErr");
+      hideNote(err);
+      btn.disabled = true;
+      btn.textContent = t("login.busy");
+      try {
+        const data = await api("/api/auth/login", {
+          method: "POST",
+          body: { email: $("#email").value.trim(), password: $("#password").value },
+        });
+        $("#password").value = "";
+        await enter(data.user);
+      } catch (ex) {
+        if (ex.code === "access_not_granted") note(err, "err", t("login.denied"));
+        else note(err, "err", authErrText(ex));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = t("login.submit");
+      }
+    });
+
+    $("#logoutBtn").addEventListener("click", async () => {
+      try { await api("/api/auth/logout", { method: "POST", body: {} }); } catch (_) {}
+      showLogin("");
+      hideNote($("#loginErr"));
+    });
+
+    // ---- routing ----
+    function route() {
+      let tab = (location.hash || "").replace("#", "");
+      if (!TABS.includes(tab) || (tab === "review" && !(state.me && state.me.is_admin))) tab = "overview";
+      state.tab = tab;
+      $$("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+      $$("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== tab));
+      load(tab);
+    }
+    window.addEventListener("hashchange", () => { if (state.me) route(); });
+    $$("[data-tab]").forEach((b) => b.addEventListener("click", () => { location.hash = b.dataset.tab; }));
+    $$("[data-refresh]").forEach((b) => b.addEventListener("click", () => { refreshDevices().then(() => load(state.tab)); }));
+
+    function load(tab) {
+      const fn = { overview: loadOverview, scripts: loadScripts, push: loadMessages, events: loadEvents, devices: renderDevices, tokens: loadTokens, review: loadReview }[tab];
+      if (fn) fn();
+    }
+
+    // ---- devices ----
+    async function refreshDevices() {
+      try {
+        const data = await api("/api/devices");
+        state.devices = data.devices || [];
+      } catch (ex) {
+        if (onAuthError(ex)) return;
+        state.devices = [];
+      }
+      if (!state.devices.find((d) => d.id === state.deviceId)) {
+        const pick = state.devices.find((d) => d.online) || state.devices[0];
+        state.deviceId = pick ? pick.id : "";
+      }
+      if (state.deviceId) localStorage.setItem(DEVICE_KEY, state.deviceId);
+      renderPicker();
+      if (state.tab === "devices") renderDevices();
+    }
+
+    function renderPicker() {
+      const pick = $("#devPick");
+      pick.classList.toggle("hidden", !state.devices.length);
+      const sel = $("#deviceSelect");
+      sel.innerHTML = state.devices
+        .map((d) => `<option value="${h(d.id)}">${h((d.online ? "● " : "○ ") + (d.name || d.id))}</option>`)
+        .join("");
+      sel.value = state.deviceId;
+      const d = current();
+      $("#navDot").className = "dot " + (d ? (d.online ? "on" : "off") : "");
+      const hint = $("#iHint");
+      if (d && hint) hint.textContent = t("push.file.help.dev", { w: d.width, h: d.height });
+    }
+    $("#deviceSelect").addEventListener("change", (e) => {
+      state.deviceId = e.target.value;
+      localStorage.setItem(DEVICE_KEY, state.deviceId);
+      renderPicker();
+      load(state.tab);
+    });
+
+    function sensorText(m) {
+      const bits = [];
+      if (m.temp_c != null) bits.push(Number(m.temp_c).toFixed(1) + "°C");
+      if (m.humidity != null) bits.push(Number(m.humidity).toFixed(0) + "%RH");
+      if (m.battery_pct != null) bits.push(m.battery_pct + "%");
+      else if (m.battery_v != null) bits.push(Number(m.battery_v).toFixed(2) + "V");
+      return bits.join(" · ") || t("common.none");
+    }
+
+    function renderDevices() {
+      const box = $("#devList");
+      if (!state.devices.length) { box.innerHTML = `<div class="empty">${h(t("dev.none"))}</div>`; return; }
+      box.innerHTML = `<div class="list">` + state.devices.map((d) => `
+        <div class="list-item">
+          <span class="dot ${d.online ? "on" : "off"}" style="margin-top:7px"></span>
+          <div class="grow">
+            <div class="title">${h(d.name || d.id)} <span class="tag ${d.online ? "green" : ""}">${h(t(d.online ? "st.online" : "st.offline"))}</span></div>
+            <div class="meta">${h([d.id, d.width + "×" + d.height, d.fw, d.ip, d.rssi != null ? d.rssi + " dBm" : "", d.last_seen ? t("dev.seen", { t: OC.fmtTime(d.last_seen) }) : t("dev.never")].filter(Boolean).join(" · "))}</div>
+          </div>
+          <button class="btn sm ghost" type="button" data-rotate="${h(d.id)}">${h(t("dev.rotate"))}</button>
+        </div>`).join("") + `</div>`;
+      $$("[data-rotate]", box).forEach((b) => b.addEventListener("click", async () => {
+        if (!confirm(t("dev.rotate.confirm"))) return;
+        try {
+          const data = await api("/api/devices/" + encodeURIComponent(b.dataset.rotate) + "/rotate-token", { method: "POST", body: {} });
+          note($("#rotMsg"), "ok", secretHtml(t("dev.token.once", { id: data.device_id }), data.device_token));
+        } catch (ex) { if (!onAuthError(ex)) note($("#rotMsg"), "err", h(ex.message)); }
+      }));
+    }
+
+    $("#regForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = $("#rMsg");
+      const id = $("#rId").value.trim().toLowerCase();
+      if (id.length < 4 || !/^[a-z0-9]+$/.test(id)) return note(msg, "err", h(t("dev.err.id")));
+      const btn = $("#rBtn");
+      btn.disabled = true;
+      try {
+        const data = await api("/api/devices/register", { method: "POST", body: { device_id: id, name: $("#rName").value.trim() } });
+        note(msg, "ok", secretHtml(t("dev.token.once", { id: data.device.id }), data.device_token));
+        state.deviceId = data.device.id;
+        $("#rId").value = ""; $("#rName").value = "";
+        await refreshDevices();
+        renderDevices();
+      } catch (ex) {
+        if (onAuthError(ex)) return;
+        note(msg, "err", h(ex.status === 409 ? t("dev.claimed") : ex.message));
+      } finally { btn.disabled = false; }
+    });
+
+    // ---- overview ----
+    async function loadOverview() {
+      const d = current();
+      $("#ovEmpty").classList.toggle("hidden", !!d);
+      $("#ovDevice").classList.toggle("hidden", !d);
+      if (!d) { $("#ovSub").textContent = ""; return; }
+      $("#ovSub").textContent = t("ov.sub", { name: d.name || d.id, seen: d.last_seen ? OC.fmtTime(d.last_seen) : t("dev.never") });
+      const m = d.meta || {};
+      $("#ovStats").innerHTML = [
+        [t("st.status"), `<span class="dot ${d.online ? "on" : "off"}"></span> ${h(t(d.online ? "st.online" : "st.offline"))}`, false],
+        [t("st.panel"), h(d.width + "×" + d.height), false],
+        [t("st.net"), h([d.rssi != null ? d.rssi + " dBm" : "", d.ip || ""].filter(Boolean).join(" · ") || t("common.none")), true],
+        [t("st.sensors"), h(sensorText(m)), true],
+      ].map(([k, v, sm]) => `<div class="stat"><div class="k">${h(k)}</div><div class="v${sm ? " sm" : ""}">${v}</div></div>`).join("");
+      await loadScriptStatus($("#ovScript"));
+      try {
+        const ev = await api("/api/events?limit=5&device_id=" + encodeURIComponent(d.id));
+        renderEvents($("#ovEvents"), ev.events || [], true);
+      } catch (ex) { onAuthError(ex); }
+      try {
+        const ms = await api("/api/messages?limit=5&device_id=" + encodeURIComponent(d.id));
+        renderMessages($("#ovMessages"), ms.messages || []);
+      } catch (ex) { onAuthError(ex); }
+    }
+
+    async function loadScriptStatus(box) {
+      const d = current();
+      if (!d) { box.innerHTML = `<span class="muted">${h(t("scripts.nodev"))}</span>`; return; }
+      try {
+        const s = await api("/api/script/status?device_id=" + encodeURIComponent(d.id));
+        const rt = s.runtime || {};
+        const stateTxt = s.script_state || rt.status || t("common.none");
+        const cls = /run/.test(stateTxt) ? "green" : /err|fail/.test(stateTxt) ? "red" : /stop/.test(stateTxt) ? "" : "amber";
+        let name = await scriptName(rt.script_id || s.script_id || "");
+        try { const rec = JSON.parse(rt.source || "{}"); if (rec.mode) name += " · " + rec.mode + (rec.every_ms ? " " + rec.every_ms + "ms" : ""); } catch (_) {}
+        box.innerHTML = `
+          <span class="tag ${cls}">${h(stateTxt)}</span>
+          <span class="mono small">${h(name || t("common.none"))}</span>
+          ${rt.updated_at ? `<span class="muted small">${h(t("scripts.runtime"))}: ${h(rt.status || "")} · ${h(OC.fmtTime(rt.updated_at))}</span>` : ""}
+          ${s.script_error ? `<div class="note err" style="width:100%">${h(t("scripts.err"))}: ${h(s.script_error)}</div>` : ""}`;
+      } catch (ex) { if (!onAuthError(ex)) box.textContent = ex.message; }
+    }
+
+    async function stopScript(msgEl) {
+      const d = current();
+      if (!d) return;
+      try {
+        await api("/api/script/stop", { method: "POST", body: { device_id: d.id } });
+        if (msgEl) note(msgEl, "ok", h(t("scripts.ok.stop")));
+        setTimeout(() => load(state.tab), 600);
+      } catch (ex) { if (!onAuthError(ex) && msgEl) note(msgEl, "err", h(ex.message)); }
+    }
+    $("#ovStop").addEventListener("click", () => stopScript(null));
+
+    // ---- scripts ----
+    $("#sSource").value = DEFAULT_LUA;
+    function updateBytes() { $("#sBytes").textContent = "· " + t("scripts.bytes", { n: new TextEncoder().encode($("#sSource").value).length }); }
+    $("#sSource").addEventListener("input", updateBytes);
+    $("#sSource").addEventListener("keydown", (e) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const ta = e.target, s = ta.selectionStart;
+        ta.setRangeText("  ", s, ta.selectionEnd, "end");
+        updateBytes();
+      }
+    });
+    updateBytes();
+
+    let scriptCache = [];
+    let scriptCacheLoaded = false;
+    async function scriptName(id) {
+      if (!id) return "";
+      if (!scriptCacheLoaded || !scriptCache.find((s) => s.id === id)) {
+        try { scriptCache = (await api("/api/scripts?limit=50")).scripts || []; } catch (_) {}
+        scriptCacheLoaded = true;
+      }
+      const s = scriptCache.find((x) => x.id === id);
+      return s ? s.name + " (" + id.slice(0, 8) + ")" : id;
+    }
+    function scriptNameSync(id) {
+      const s = scriptCache.find((x) => x.id === id);
+      return s ? s.name : (id || "").slice(0, 8);
+    }
+    async function loadScripts() {
+      const statusBox = $("#scriptStatus");
+      const d = current();
+      statusBox.innerHTML = "";
+      if (d) {
+        const wrap = document.createElement("div");
+        wrap.className = "script-status";
+        wrap.style.flex = "1";
+        statusBox.appendChild(wrap);
+        const stop = document.createElement("button");
+        stop.className = "btn sm danger";
+        stop.type = "button";
+        stop.textContent = t("scripts.stop");
+        stop.onclick = () => stopScript($("#sMsg"));
+        statusBox.appendChild(stop);
+        loadScriptStatus(wrap);
+      } else {
+        statusBox.innerHTML = `<span class="muted">${h(t("scripts.nodev"))}</span>`;
+      }
+      const list = $("#scriptList");
+      try {
+        const data = await api("/api/scripts?limit=50");
+        scriptCache = data.scripts || [];
+        if (!scriptCache.length) { list.innerHTML = `<div class="empty">${h(t("scripts.empty"))}</div>`; return; }
+        list.innerHTML = `<div class="list">` + scriptCache.map((s, i) => `
+          <div class="list-item">
+            <div class="grow">
+              <div class="title">${h(s.name)}</div>
+              <div class="meta">${h([s.mode, s.every_ms ? s.every_ms + "ms" : "", s.id.slice(0, 8), OC.fmtTime(s.updated_at)].filter(Boolean).join(" · "))}</div>
+            </div>
+            <button class="btn sm ghost" type="button" data-load="${i}">${h(t("scripts.edit"))}</button>
+            <button class="btn sm" type="button" data-deploy="${h(s.id)}" ${d ? "" : "disabled"}>${h(t("scripts.run"))}</button>
+          </div>`).join("") + `</div>`;
+        $$("[data-load]", list).forEach((b) => b.addEventListener("click", () => {
+          const s = scriptCache[+b.dataset.load];
+          $("#sName").value = s.name; $("#sMode").value = s.mode || "loop"; $("#sEvery").value = s.every_ms || 1000;
+          $("#sSource").value = typeof s.source === "string" ? s.source : JSON.stringify(s.source, null, 2);
+          updateBytes();
+          $("#scriptForm").scrollIntoView({ behavior: "smooth", block: "start" });
+        }));
+        $$("[data-deploy]", list).forEach((b) => b.addEventListener("click", async () => {
+          const dd = current();
+          if (!dd) return;
+          b.disabled = true;
+          try {
+            await api("/api/scripts/" + encodeURIComponent(b.dataset.deploy) + "/deploy", { method: "POST", body: { device_id: dd.id } });
+            const s = scriptCache.find((x) => x.id === b.dataset.deploy);
+            note($("#sMsg"), "ok", h(t("scripts.ok.deploy", { name: s ? s.name : "" })));
+            setTimeout(loadScripts, 1500);
+          } catch (ex) { if (!onAuthError(ex)) note($("#sMsg"), "err", h(ex.message)); }
+          finally { b.disabled = false; }
+        }));
+      } catch (ex) { if (!onAuthError(ex)) list.textContent = ex.message; }
+    }
+
+    async function saveScript(deploy) {
+      const msg = $("#sMsg");
+      hideNote(msg);
+      const d = current();
+      if (deploy && !d) return note(msg, "err", h(t("scripts.nodev")));
+      const body = {
+        name: $("#sName").value.trim() || "script",
+        language: "lua",
+        mode: $("#sMode").value,
+        every_ms: Math.max(50, parseInt($("#sEvery").value, 10) || 1000),
+        source: $("#sSource").value,
+      };
+      if (deploy) body.device_id = d.id;
+      const btn = deploy ? $("#sDeployBtn") : $("#sSaveBtn");
+      btn.disabled = true;
+      try {
+        await api("/api/scripts", { method: "POST", body });
+        note(msg, "ok", h(t(deploy ? "scripts.ok.deploy" : "scripts.ok.save", { name: body.name })));
+        loadScripts();
+      } catch (ex) { if (!onAuthError(ex)) note(msg, "err", h(ex.message)); }
+      finally { btn.disabled = false; }
+    }
+    $("#scriptForm").addEventListener("submit", (e) => { e.preventDefault(); saveScript(true); });
+    $("#sSaveBtn").addEventListener("click", () => saveScript(false));
+
+    // ---- push ----
+    $$("#pushSeg button").forEach((b) => b.addEventListener("click", () => {
+      state.pushMode = b.dataset.mode;
+      $$("#pushSeg button").forEach((x) => x.classList.toggle("on", x === b));
+      $("#textForm").classList.toggle("hidden", state.pushMode !== "text");
+      $("#imageForm").classList.toggle("hidden", state.pushMode !== "image");
+    }));
+
+    $("#textForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = $("#pMsg");
+      const title = $("#pTitle").value.trim();
+      const body = $("#pBody").value;
+      if (!title && !body.trim()) return note(msg, "err", h(t("push.err.empty")));
+      const btn = $("#pBtn");
+      btn.disabled = true;
+      try {
+        const data = await api("/api/push", {
+          method: "POST",
+          body: { title, body, full_refresh: $("#pFull").checked, beep: $("#pBeep").checked, device_id: state.deviceId || undefined },
+        });
+        note(msg, "ok", h(t("push.ok", { id: data.message.id.slice(0, 8) })));
+        $("#pBody").value = "";
+        loadMessages();
+      } catch (ex) { if (!onAuthError(ex)) note(msg, "err", h(ex.message)); }
+      finally { btn.disabled = false; }
+    });
+
+    function imageProblem(file) {
+      const name = (file.name || "").toLowerCase();
+      const type = (file.type || "").toLowerCase();
+      if (type.includes("heic") || type.includes("heif") || /\.(heic|heif)$/.test(name)) return t("push.err.heic");
+      if (file.size > 5 * 1024 * 1024) return t("push.err.big", { mb: (file.size / 1048576).toFixed(1) });
+      return "";
+    }
+    $("#iFile").addEventListener("change", () => {
+      const f = $("#iFile").files[0];
+      const p = f ? imageProblem(f) : "";
+      if (p) note($("#iMsg"), "err", h(p)); else hideNote($("#iMsg"));
+    });
+    $("#imageForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = $("#iMsg");
+      const file = $("#iFile").files[0];
+      if (!file) return note(msg, "err", h(t("push.err.nofile")));
+      const p = imageProblem(file);
+      if (p) return note(msg, "err", h(p));
+      const btn = $("#iBtn");
+      btn.disabled = true;
+      note(msg, "info", h(t("push.uploading", { name: file.name, kb: (file.size / 1024).toFixed(0) })));
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("title", $("#iTitle").value.trim());
+      fd.append("fit", $("#iFit").value);
+      fd.append("full_refresh", $("#iFull").checked ? "true" : "false");
+      if (state.deviceId) fd.append("device_id", state.deviceId);
+      try {
+        const data = await api("/api/push/image", { method: "POST", body: fd, timeoutMs: 90000 });
+        note(msg, "ok", h(t("push.ok", { id: data.message.id.slice(0, 8) })));
+        $("#imageForm").reset();
+        loadMessages();
+      } catch (ex) { if (!onAuthError(ex)) note(msg, "err", h(ex.status === 413 ? t("push.err.big", { mb: ">5" }) : ex.message)); }
+      finally { btn.disabled = false; }
+    });
+
+    function renderMessages(box, list) {
+      if (!list.length) { box.innerHTML = `<div class="empty">${h(t("msg.empty"))}</div>`; return; }
+      box.innerHTML = `<div class="list">` + list.map((m) => {
+        const st = m.status || "";
+        const cls = st === "acked" || st === "delivered" ? "green" : st === "pending" ? "amber" : st === "failed" ? "red" : "";
+        const label = m.type && m.type !== "bitmap" ? m.type : (m.full_refresh ? t("msg.full") : t("msg.partial"));
+        const body = m.type === "script" ? "" : (m.body || "");
+        return `<div class="list-item">
+          <div class="grow">
+            <div class="title">${h(m.type === "script" ? "▶ " + scriptNameSync(m.title) : (m.title || "—"))}</div>
+            ${body ? `<div class="small" style="color:var(--ink-2);white-space:pre-wrap;max-height:4.8em;overflow:hidden">${h(body.slice(0, 300))}</div>` : ""}
+            <div class="meta">${h([label, m.device_id, OC.fmtTime(m.created_at)].filter(Boolean).join(" · "))}</div>
+          </div>
+          <span class="tag ${cls}">${h(st)}</span>
+        </div>`;
+      }).join("") + `</div>`;
+    }
+    async function loadMessages() {
+      try {
+        const q = state.deviceId ? "&device_id=" + encodeURIComponent(state.deviceId) : "";
+        const data = await api("/api/messages?limit=20" + q);
+        renderMessages($("#msgList"), data.messages || []);
+      } catch (ex) { onAuthError(ex); }
+    }
+
+    // ---- events ----
+    function renderEvents(box, list, compact) {
+      if (!list.length) { box.innerHTML = `<div class="empty">${h(t("events.empty"))}</div>`; return; }
+      box.innerHTML = `<div class="list">` + list.map((ev) => {
+        const data = ev.data == null ? "" : (typeof ev.data === "string" ? ev.data : JSON.stringify(ev.data, null, compact ? 0 : 2));
+        return `<div class="list-item"><div class="grow">
+          <div class="title mono">${h(ev.name)}</div>
+          <div class="meta">${h([ev.device_id, ev.script_id ? ev.script_id.slice(0, 8) : "", OC.fmtTime(ev.created_at)].filter(Boolean).join(" · "))}</div>
+          ${data ? (compact ? `<div class="meta" style="color:var(--ink-2)">${h(data.slice(0, 160))}</div>` : `<pre class="json">${h(data)}</pre>`) : ""}
+        </div></div>`;
+      }).join("") + `</div>`;
+    }
+    async function loadEvents() {
+      try {
+        const q = state.deviceId ? "&device_id=" + encodeURIComponent(state.deviceId) : "";
+        const data = await api("/api/events?limit=100" + q);
+        renderEvents($("#eventList"), data.events || [], false);
+      } catch (ex) { onAuthError(ex); }
+    }
+
+    // ---- agent tokens ----
+    async function loadTokens() {
+      const box = $("#tokList");
+      try {
+        const data = await api("/api/agent-tokens");
+        const list = data.tokens || [];
+        if (!list.length) { box.innerHTML = `<div class="empty">${h(t("tok.empty"))}</div>`; return; }
+        box.innerHTML = `<div class="list">` + list.map((tk) => `
+          <div class="list-item">
+            <div class="grow">
+              <div class="title">${h(tk.name)} <span class="tag ${tk.revoked ? "red" : "green"}">${h(t(tk.revoked ? "tok.revoked" : "tok.active"))}</span></div>
+              <div class="meta">${h([tk.token_prefix + "…", OC.fmtTime(tk.created_at), tk.last_used_at ? t("tok.used", { t: OC.fmtTime(tk.last_used_at) }) : t("tok.unused")].join(" · "))}</div>
+            </div>
+            ${tk.revoked ? "" : `<button class="btn sm danger" type="button" data-revoke="${h(tk.id)}">${h(t("tok.revoke"))}</button>`}
+          </div>`).join("") + `</div>`;
+        $$("[data-revoke]", box).forEach((b) => b.addEventListener("click", async () => {
+          if (!confirm(t("tok.revoke.confirm"))) return;
+          try { await api("/api/agent-tokens/" + encodeURIComponent(b.dataset.revoke), { method: "DELETE" }); loadTokens(); }
+          catch (ex) { if (!onAuthError(ex)) alert(ex.message); }
+        }));
+      } catch (ex) { if (!onAuthError(ex)) box.textContent = ex.message; }
+    }
+    $("#tokForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = $("#tMsg");
+      const btn = $("#tBtn");
+      btn.disabled = true;
+      try {
+        const data = await api("/api/agent-tokens", { method: "POST", body: { name: $("#tName").value.trim() || "agent" } });
+        note(msg, "ok", secretHtml(t("tok.once"), data.token));
+        loadTokens();
+      } catch (ex) { if (!onAuthError(ex)) note(msg, "err", h(ex.message)); }
+      finally { btn.disabled = false; }
+    });
+    $("#copyPrompt").addEventListener("click", (e) => OC.copy($("#tokPrompt").textContent, e.currentTarget));
+
+    // ---- admin review ----
+    function setCounts(counts) {
+      $$("#rvSeg [data-c]").forEach((el) => { el.textContent = counts[el.dataset.c] != null ? counts[el.dataset.c] : ""; });
+      const n = counts.pending || 0;
+      const badge = $("#reviewBadge");
+      badge.textContent = n;
+      badge.classList.toggle("hidden", !n);
+    }
+    async function refreshReviewBadge() {
+      try { const data = await api("/api/admin/applications?status=pending&limit=1"); setCounts(data.counts || {}); } catch (_) {}
+    }
+    $$("#rvSeg button").forEach((b) => b.addEventListener("click", () => {
+      state.rvStatus = b.dataset.status;
+      $$("#rvSeg button").forEach((x) => x.classList.toggle("on", x === b));
+      loadReview();
+    }));
+    async function loadReview() {
+      const box = $("#rvList");
+      try {
+        const data = await api("/api/admin/applications?status=" + state.rvStatus + "&limit=200");
+        setCounts(data.counts || {});
+        const mail = $("#rvMail");
+        if (data.mail) mail.classList.add("hidden"); else note(mail, "info", h(t("rv.mail.off")));
+        const list = data.applications || [];
+        if (!list.length) { box.innerHTML = `<div class="card"><div class="empty">${h(t("rv.empty"))}</div></div>`; return; }
+        box.innerHTML = list.map((a) => {
+          const links = (a.links || "").split(/\s+/).filter(Boolean).map((u) =>
+            /^https?:\/\//i.test(u) ? `<a href="${h(u)}" target="_blank" rel="noopener noreferrer">${h(u)}</a>` : h(u)).join(" ");
+          const actions = a.status === "pending"
+            ? `<button class="btn sm accent" type="button" data-act="approve" data-id="${h(a.id)}">${h(t("rv.approve"))}</button>
+               <button class="btn sm danger" type="button" data-act="reject" data-id="${h(a.id)}">${h(t("rv.reject"))}</button>`
+            : a.status === "rejected"
+            ? `<button class="btn sm ghost" type="button" data-act="approve" data-id="${h(a.id)}">${h(t("rv.reopen"))}</button>`
+            : `<button class="btn sm danger" type="button" data-act="reject" data-id="${h(a.id)}">${h(t("rv.revoke"))}</button>`;
+          return `<div class="app-card">
+            <div class="row" style="justify-content:space-between">
+              <div><b>${h(a.name)}</b> <span class="muted">&lt;${h(a.email)}&gt;</span></div>
+              <span class="tag">${h(t("hw." + a.hardware))}</span>
+            </div>
+            <div class="use">${h(a.use_case)}</div>
+            ${links ? `<div class="small" style="word-break:break-all">${links}</div>` : ""}
+            <div class="meta" style="margin-top:6px">${h([a.lang, a.ip, OC.fmtTime(a.created_at), a.reviewed_by ? t("rv.by", { who: a.reviewed_by, t: OC.fmtTime(a.reviewed_at) }) : ""].filter(Boolean).join(" · "))}</div>
+            ${a.note ? `<div class="note info">${h(a.note)}</div>` : ""}
+            <div class="act">
+              <input type="text" maxlength="500" placeholder="${h(t("rv.note.ph"))}" data-note="${h(a.id)}" />
+              ${actions}
+            </div>
+          </div>`;
+        }).join("");
+        $$("[data-act]", box).forEach((b) => b.addEventListener("click", async () => {
+          const id = b.dataset.id;
+          const noteEl = box.querySelector(`[data-note="${CSS.escape(id)}"]`);
+          b.disabled = true;
+          try {
+            await api(`/api/admin/applications/${encodeURIComponent(id)}/${b.dataset.act}`, { method: "POST", body: { note: noteEl ? noteEl.value.trim() : "" } });
+            loadReview();
+          } catch (ex) { if (!onAuthError(ex)) alert(ex.message); b.disabled = false; }
+        }));
+      } catch (ex) { if (!onAuthError(ex)) box.innerHTML = `<div class="note err">${h(ex.message)}</div>`; }
+    }
+
+    // ---- polling & lang ----
+    setInterval(async () => {
+      if (!state.me || document.hidden) return;
+      await refreshDevices();
+      if (state.tab === "overview") loadOverview();
+      else if (state.tab === "events") loadEvents();
+      else if (state.tab === "push") loadMessages();
+    }, 8000);
+    setInterval(() => { if (state.me && state.me.is_admin && !document.hidden) refreshReviewBadge(); }, 60000);
+
+    document.addEventListener("oc:lang", () => {
+      updateBytes();
+      if (!state.me) return;
+      $("#tokPrompt").textContent = t("tok.prompt", { base: PUBLIC_BASE });
+      renderPicker();
+      load(state.tab);
+    });
+
+    (async function boot() {
+      if (location.hash.startsWith("#setpw=")) {
+        await showSetpw(decodeURIComponent(location.hash.slice("#setpw=".length)));
+        return;
+      }
+      try {
+        const me = await api("/api/auth/me");
+        await enter(me.user);
+      } catch (_) {
+        showLogin("");
+      }
+    })();
+  </script>
+</body>
+</html>

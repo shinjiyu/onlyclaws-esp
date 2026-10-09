@@ -1,5 +1,7 @@
 # 固件本地开发（`rlcd/`）
 
+项目说明：[中文](../README.zh-CN.md) · [English](../README.md)。
+
 统一运行时：`agent-runtime-0.13.x`。`0.13.6` 起核心是 ESP32-S3 裸件，屏和音频按环境打开。
 
 | 环境 | 组成 |

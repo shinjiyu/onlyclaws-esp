@@ -19,7 +19,7 @@ OnlyClaws ESP 上的边缘 Lua 小游戏，用来演示「Agent 热部署 loop �
 
 ```bash
 # Agent Token：oct_…
-curl -sS -X POST https://onlyclaws.world/epaper/api/scripts \
+curl -sS -X POST https://onlyclaws.world/api/scripts \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(python3 - <<'PY'

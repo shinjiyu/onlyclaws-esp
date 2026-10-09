@@ -1,4 +1,4 @@
-"""Multi-tenant helpers: each kuroneko user owns their ESP devices."""
+"""Multi-tenant helpers: each account (by email) owns its ESP devices."""
 
 from __future__ import annotations
 
@@ -12,17 +12,19 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, Request
 
+import access
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def env_allowlist() -> Optional[set[str]]:
-    """None = open (any kuroneko user). Non-empty set = closed allowlist."""
+    """None = open (any account). A set = closed; `invite` = admins + approved only."""
     raw = os.environ.get("EPD_ALLOWLIST", "").strip()
     if not raw or raw == "*":
         return None
-    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+    return {e.strip().lower() for e in raw.split(",") if e.strip() and e.strip() != "invite"}
 
 
 BOOTSTRAP_OWNER = os.environ.get(
@@ -170,7 +172,7 @@ def verify_agent_control_token(
     if row["revoked_at"]:
         raise HTTPException(status_code=401, detail="agent token revoked")
     email = str(row["owner_email"] or "").strip().lower()
-    if not email_allowed(email):
+    if not email_allowed(email, conn):
         raise HTTPException(status_code=403, detail="not authorized for this instance")
     now = _utc_now()
     conn.execute(
@@ -185,11 +187,15 @@ def verify_agent_control_token(
     }
 
 
-def email_allowed(email: str) -> bool:
+def email_allowed(email: str, conn: Optional[sqlite3.Connection] = None) -> bool:
+    """Open instance, env allowlist, admin, or an approved application."""
     allow = env_allowlist()
     if allow is None:
         return True
-    return email.strip().lower() in allow
+    email = email.strip().lower()
+    if email in allow or access.is_admin(email):
+        return True
+    return conn is not None and access.is_approved(conn, email)
 
 
 def session_email(sess: dict[str, Any]) -> str:

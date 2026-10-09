@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Apply · OnlyClaws</title>
+  <meta name="robots" content="noindex" />
+  <meta name="theme-color" content="#f3f0e8" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23e5482d' d='M2 3h2v6H2zM7 1h2v8H7zM12 3h2v6h-2zM2 9h12v2H2zM4 11h8v4H4z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="../assets/oc.css" />
+  <style>
+    .page { display: grid; grid-template-columns: 1fr 1.25fr; gap: 48px; padding: 56px 0 72px; align-items: start; }
+    @media (max-width: 880px) { .page { grid-template-columns: 1fr; gap: 28px; padding-top: 36px; } }
+    .intro h1 { font-size: clamp(1.8rem, 3.4vw, 2.5rem); letter-spacing: -.02em; line-height: 1.15; margin: 0 0 14px; }
+    .intro p { color: var(--ink-2); }
+    .facts { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 12px; }
+    .facts li { display: grid; grid-template-columns: 28px 1fr; gap: 10px; font-size: .9rem; }
+    .facts .n { font-family: var(--mono); font-size: .78rem; color: var(--accent); padding-top: 2px; }
+    .facts b { display: block; }
+    .facts span { color: var(--muted); }
+    .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+    .count { float: right; font-weight: 400; color: var(--muted); font-family: var(--mono); font-size: .74rem; }
+
+    .timeline { list-style: none; margin: 18px 0 0; padding: 0; }
+    .timeline li { position: relative; padding: 0 0 20px 30px; }
+    .timeline li::before { content: ""; position: absolute; left: 8px; top: 18px; bottom: 0; width: 2px; background: var(--line); }
+    .timeline li:last-child::before { display: none; }
+    .timeline .mark { position: absolute; left: 0; top: 2px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--card); }
+    .timeline li.done .mark { background: var(--ink); border-color: var(--ink); }
+    .timeline li.now .mark { border-color: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 18%, transparent); }
+    .timeline li.good .mark { background: var(--green); border-color: var(--green); }
+    .timeline li.bad .mark { background: var(--red); border-color: var(--red); }
+    .timeline b { display: block; font-size: .95rem; }
+    .timeline span { font-size: .84rem; color: var(--muted); }
+    .status-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+  </style>
+</head>
+<body data-title-key="apply.doc_title">
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="../">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="#e5482d" d="M2 3h2v6H2zM7 1h2v8H7zM12 3h2v6h-2zM2 9h12v2H2zM4 11h8v4H4z"/></svg>
+        OnlyClaws
+      </a>
+      <span class="spacer"></span>
+      <button class="lang-btn" data-lang-toggle type="button">EN</button>
+      <a class="btn sm ghost" href="../console/" data-i18n="nav.console">控制台</a>
+    </div>
+  </header>
+
+  <main class="wrap page">
+    <div class="intro">
+      <p class="kicker" data-i18n="apply.kicker">Early access</p>
+      <h1 data-i18n="apply.title">申请 OnlyClaws 托管控制台</h1>
+      <p data-i18n="apply.lede"></p>
+      <ul class="facts">
+        <li><span class="n">01</span><div><b data-i18n="apply.f1.t"></b><span data-i18n="apply.f1.b"></span></div></li>
+        <li><span class="n">02</span><div><b data-i18n="apply.f2.t"></b><span data-i18n="apply.f2.b"></span></div></li>
+        <li><span class="n">03</span><div><b data-i18n="apply.f3.t"></b><span data-i18n-html="apply.f3.b"></span></div></li>
+      </ul>
+    </div>
+
+    <div>
+      <form id="applyForm" class="card" novalidate>
+        <h3 data-i18n="apply.form.title">申请表</h3>
+        <p class="hint" data-i18n="apply.form.hint"></p>
+        <div class="grid-2">
+          <div class="field">
+            <label for="fEmail" data-i18n="apply.email">邮箱</label>
+            <input id="fEmail" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com" />
+            <div class="help" data-i18n="apply.email.help"></div>
+          </div>
+          <div class="field">
+            <label for="fName" data-i18n="apply.name">怎么称呼你</label>
+            <input id="fName" type="text" autocomplete="name" required maxlength="80" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="fHardware" data-i18n="apply.hardware">你的硬件</label>
+          <select id="fHardware">
+            <option value="rlcd-42" data-i18n="hw.rlcd">Waveshare ESP32-S3-RLCD-4.2</option>
+            <option value="epaper-397" data-i18n="hw.epd">Waveshare ESP32-S3-ePaper-3.97</option>
+            <option value="bare-s3" data-i18n="hw.bare">其他 ESP32-S3 模组 / 自己接线</option>
+            <option value="other" data-i18n="hw.other">还没有硬件，先了解</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fUse"><span data-i18n="apply.use">你想用它做什么</span><span class="count" id="useCount">0/2000</span></label>
+          <textarea id="fUse" required minlength="10" maxlength="2000" data-i18n-ph="apply.use.ph"></textarea>
+        </div>
+        <div class="field">
+          <label for="fLinks" data-i18n="apply.links">链接（可选）</label>
+          <input id="fLinks" type="text" maxlength="500" data-i18n-ph="apply.links.ph" />
+        </div>
+        <div class="hp" aria-hidden="true">
+          <label for="fWebsite">Website</label>
+          <input id="fWebsite" type="text" tabindex="-1" autocomplete="off" />
+        </div>
+        <div class="row">
+          <button class="btn accent" type="submit" id="submitBtn" data-i18n="apply.submit">提交申请</button>
+          <span class="muted small" data-i18n="apply.privacy"></span>
+        </div>
+        <div id="formErr" class="note err hidden"></div>
+      </form>
+
+      <div id="statusView" class="card hidden">
+        <div class="status-head">
+          <h3 data-i18n="status.title">申请进度</h3>
+          <span id="statusTag" class="tag"></span>
+        </div>
+        <p class="hint" id="statusWho"></p>
+        <ul class="timeline" id="timeline"></ul>
+        <div id="statusNote" class="note info hidden"></div>
+        <div class="row" style="margin-top:6px">
+          <a class="btn accent hidden" id="openConsole" href="../console/" data-i18n="status.open">打开控制台</a>
+          <button class="btn ghost hidden" type="button" id="resubmitBtn" data-i18n="status.resubmit">修改后重新提交</button>
+          <button class="btn ghost" type="button" id="refreshStatus" data-i18n="status.refresh">刷新</button>
+        </div>
+        <div id="statusMail" class="note info hidden"></div>
+        <p class="muted small" style="margin:16px 0 0" data-i18n="status.bookmark"></p>
+      </div>
+
+      <div id="statusErr" class="note err hidden"></div>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <span>© 2026 OnlyClaws</span>
+      <span class="spacer"></span>
+      <a href="../">OnlyClaws</a>
+      <a href="https://github.com/shinjiyu/onlyclaws-esp" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </footer>
+
+  <script src="../assets/oc.js"></script>
+  <script>
+    OC.addStrings({
+      zh: {
+        "apply.doc_title": "申请托管控制台 · OnlyClaws",
+        "nav.console": "控制台",
+        "apply.kicker": "内测申请",
+        "apply.title": "申请 OnlyClaws 托管控制台",
+        "apply.lede": "onlyclaws.world 上的控制台由我们托管，目前按人工审核逐批开放。填一下你的硬件和想法，通过后我们会发邮件通知你。",
+        "apply.f1.t": "人工审核",
+        "apply.f1.b": "通常 1–3 天内处理。有真实硬件、想法具体的申请会优先。",
+        "apply.f2.t": "邮件通知",
+        "apply.f2.b": "提交后会收到确认邮件，审核结果也会发到同一个邮箱。",
+        "apply.f3.t": "不想等？",
+        "apply.f3.b": "固件和控制面都是 MIT 开源，可以照 <a href=\"https://github.com/shinjiyu/onlyclaws-esp/tree/main/server\" target=\"_blank\" rel=\"noopener\">server/</a> 自建一套。",
+        "apply.form.title": "申请表",
+        "apply.form.hint": "这个邮箱就是你的控制台账号，审核结果和设置密码的链接都会发到这里。",
+        "apply.email": "邮箱",
+        "apply.email.help": "通过后用它登录控制台",
+        "apply.name": "怎么称呼你",
+        "apply.hardware": "你的硬件",
+        "hw.rlcd": "Waveshare ESP32-S3-RLCD-4.2",
+        "hw.epd": "Waveshare ESP32-S3-ePaper-3.97",
+        "hw.bare": "其他 ESP32-S3 模组 / 自己接线",
+        "hw.other": "还没有硬件，先了解一下",
+        "apply.use": "你想用它做什么",
+        "apply.use.ph": "例如：让我的 Agent 每天早上在桌面墨水屏上显示日程和天气；或者用 Lua 做个小游戏给孩子玩…",
+        "apply.links": "链接（可选）",
+        "apply.links.ph": "GitHub、博客、小红书、B 站…任何能让我们了解你的地方",
+        "apply.submit": "提交申请",
+        "apply.submitting": "提交中…",
+        "apply.privacy": "只用于审核和通知，不会公开。",
+        "err.email": "邮箱格式不对",
+        "err.name": "请填写称呼",
+        "err.use": "请多写几句你想做什么（至少 10 个字）",
+        "err.rate": "提交太频繁，请一小时后再试",
+        "status.title": "申请进度",
+        "status.who": "{name} · {email}",
+        "status.pending": "审核中",
+        "status.approved": "已通过",
+        "status.rejected": "未通过",
+        "status.t1": "已提交",
+        "status.t2": "人工审核",
+        "status.t2.now": "我们会尽快处理，结果会发到你的邮箱",
+        "status.t3.approved": "已开通",
+        "status.t3.approved.b": "按邮件里的链接设置密码，然后登录控制台",
+        "status.t3.rejected": "暂未开通",
+        "status.t3.wait": "开通控制台",
+        "status.note": "审核备注：{note}",
+        "status.open": "打开控制台",
+        "status.resubmit": "修改后重新提交",
+        "status.refresh": "刷新",
+        "status.bookmark": "可以收藏这个页面，随时回来查看进度。链接里包含查看凭证，请不要公开分享。",
+        "status.mail.on": "确认邮件已发送到 {email}。没收到的话看看垃圾箱。",
+        "status.mail.off": "邮件通知暂未配置，请收藏本页查看审核结果。",
+        "status.missing": "找不到这个申请，链接可能已失效（每次审核后会发新链接到邮箱）。",
+      },
+      en: {
+        "apply.doc_title": "Apply for the hosted console · OnlyClaws",
+        "nav.console": "Console",
+        "apply.kicker": "Early access",
+        "apply.title": "Apply for the OnlyClaws hosted console",
+        "apply.lede": "We host the console at onlyclaws.world and open it in batches after a manual review. Tell us about your hardware and what you want to build. We'll email you when you're in.",
+        "apply.f1.t": "Reviewed by a human",
+        "apply.f1.b": "Usually within 1–3 days. Real hardware and a concrete idea move you up the queue.",
+        "apply.f2.t": "Email updates",
+        "apply.f2.b": "You get a confirmation now, and the decision goes to the same address.",
+        "apply.f3.t": "Don't want to wait?",
+        "apply.f3.b": "The firmware and control plane are MIT. Run your own from <a href=\"https://github.com/shinjiyu/onlyclaws-esp/tree/main/server\" target=\"_blank\" rel=\"noopener\">server/</a>.",
+        "apply.form.title": "Application",
+        "apply.form.hint": "This email becomes your console account. The decision and a link to set your password go here.",
+        "apply.email": "Email",
+        "apply.email.help": "You'll sign in to the console with it",
+        "apply.name": "Name",
+        "apply.hardware": "Your hardware",
+        "hw.rlcd": "Waveshare ESP32-S3-RLCD-4.2",
+        "hw.epd": "Waveshare ESP32-S3-ePaper-3.97",
+        "hw.bare": "Another ESP32-S3 module / my own wiring",
+        "hw.other": "No hardware yet, just exploring",
+        "apply.use": "What do you want to build?",
+        "apply.use.ph": "e.g. my agent shows today's calendar and weather on a desk e-paper every morning; or a small Lua game for my kids…",
+        "apply.links": "Links (optional)",
+        "apply.links.ph": "GitHub, blog, X, YouTube… anything that helps us know you",
+        "apply.submit": "Submit application",
+        "apply.submitting": "Submitting…",
+        "apply.privacy": "Used only for review and notices. Never shown publicly.",
+        "err.email": "That email doesn't look right",
+        "err.name": "Please tell us your name",
+        "err.use": "Tell us a bit more about what you want to build (10+ characters)",
+        "err.rate": "Too many submissions. Try again in an hour.",
+        "status.title": "Application status",
+        "status.who": "{name} · {email}",
+        "status.pending": "In review",
+        "status.approved": "Approved",
+        "status.rejected": "Not approved",
+        "status.t1": "Submitted",
+        "status.t2": "Manual review",
+        "status.t2.now": "We'll get to it soon and email you the result",
+        "status.t3.approved": "Access granted",
+        "status.t3.approved.b": "Set your password from the email link, then sign in",
+        "status.t3.rejected": "Not opened yet",
+        "status.t3.wait": "Console access",
+        "status.note": "Reviewer note: {note}",
+        "status.open": "Open the console",
+        "status.resubmit": "Edit and resubmit",
+        "status.refresh": "Refresh",
+        "status.bookmark": "Bookmark this page to check back. The link contains a private key, so don't share it.",
+        "status.mail.on": "A confirmation was sent to {email}. Check spam if you don't see it.",
+        "status.mail.off": "Email notices aren't configured yet. Bookmark this page to see the decision.",
+        "status.missing": "We can't find this application. The link may have expired (each review emails a fresh one).",
+      },
+    });
+    OC.apply();
+
+    const $ = OC.$;
+    const form = $("#applyForm");
+    const statusView = $("#statusView");
+    const STORE = "oc_apply";
+    let current = null;
+    let mailSent = null;
+
+    $("#fUse").addEventListener("input", (e) => { $("#useCount").textContent = e.target.value.length + "/2000"; });
+
+    function showErr(el, msg) { el.textContent = msg; el.classList.toggle("hidden", !msg); }
+
+    function mapErr(ex) {
+      if (ex.status === 429) return OC.t("err.rate");
+      if (/invalid email/.test(ex.message)) return OC.t("err.email");
+      if (/use_case/.test(ex.message)) return OC.t("err.use");
+      return ex.message;
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const err = $("#formErr");
+      showErr(err, "");
+      const email = $("#fEmail").value.trim();
+      const name = $("#fName").value.trim();
+      const use = $("#fUse").value.trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) return showErr(err, OC.t("err.email"));
+      if (!name) return showErr(err, OC.t("err.name"));
+      if (use.length < 10) return showErr(err, OC.t("err.use"));
+      const btn = $("#submitBtn");
+      btn.disabled = true;
+      btn.textContent = OC.t("apply.submitting");
+      try {
+        const data = await OC.api("/api/applications", {
+          method: "POST",
+          body: {
+            email, name, use_case: use,
+            hardware: $("#fHardware").value,
+            links: $("#fLinks").value.trim(),
+            lang: OC.lang,
+            website: $("#fWebsite").value,
+          },
+        });
+        if (data.status_key) {
+          const ref = { id: data.application.id, k: data.status_key };
+          localStorage.setItem(STORE, JSON.stringify(ref));
+          history.replaceState(null, "", "?id=" + encodeURIComponent(ref.id) + "&k=" + encodeURIComponent(ref.k));
+        }
+        mailSent = !!data.mail;
+        renderStatus(data.application);
+      } catch (ex) {
+        showErr(err, mapErr(ex));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = OC.t("apply.submit");
+      }
+    });
+
+    function renderStatus(app) {
+      current = app;
+      form.classList.add("hidden");
+      statusView.classList.remove("hidden");
+      $("#statusErr").classList.add("hidden");
+      const st = app.status || "pending";
+      const tag = $("#statusTag");
+      tag.className = "tag " + (st === "approved" ? "green" : st === "rejected" ? "red" : "amber");
+      tag.textContent = OC.t("status." + st);
+      $("#statusWho").textContent = app.email ? OC.t("status.who", { name: app.name || "", email: app.email }) : "";
+
+      const steps = [
+        { cls: "done", t: OC.t("status.t1"), b: OC.fmtTime(app.created_at) },
+        st === "pending"
+          ? { cls: "now", t: OC.t("status.t2"), b: OC.t("status.t2.now") }
+          : { cls: "done", t: OC.t("status.t2"), b: OC.fmtTime(app.reviewed_at) },
+        st === "approved"
+          ? { cls: "good", t: OC.t("status.t3.approved"), b: OC.t("status.t3.approved.b") }
+          : st === "rejected"
+          ? { cls: "bad", t: OC.t("status.t3.rejected"), b: "" }
+          : { cls: "", t: OC.t("status.t3.wait"), b: "" },
+      ];
+      $("#timeline").innerHTML = steps
+        .map((s) => `<li class="${s.cls}"><i class="mark"></i><b>${OC.escapeHtml(s.t)}</b><span>${OC.escapeHtml(s.b || "")}</span></li>`)
+        .join("");
+
+      const note = $("#statusNote");
+      note.classList.toggle("hidden", !app.note);
+      if (app.note) note.textContent = OC.t("status.note", { note: app.note });
+      $("#openConsole").classList.toggle("hidden", st !== "approved");
+      $("#resubmitBtn").classList.toggle("hidden", st !== "rejected");
+
+      const mail = $("#statusMail");
+      if (mailSent === null || st !== "pending") {
+        mail.classList.add("hidden");
+      } else {
+        mail.textContent = mailSent ? OC.t("status.mail.on", { email: app.email || "" }) : OC.t("status.mail.off");
+        mail.classList.remove("hidden");
+      }
+    }
+
+    async function loadStatus(id, k) {
+      try {
+        const data = await OC.api("/api/applications/status?id=" + encodeURIComponent(id) + "&k=" + encodeURIComponent(k));
+        localStorage.setItem(STORE, JSON.stringify({ id, k }));
+        renderStatus(data.application);
+      } catch (ex) {
+        if (ex.status === 404) {
+          localStorage.removeItem(STORE);
+          showErr($("#statusErr"), OC.t("status.missing"));
+          form.classList.remove("hidden");
+          statusView.classList.add("hidden");
+        } else {
+          showErr($("#statusErr"), ex.message);
+        }
+      }
+    }
+
+    function ref() {
+      const q = new URLSearchParams(location.search);
+      if (q.get("id") && q.get("k")) return { id: q.get("id"), k: q.get("k") };
+      try { return JSON.parse(localStorage.getItem(STORE) || "null"); } catch { return null; }
+    }
+
+    $("#refreshStatus").addEventListener("click", () => { const r = ref(); if (r) loadStatus(r.id, r.k); });
+    $("#resubmitBtn").addEventListener("click", () => {
+      statusView.classList.add("hidden");
+      form.classList.remove("hidden");
+      if (current) { $("#fEmail").value = current.email || ""; $("#fName").value = current.name || ""; }
+      $("#fUse").focus();
+    });
+    document.addEventListener("oc:lang", () => { if (current) renderStatus(current); });
+
+    const r = ref();
+    if (r) loadStatus(r.id, r.k);
+  </script>
+</body>
+</html>

@@ -16,14 +16,32 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote, urlparse
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response as RawResponse
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response as RawResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
+import access
+import accounts
 import render as epd_render
 import snake_ctrl
 import tenancy
@@ -37,12 +55,13 @@ BITMAP_DIR = DATA_DIR / "bitmaps"
 VOICE_DIR = DATA_DIR / "voice"
 BITMAP_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
-KURONEKO_BASE = os.environ.get("KURONEKO_BASE", "https://kuroneko.chat").rstrip("/")
 SESSION_SECRET = os.environ.get("EPD_SESSION_SECRET", "")
 SESSION_COOKIE = os.environ.get("EPD_SESSION_COOKIE", "epd_session")
 SESSION_MAX_AGE = int(os.environ.get("EPD_SESSION_MAX_AGE", "604800"))
 DEFAULT_DEVICE_ID = os.environ.get("EPD_DEFAULT_DEVICE_ID", "a4cb8fdf8440")
-PUBLIC_BASE = os.environ.get("EPD_PUBLIC_BASE", "https://onlyclaws.world/epaper")
+PUBLIC_BASE = os.environ.get("EPD_PUBLIC_BASE", "https://onlyclaws.world").rstrip("/")
+COOKIE_PATH = urlparse(PUBLIC_BASE).path.rstrip("/") or "/"
+CONSOLE_URL = f"{PUBLIC_BASE}/console/"
 
 # device_id -> (width, height, display_name) — hints only; ownership is in DB
 DEVICE_PANELS: dict[str, tuple[int, int, str]] = {
@@ -61,6 +80,7 @@ if not SESSION_SECRET:
     raise RuntimeError("EPD_SESSION_SECRET is required")
 
 serializer = URLSafeTimedSerializer(SESSION_SECRET, salt="epaper-ctrl")
+password_links = accounts.LinkSigner(SESSION_SECRET)
 
 
 def utc_now() -> str:
@@ -116,6 +136,8 @@ def init_db() -> None:
         ensure_column(conn, "devices", "token_hash", "TEXT")
         ensure_column(conn, "devices", "claimed_at", "TEXT")
         tenancy.ensure_agent_tokens_table(conn)
+        access.ensure_table(conn)
+        accounts.ensure_table(conn)
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS scripts (
@@ -421,12 +443,12 @@ def set_session(resp: Response, email: str, user: dict[str, Any]) -> None:
         httponly=True,
         secure=True,
         samesite="lax",
-        path="/epaper",
+        path=COOKIE_PATH,
     )
 
 
 def clear_session(resp: Response) -> None:
-    resp.delete_cookie(SESSION_COOKIE, path="/epaper")
+    resp.delete_cookie(SESSION_COOKIE, path=COOKIE_PATH)
 
 
 def read_session(request: Request) -> Optional[dict[str, Any]]:
@@ -438,8 +460,11 @@ def read_session(request: Request) -> Optional[dict[str, Any]]:
     except (BadSignature, SignatureExpired):
         return None
     email = str(data.get("email", "")).lower()
-    if not email or not tenancy.email_allowed(email):
+    if not email:
         return None
+    with db() as conn:
+        if not tenancy.email_allowed(email, conn):
+            return None
     return data
 
 
@@ -552,43 +577,6 @@ def require_device_token(device_id: str, request: Request) -> str:
 # FastAPI dependency: path {device_id} + bearer must match that device's token.
 def require_known_device(device_id: str, request: Request) -> str:
     return require_device_token(device_id, request)
-
-
-async def kuroneko_login(email: str, password: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.post(
-            f"{KURONEKO_BASE}/api/auth/login",
-            json={"email": email, "password": password},
-            headers={"Content-Type": "application/json"},
-        )
-    try:
-        payload = r.json()
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"kuroneko bad response: {exc}") from exc
-    if r.status_code >= 400 or not payload.get("success"):
-        raise HTTPException(
-            status_code=401,
-            detail=payload.get("message") or "kuroneko login failed",
-        )
-    return payload.get("data") or {}
-
-
-async def kuroneko_verify(access_token: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(
-            f"{KURONEKO_BASE}/api/auth/verify",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-    try:
-        payload = r.json()
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"kuroneko bad response: {exc}") from exc
-    if r.status_code >= 400 or not payload.get("success"):
-        raise HTTPException(
-            status_code=401,
-            detail=payload.get("message") or "token invalid",
-        )
-    return payload.get("data") or payload
 
 
 def enqueue_bitmap(
@@ -715,8 +703,28 @@ def message_payload(msg: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+async def home() -> FileResponse:
+    return FileResponse(STATIC_DIR / "home.html")
+
+
+@app.get("/console")
+async def console_redirect() -> RedirectResponse:
+    return RedirectResponse(url="console/", status_code=301)
+
+
+@app.get("/console/")
+async def console() -> FileResponse:
+    return FileResponse(STATIC_DIR / "console.html")
+
+
+@app.get("/apply")
+async def apply_redirect() -> RedirectResponse:
+    return RedirectResponse(url="apply/", status_code=301)
+
+
+@app.get("/apply/")
+async def apply_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "apply.html")
 
 
 @app.get("/api/health")
@@ -736,34 +744,87 @@ async def health() -> dict[str, Any]:
     }
 
 
+def password_link(conn: sqlite3.Connection, email: str) -> str:
+    # Fragment, not query: the token never reaches CDN/nginx access logs.
+    return f"{CONSOLE_URL}#setpw={password_links.make(conn, email)}"
+
+
+def display_name(conn: sqlite3.Connection, email: str) -> Optional[str]:
+    row = conn.execute(
+        "SELECT name FROM access_applications WHERE email=?", (email,)
+    ).fetchone()
+    return row["name"] if row else None
+
+
+def start_session(response: Response, conn: sqlite3.Connection, email: str) -> dict[str, Any]:
+    user = {"email": email, "name": display_name(conn, email)}
+    set_session(response, email, user)
+    return {"success": True, "user": {**user, "is_admin": access.is_admin(email)}}
+
+
 @app.post("/api/auth/login")
-async def login(body: LoginIn, response: Response) -> dict[str, Any]:
+async def login(body: LoginIn, request: Request, response: Response) -> dict[str, Any]:
     email = body.email.strip().lower()
-    data = await kuroneko_login(email, body.password)
-    user = data.get("user") or {}
-    user_email = str(user.get("email") or email).strip().lower()
-    if not tenancy.email_allowed(user_email):
-        raise HTTPException(status_code=403, detail="not authorized for this instance")
+    ip = access.client_ip(request) or "unknown"
+    if not accounts.login_ip_limiter.hit(ip) or not accounts.login_email_limiter.hit(email):
+        raise HTTPException(status_code=429, detail="too_many_attempts")
 
-    access = data.get("access_token")
-    if access:
-        try:
-            verified = await kuroneko_verify(access)
-            vuser = verified.get("user") or verified
-            if isinstance(vuser, dict) and vuser.get("email"):
-                user = {**user, **vuser}
-                user_email = str(user.get("email")).strip().lower()
-        except HTTPException:
-            pass
+    if not await accounts.upstream_login(email, body.password):
+        raise HTTPException(status_code=401, detail="invalid_credentials")
+    with db() as conn:
+        if not tenancy.email_allowed(email, conn):
+            raise HTTPException(status_code=403, detail="access_not_granted")
+        return start_session(response, conn, email)
 
-    if not tenancy.email_allowed(user_email):
-        raise HTTPException(status_code=403, detail="not authorized for this instance")
 
-    set_session(response, user_email, user)
-    return {
-        "success": True,
-        "user": {"email": user_email, "name": user.get("name") or user.get("username")},
-    }
+class LinkRequestIn(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    lang: str = Field("zh", max_length=8)
+
+
+class SetPasswordIn(BaseModel):
+    token: str = Field(..., min_length=10, max_length=512)
+    password: str = Field(..., max_length=accounts.PASSWORD_MAX)
+
+
+@app.post("/api/auth/password/request")
+async def request_password_link(
+    body: LinkRequestIn, request: Request, background: BackgroundTasks
+) -> dict[str, Any]:
+    email = body.email.strip().lower()
+    ip = access.client_ip(request) or "unknown"
+    if not accounts.link_ip_limiter.hit(ip):
+        raise HTTPException(status_code=429, detail="too_many_attempts")
+    # Same answer whether or not the email has access, so this can't enumerate accounts.
+    if access.EMAIL_RE.match(email) and accounts.link_email_limiter.hit(email):
+        with db() as conn:
+            if tenancy.email_allowed(email, conn):
+                lang = "en" if body.lang.lower().startswith("en") else "zh"
+                subject, text = accounts.mail_password_link(email, lang, password_link(conn, email))
+                background.add_task(access.send_mail, [email], subject, text)
+    return {"success": True}
+
+
+@app.get("/api/auth/password/link")
+async def password_link_info(token: str) -> dict[str, Any]:
+    with db() as conn:
+        email = password_links.resolve(conn, token)
+    return {"success": True, "email": email}
+
+
+@app.post("/api/auth/password/set")
+async def set_password(body: SetPasswordIn, response: Response) -> dict[str, Any]:
+    accounts.check_password_policy(body.password)
+    with db() as conn:
+        email = password_links.resolve(conn, body.token)
+        if not tenancy.email_allowed(email, conn):
+            raise HTTPException(status_code=403, detail="access_not_granted")
+    if await accounts.upstream_register(email, body.password) == "exists":
+        if not await accounts.upstream_set_password(email, body.password):
+            raise HTTPException(status_code=409, detail="account_exists")
+    with db() as conn:
+        accounts.mark_registered(conn, email)
+        return start_session(response, conn, email)
 
 
 @app.post("/api/auth/logout")
@@ -775,13 +836,146 @@ async def logout(response: Response) -> dict[str, Any]:
 @app.get("/api/auth/me")
 async def me(sess: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     user = sess.get("user") or {}
+    email = tenancy.session_email(sess)
     return {
         "success": True,
         "user": {
             "email": sess.get("email"),
             "name": user.get("name") or user.get("username"),
+            "is_admin": sess.get("auth") != "agent_token" and access.is_admin(email),
         },
     }
+
+
+# ---- access applications (public apply + admin review) ----
+
+
+class ApplicationIn(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    name: str = Field(..., min_length=1, max_length=80)
+    hardware: str = Field("other", max_length=32)
+    use_case: str = Field(..., min_length=10, max_length=2000)
+    links: str = Field("", max_length=500)
+    lang: str = Field("zh", max_length=8)
+    website: str = Field("", max_length=200)  # honeypot; humans leave it empty
+
+
+class ReviewIn(BaseModel):
+    note: str = Field("", max_length=500)
+
+
+def application_status_url(app_id: str, key: str) -> str:
+    return f"{PUBLIC_BASE}/apply/?id={quote(app_id)}&k={quote(key)}"
+
+
+async def require_admin(sess: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    if sess.get("auth") == "agent_token":
+        raise HTTPException(status_code=403, detail="review requires human login")
+    if not access.is_admin(tenancy.session_email(sess)):
+        raise HTTPException(status_code=403, detail="admin only")
+    return sess
+
+
+@app.post("/api/applications")
+async def submit_application(
+    body: ApplicationIn, request: Request, background: BackgroundTasks
+) -> dict[str, Any]:
+    if body.website.strip():
+        # Pretend success so bots learn nothing.
+        return {"success": True, "application": {"status": "pending"}}
+    ip = access.client_ip(request)
+    if not access.apply_limiter.hit(ip or "unknown"):
+        raise HTTPException(status_code=429, detail="too many applications; try again later")
+    with db() as conn:
+        view, key, is_new = access.submit(
+            conn,
+            email=body.email,
+            name=body.name,
+            hardware=body.hardware,
+            use_case=body.use_case,
+            links=body.links,
+            lang=body.lang,
+            ip=ip,
+        )
+    lang = "en" if body.lang.lower().startswith("en") else "zh"
+    status_url = application_status_url(view["id"], key)
+    if is_new:
+        subject, text = access.mail_received(view, lang, status_url)
+        background.add_task(access.send_mail, [view["email"]], subject, text)
+        subject, text = access.mail_admin_new(
+            view, body.hardware, body.use_case.strip(), body.links.strip(), f"{CONSOLE_URL}#review"
+        )
+        background.add_task(access.send_mail, access.notify_emails(), subject, text)
+    return {
+        "success": True,
+        "application": view,
+        "status_key": key,
+        "status_url": status_url,
+        "mail": access.mail_configured(),
+    }
+
+
+@app.get("/api/applications/status")
+async def application_status(id: str, k: str, request: Request) -> dict[str, Any]:
+    if not access.status_limiter.hit(access.client_ip(request) or "unknown"):
+        raise HTTPException(status_code=429, detail="too many requests")
+    with db() as conn:
+        view = access.lookup(conn, id, k)
+    out: dict[str, Any] = {"success": True, "application": view}
+    if view["status"] == "approved":
+        out["console_url"] = CONSOLE_URL
+    return out
+
+
+@app.get("/api/admin/applications")
+async def admin_list_applications(
+    status: Optional[str] = None,
+    limit: int = 100,
+    _: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    with db() as conn:
+        items, counts = access.list_for_admin(conn, status, limit)
+    return {
+        "success": True,
+        "applications": items,
+        "counts": counts,
+        "mail": access.mail_configured(),
+    }
+
+
+async def _review_application(
+    app_id: str, status: str, body: ReviewIn, sess: dict[str, Any], background: BackgroundTasks
+) -> dict[str, Any]:
+    reviewer = tenancy.session_email(sess)
+    with db() as conn:
+        view = access.review(conn, app_id=app_id, status=status, note=body.note, reviewer=reviewer)
+        key = access.rotate_status_key(conn, app_id)
+        setup_link = password_link(conn, view["email"]) if status == "approved" else None
+    subject, text = access.mail_decision(
+        view, view["lang"], CONSOLE_URL, application_status_url(app_id, key), setup_link
+    )
+    background.add_task(access.send_mail, [view["email"]], subject, text)
+    return {"success": True, "application": view, "mail": access.mail_configured()}
+
+
+@app.post("/api/admin/applications/{app_id}/approve")
+async def admin_approve_application(
+    app_id: str,
+    body: ReviewIn,
+    background: BackgroundTasks,
+    sess: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    return await _review_application(app_id, "approved", body, sess, background)
+
+
+@app.post("/api/admin/applications/{app_id}/reject")
+async def admin_reject_application(
+    app_id: str,
+    body: ReviewIn,
+    background: BackgroundTasks,
+    sess: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    return await _review_application(app_id, "rejected", body, sess, background)
 
 
 @app.get("/api/devices")
@@ -1739,9 +1933,9 @@ async def agent_capabilities(
             "revoke": "DELETE /api/agent-tokens/{id}",
             "human_session": "Cookie after POST /api/auth/login — humans only; Agents must NOT use passwords",
             "cookie": SESSION_COOKIE,
-            "cookie_path": "/epaper",
+            "cookie_path": COOKIE_PATH,
             "skill": "GET /api/agent/skill.md (public)",
-            "allowlist": "optional EPD_ALLOWLIST (* or empty = open)",
+            "allowlist": "EPD_ALLOWLIST (* or empty = open) plus approved applications at /apply/",
             "device_token": "per-device bearer for ESP wire protocol only — not for Agents",
         },
         "devices": [

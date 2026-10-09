@@ -1,6 +1,6 @@
 # OnlyClaws ESP32 Agent Platform — Agent Function-Call Spec
 
-Base URL: `https://onlyclaws.world/epaper`
+Base URL: `https://onlyclaws.world`
 
 **Product model:** pure agent/device framework. Remote Agents control ESP32 over the network; optionally deploy **Lua** for an on-device loop. No character UI. The full LLM does **not** run on-device.
 
@@ -10,7 +10,7 @@ Base URL: `https://onlyclaws.world/epaper`
 
 ### 1.1 Agent control token (preferred for Agents)
 
-Humans log into the web UI with kuroneko.chat, then mint an **Agent control token** (`oct_…`).
+Humans sign in to the console (`/console/`), then mint an **Agent control token** (`oct_…`).
 
 Agents call every control-plane API with:
 
@@ -23,7 +23,7 @@ Authorization: Bearer oct_...
 - Revoke: `DELETE /api/agent-tokens/{id}`
 - Public skill: `GET /api/agent/skill.md` (no auth)
 
-**Never** ask for kuroneko email/password. On `401`, ask the human to mint/rotate a token in the UI.
+**Never** ask for the human's email/password. On `401`, ask the human to mint/rotate a token in the UI.
 
 ### 1.2 Human browser session (UI only)
 
