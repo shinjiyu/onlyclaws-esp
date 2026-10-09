@@ -1,6 +1,12 @@
 # 固件本地开发（`rlcd/`）
 
-统一运行时：`agent-runtime-0.13.x`。用 PlatformIO 环境选择面板。
+统一运行时：`agent-runtime-0.13.x`。`0.13.6` 起核心是 ESP32-S3 裸件，屏和音频按环境打开。
+
+| 环境 | 组成 |
+|------|------|
+| `esp32-s3-bare` | 核心：Wi-Fi、云端、Lua。无面板、无 ES8311 |
+| `esp32-s3-rlcd-42` | 核心 + ST7305 400×300 + ES8311 + BLE |
+| `esp32-s3-epaper-397` | 核心 + GxEPD2 800×480 + ES8311 |
 
 ## 环境（macOS arm64）
 
@@ -28,13 +34,17 @@ cp include/device_secrets.h.example include/device_secrets.h
 
 ## 构建与烧录
 
-| 环境 | 面板 |
+| 环境 | 组成 |
 |------|------|
-| `esp32-s3-rlcd-42` | ST7305 RLCD 400×300 |
-| `esp32-s3-epaper-397` | GxEPD2 ePaper 3.97" 800×480 |
+| `esp32-s3-bare` | 无面板、无音频 |
+| `esp32-s3-rlcd-42` | ST7305 RLCD 400×300 + 音频 + BLE |
+| `esp32-s3-epaper-397` | GxEPD2 ePaper 3.97" 800×480 + 音频 |
 
 ```bash
 cd rlcd
+
+# 裸件
+pio run -e esp32-s3-bare
 
 # RLCD
 pio run -e esp32-s3-rlcd-42 -t upload --upload-port /dev/cu.usbmodem*

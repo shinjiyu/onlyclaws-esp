@@ -7,6 +7,9 @@
 #include <math.h>
 
 #include "board_pins.h"
+#include "oc_features.h"
+
+#if OC_HAS_AUDIO
 
 namespace {
 bool ready = false;
@@ -408,3 +411,5 @@ size_t audioMicReadMono(int16_t *out, size_t maxFrames) {
   }
   return n;
 }
+
+#endif  // OC_HAS_AUDIO

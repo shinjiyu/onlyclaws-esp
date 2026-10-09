@@ -1,67 +1,39 @@
-#include <Adafruit_GFX.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <Fonts/FreeMonoBold12pt7b.h>
-#include <Fonts/FreeMonoBold18pt7b.h>
 #include <HTTPClient.h>
-#include <SPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
-#include <Wire.h>
-#include <esp_heap_caps.h>
-#include <esp_mac.h>
 #include <esp_netif.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
-#include <math.h>
 #include <string.h>
 
 #include "api_config.h"
-#include "audio_es8311.h"
+#include "audio_plugin.h"
 #include "ble_ctrl.h"
 #include "board_pins.h"
+#include "cloud_http.h"
 #include "http_pad.h"
 #include "cloud_config.h"
 #include "device_secrets.h"
-#include "panel_display.h"
+#include "oc_features.h"
+#include "panel_plugin.h"
 #include "script_engine.h"
 #include "sensors.h"
-#ifdef BOARD_PANEL_EPAPER
-#include "epd397_panel.h"
-#else
-#include "st7305_rlcd.h"
-#endif
 #include "wifi_ap_prov.h"
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.13.5";
+constexpr const char *FW_VERSION = "agent-runtime-0.13.6";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
-constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
-#ifdef BOARD_PANEL_EPAPER
-Epd397Panel display;
-#else
-St7305Rlcd display;
-#endif
-// Separate TLS sessions: Lua http.* must not starve cloud pending/status.
-WiFiClientSecure tlsCloud;
+// Lua http.* uses its own TLS session so it cannot starve cloud pending/status.
 WiFiClientSecure tlsLua;
-uint8_t *frameBuf = nullptr;
 String lastShownId;
 uint32_t lastSensorMs = 0;
 SensorReading lastSensors{};
 String statusLine1 = "OnlyClaws";
 String statusLine2 = "runtime";
-
-String macSuffix() {
-  uint8_t mac[6] = {};
-  esp_read_mac(mac, ESP_MAC_WIFI_STA);
-  char buf[13];
-  snprintf(buf, sizeof(buf), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2],
-           mac[3], mac[4], mac[5]);
-  return String(buf);
-}
 
 void forcePublicDns() {
   esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -75,7 +47,7 @@ void forcePublicDns() {
 }
 
 bool bootButtonHeld(uint32_t ms = 1500) {
-  if (digitalRead(PIN_BOOT_BTN) != LOW) return false;
+  if (PIN_BOOT_BTN < 0 || digitalRead(PIN_BOOT_BTN) != LOW) return false;
   const uint32_t start = millis();
   while (digitalRead(PIN_BOOT_BTN) == LOW) {
     if (millis() - start >= ms) return true;
@@ -84,33 +56,8 @@ bool bootButtonHeld(uint32_t ms = 1500) {
   return false;
 }
 
-bool ensureFrameBuf() {
-  if (frameBuf) return true;
-  frameBuf = (uint8_t *)heap_caps_malloc(FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!frameBuf) frameBuf = (uint8_t *)malloc(FRAME_BYTES);
-  return frameBuf != nullptr;
-}
-
 void drawStatus(const char *title, const char *line2, const char *line3 = nullptr) {
-  display.fillScreen(0);
-  display.drawRect(4, 4, LCD_WIDTH - 8, LCD_HEIGHT - 8, 1);
-  display.setTextColor(1);
-  display.setFont(&FreeMonoBold18pt7b);
-  display.setCursor(24, 48);
-  display.print(title);
-  display.setFont(&FreeMonoBold12pt7b);
-  display.setCursor(24, 96);
-  display.print(line2);
-  if (line3) {
-    display.setCursor(24, 132);
-    display.print(line3);
-  }
-  display.setCursor(24, 180);
-  display.print("MAC ");
-  display.print(macSuffix());
-  display.setCursor(24, 216);
-  display.print(FW_VERSION);
-  display.flush();
+  panelPluginDrawStatus(title, line2, line3);
 }
 
 void drawRuntimeHud(bool forceSensors = false) {
@@ -126,13 +73,7 @@ void drawRuntimeHud(bool forceSensors = false) {
 
 void drawPortalHint() {
   drawStatus("WiFi Setup", "1) Join OC-Setup-*", "2) http://192.168.4.1/");
-}
-
-void drawBitmapFrame() {
-  if (!frameBuf) return;
-  // 1-bit framebuffer already matches panel geometry.
-  display.drawBitmap(0, 0, frameBuf, LCD_WIDTH, LCD_HEIGHT, 1, 0);
-  display.flush();
+  Serial.println("[wifi] setup: join OC-Setup-* then open http://192.168.4.1/");
 }
 
 bool connectWifiWith(const WifiCreds &c, uint32_t timeoutMs = 20000) {
@@ -180,7 +121,6 @@ bool ensureWifiConnected() {
 String apiUrl(const char *suffix) { return apiDeviceUrl(suffix); }
 String absoluteUrl(const char *pathOrUrl) { return apiAbsoluteUrl(pathOrUrl); }
 
-SemaphoreHandle_t httpCloudMutex = nullptr;
 SemaphoreHandle_t httpLuaMutex = nullptr;
 
 bool httpChannelLock(SemaphoreHandle_t *slot, uint32_t waitMs) {
@@ -194,26 +134,7 @@ void httpChannelUnlock(SemaphoreHandle_t slot) {
 
 bool httpJson(const char *method, const String &url, const String &body, String &out,
               uint32_t timeoutMs) {
-  if (WiFi.status() != WL_CONNECTED) return false;
-  if (!httpChannelLock(&httpCloudMutex, 20000)) return false;
-  HTTPClient http;
-  http.setTimeout(timeoutMs);
-  http.setReuse(false);
-  tlsCloud.setInsecure();
-  tlsCloud.setTimeout(timeoutMs);
-  Serial.printf("%s heap=%u %s\n", method, ESP.getFreeHeap(), url.c_str());
-  bool ok = false;
-  if (http.begin(tlsCloud, url)) {
-    http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
-    http.addHeader("Content-Type", "application/json");
-    int code = (strcmp(method, "GET") == 0) ? http.GET() : http.POST(body);
-    out = http.getString();
-    http.end();
-    if (code < 200 || code >= 300) Serial.printf("HTTP %d\n", code);
-    else ok = true;
-  }
-  httpChannelUnlock(httpCloudMutex);
-  return ok;
+  return cloudHttpJson(method, url, body, out, timeoutMs);
 }
 
 // Lua-facing HTTP: any URL, no OnlyClaws device bearer. Returns false only on
@@ -293,162 +214,6 @@ bool hostHttpRequest(const char *method, const char *url, const char *reqBody, i
   return transportOk;
 }
 
-bool downloadAsset(const String &url) {
-  if (!ensureFrameBuf() || WiFi.status() != WL_CONNECTED) return false;
-  if (!httpChannelLock(&httpCloudMutex, 20000)) return false;
-  HTTPClient http;
-  http.setTimeout(45000);
-  http.setReuse(false);
-  tlsCloud.setInsecure();
-  tlsCloud.setTimeout(30000);
-  bool ok = false;
-  if (http.begin(tlsCloud, url)) {
-    http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
-    if (http.GET() == 200) {
-      WiFiClient *stream = http.getStreamPtr();
-      size_t got = 0;
-      const uint32_t t0 = millis();
-      while (got < FRAME_BYTES && millis() - t0 < 45000) {
-        size_t avail = stream->available();
-        if (!avail) {
-          if (!http.connected()) break;
-          delay(2);
-          yield();
-          continue;
-        }
-        got += stream->readBytes(frameBuf + got, min(avail, FRAME_BYTES - got));
-      }
-      ok = got == FRAME_BYTES;
-    }
-    http.end();
-  }
-  httpChannelUnlock(httpCloudMutex);
-  return ok;
-}
-
-bool bitmapNameOk(const char *name) {
-  if (!name || !name[0]) return false;
-  const size_t n = strlen(name);
-  if (n > 64) return false;
-  for (size_t i = 0; i < n; ++i) {
-    const char c = name[i];
-    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                    (c >= '0' && c <= '9') || c == '_' || c == '-';
-    if (!ok) return false;
-  }
-  return true;
-}
-
-struct CachedBmp {
-  char name[65] = {0};
-  int w = 0;
-  int h = 0;
-  uint8_t *data = nullptr;
-  size_t n = 0;
-  uint32_t used = 0;
-};
-
-CachedBmp gBmpCache[8];
-uint32_t gBmpClock = 1;
-
-CachedBmp *cacheFind(const char *name) {
-  for (auto &c : gBmpCache) {
-    if (c.data && strcmp(c.name, name) == 0) {
-      c.used = ++gBmpClock;
-      return &c;
-    }
-  }
-  return nullptr;
-}
-
-CachedBmp *cacheVictim() {
-  CachedBmp *oldest = &gBmpCache[0];
-  for (auto &c : gBmpCache) {
-    if (!c.data) return &c;
-    if (c.used < oldest->used) oldest = &c;
-  }
-  return oldest;
-}
-
-bool hostFetchBitmap(const char *name, ScriptHost::BitmapView *out) {
-  if (out) *out = {};
-  if (!out || !bitmapNameOk(name) || WiFi.status() != WL_CONNECTED) return false;
-  if (CachedBmp *hit = cacheFind(name)) {
-    out->w = hit->w;
-    out->h = hit->h;
-    out->data = hit->data;
-    out->n = hit->n;
-    return true;
-  }
-  if (!httpChannelLock(&httpCloudMutex, 20000)) return false;
-
-  bool ok = false;
-  int w = 0, h = 0;
-  uint8_t *raw = nullptr;
-  size_t got = 0;
-  HTTPClient http;
-  http.setTimeout(20000);
-  http.setReuse(false);
-  tlsCloud.setInsecure();
-  tlsCloud.setTimeout(20000);
-  const String path = String("/bitmaps/") + name;
-  const String url = apiUrl(path.c_str());
-  Serial.printf("GET bitmap %s\n", url.c_str());
-  if (http.begin(tlsCloud, url)) {
-    const char *hdrKeys[] = {"X-Width", "X-Height"};
-    http.collectHeaders(hdrKeys, 2);
-    http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
-    const int code = http.GET();
-    if (code == 200) {
-      w = http.header("X-Width").toInt();
-      h = http.header("X-Height").toInt();
-      const bool dimsOk = w >= 8 && h >= 1 && w <= 800 && h <= 480 && (w % 8) == 0;
-      const size_t need = dimsOk ? (size_t)w / 8 * (size_t)h : 0;
-      if (need > 0 && need <= (800 * 480 / 8)) {
-        raw = (uint8_t *)heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!raw) raw = (uint8_t *)malloc(need);
-        WiFiClient *stream = http.getStreamPtr();
-        const uint32_t t0 = millis();
-        while (raw && got < need && millis() - t0 < 20000) {
-          const size_t avail = stream->available();
-          if (!avail) {
-            if (!http.connected()) break;
-            delay(2);
-            yield();
-            continue;
-          }
-          got += stream->readBytes(raw + got, min(avail, need - got));
-        }
-        ok = raw && got == need;
-      }
-    } else {
-      Serial.printf("bitmap HTTP %d\n", code);
-    }
-    http.end();
-  }
-  httpChannelUnlock(httpCloudMutex);
-  if (!ok) {
-    free(raw);
-    return false;
-  }
-
-  CachedBmp *slot = cacheVictim();
-  if (slot->data) free(slot->data);
-  strncpy(slot->name, name, sizeof(slot->name) - 1);
-  slot->name[sizeof(slot->name) - 1] = 0;
-  slot->w = w;
-  slot->h = h;
-  slot->data = raw;
-  slot->n = got;
-  slot->used = ++gBmpClock;
-  out->w = w;
-  out->h = h;
-  out->data = raw;
-  out->n = got;
-  Serial.printf("[bmp] %s %dx%d %u\n", name, w, h, (unsigned)got);
-  return true;
-}
-
 bool emitDeviceEvent(const char *name, const char *jsonData) {
   DynamicJsonDocument doc(768);
   doc["name"] = name ? name : "event";
@@ -467,17 +232,8 @@ bool emitDeviceEvent(const char *name, const char *jsonData) {
 }
 
 bool hostReadSensors(SensorReading &out) { return sensorsRead(out); }
-bool hostBeep(uint16_t freq, uint16_t ms) {
-  return audioIsReady() && audioPlayBeep(freq, ms);
-}
-bool hostPlayPcm(const int16_t *samples, size_t count) {
-  return audioIsReady() && audioPlayPcm(samples, count);
-}
-uint32_t hostSampleRate() { return audioSampleRate(); }
-void hostSetPa(bool on) { audioSetPa(on); }
-bool hostAudioReady() { return audioIsReady(); }
-bool hostKeyDown() { return digitalRead(PIN_KEY_BTN) == LOW; }
-bool hostBootDown() { return digitalRead(PIN_BOOT_BTN) == LOW; }
+bool hostKeyDown() { return PIN_KEY_BTN >= 0 && digitalRead(PIN_KEY_BTN) == LOW; }
+bool hostBootDown() { return PIN_BOOT_BTN >= 0 && digitalRead(PIN_BOOT_BTN) == LOW; }
 int hostWifiRssi() { return WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0; }
 void hostWifiIp(char *out, size_t n) {
   if (!out || !n) return;
@@ -501,7 +257,7 @@ void postStatus() {
   SensorReading r;
   if (sensorsRead(r)) lastSensors = r;
   lastSensorMs = millis();
-  DynamicJsonDocument doc(768);
+  DynamicJsonDocument doc(1024);
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
   doc["fw"] = FW_VERSION;
@@ -519,6 +275,8 @@ void postStatus() {
   meta["script_lang"] = scriptEngineLanguage();
   if (scriptEngineLastError()[0]) meta["script_error"] = scriptEngineLastError();
   meta["api_host"] = apiConfigGet().host;
+  meta["panel"] = panelPluginName();
+  meta["audio"] = audioPluginName();
   String body;
   serializeJson(doc, body);
   String out;
@@ -581,7 +339,7 @@ bool handlePayload(const String &json) {
     scriptEngineStop("remote stop");
     statusLine1 = "OnlyClaws";
     statusLine2 = "script stopped";
-    if (!display.slowPanel()) drawRuntimeHud(true);
+    if (!panelPluginSlow()) drawRuntimeHud(true);
     postStatus();
     ok = true;
   } else if (!strcmp(type, "script")) {
@@ -592,8 +350,8 @@ bool handlePayload(const String &json) {
       statusLine1 = "script";
       statusLine2 = scriptId.length() ? scriptId : "running";
       // Skip HUD overlay on slow panels — script will paint next tick.
-      if (!display.slowPanel()) drawRuntimeHud(false);
-      if (audioIsReady()) audioPlayBeep(660, 80);
+      if (!panelPluginSlow()) drawRuntimeHud(false);
+      if (audioPluginReady()) audioPluginBeep(660, 80);
       postStatus();
     }
   } else if (!strcmp(type, "invoke")) {
@@ -606,8 +364,7 @@ bool handlePayload(const String &json) {
     String asset = absoluteUrl(msg["asset_path"] | "");
     String title = msg["title"] | "";
     if (asset.length()) {
-      ok = downloadAsset(asset);
-      if (ok) drawBitmapFrame();
+      ok = panelPluginShowAsset(asset);
     } else if (title.length()) {
       statusLine1 = title;
       statusLine2 = msg["body"] | "";
@@ -616,7 +373,7 @@ bool handlePayload(const String &json) {
     } else {
       ok = doBeep;
     }
-    if (doBeep && audioIsReady()) audioPlayBeep(880, 100);
+    if (doBeep) audioPluginBeep(880, 100);
   }
 
   ackMessage(id, ok, millis() - t0);
@@ -680,51 +437,44 @@ void setupImpl() {
   Serial.println();
   Serial.println("=== OnlyClaws ESP runtime (Lua) ===");
   apiConfigBegin();
-  Serial.printf("fw=%s panel=%s device=%s cloud=%s%s heap=%u\n", FW_VERSION,
-                display.panelName(), apiConfigGet().deviceId.c_str(),
-                apiConfigGet().host.c_str(), apiConfigGet().pathPrefix.c_str(),
-                ESP.getFreeHeap());
+  if (PIN_KEY_BTN >= 0) {
+    pinMode(PIN_KEY_BTN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PIN_KEY_BTN), onKeyIsr, CHANGE);
+  }
+  if (PIN_BOOT_BTN >= 0 && PIN_BOOT_BTN != PIN_KEY_BTN) pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
 
-  pinMode(PIN_KEY_BTN, INPUT_PULLUP);
-  pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PIN_KEY_BTN), onKeyIsr, CHANGE);
-
-  display.begin();
-#ifndef BOARD_PANEL_EPAPER
-  ensureFrameBuf();
-#endif
+  panelPluginBegin(FW_VERSION);
   sensorsBegin();
 
   ScriptHost host{};
-  host.display = &display;
+  panelPluginAttach(host);
+  audioPluginAttach(host);
   host.readSensors = hostReadSensors;
-  host.beep = hostBeep;
-  host.playPcm = hostPlayPcm;
-  host.sampleRate = hostSampleRate;
-  host.setPa = hostSetPa;
-  host.audioReady = hostAudioReady;
   host.keyDown = hostKeyDown;
   host.bootDown = hostBootDown;
   host.wifiRssi = hostWifiRssi;
   host.wifiIp = hostWifiIp;
   host.wifiSsid = hostWifiSsid;
   host.httpRequest = hostHttpRequest;
-  host.fetchBitmap = hostFetchBitmap;
   host.emitEvent = emitDeviceEvent;
   host.onSensors = hostOnSensors;
   scriptEngineBegin(host);
 
-  if (audioBegin(16000)) audioPlayBeep(880, 80);
+  if (audioPluginBegin(16000)) audioPluginBeep(880, 80);
+
+  Serial.printf("fw=%s panel=%s audio=%s device=%s cloud=%s%s heap=%u\n", FW_VERSION,
+                panelPluginName(), audioPluginName(), apiConfigGet().deviceId.c_str(),
+                apiConfigGet().host.c_str(), apiConfigGet().pathPrefix.c_str(),
+                ESP.getFreeHeap());
 
   while (!ensureWifiConnected()) delay(1000);
 
   // ESP32 requires WiFi modem sleep when BLE is also on (else abort).
   WiFi.setSleep(true);
-#ifndef BOARD_PANEL_EPAPER
-  // NimBLE + TLS + 800x480 panel leave too little internal heap for mbedTLS.
+#if OC_HAS_BLE
   bleCtrlBegin("OC-Snake");
 #else
-  Serial.println("[ble] skipped on ePaper (heap)");
+  Serial.println("[ble] off");
 #endif
   httpPadBegin(80);
 
@@ -733,11 +483,8 @@ void setupImpl() {
   drawRuntimeHud(true);
   postStatus();
 
-  Serial.printf("ready. pad http://%s/", WiFi.localIP().toString().c_str());
-#ifndef BOARD_PANEL_EPAPER
-  Serial.print("  BLE=OC-Snake");
-#endif
-  Serial.println();
+  Serial.printf("ready. pad http://%s/ panel=%s audio=%s\n",
+                WiFi.localIP().toString().c_str(), panelPluginName(), audioPluginName());
   xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 1, nullptr, 0);
 }
 
@@ -760,12 +507,12 @@ void loopImpl() {
     } else if (WiFi.status() == WL_CONNECTED) {
       drawRuntimeHud(true);
     }
-    while (digitalRead(PIN_KEY_BTN) == LOW) delay(20);
+    while (PIN_KEY_BTN >= 0 && digitalRead(PIN_KEY_BTN) == LOW) delay(20);
   }
 
   if (keyShortPending) {
     keyShortPending = false;
-    if (audioIsReady()) audioPlayBeep(1000, 120);
+    if (audioPluginReady()) audioPluginBeep(1000, 120);
   }
 
   if (netJsonReady) {

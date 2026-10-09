@@ -50,14 +50,15 @@
 
 ### 支持硬件
 
-同一套 `rlcd/` 固件，用 PlatformIO **环境**选屏（`PanelDisplay` 适配层）：
+同一套 `rlcd/` 固件。ESP32-S3 核心始终在：Wi-Fi、设备身份、云端、Lua。屏和音频是编译期插件，用 PlatformIO 环境打开。
 
-| 环境 | 板子 | 分辨率 | 说明 |
-|------|------|--------|------|
-| `esp32-s3-rlcd-42` | Waveshare ESP32-S3-RLCD-4.2 | 400×300 | 反射 LCD，刷新快；可开 BLE |
-| `esp32-s3-epaper-397` | Waveshare ESP32-S3-ePaper-3.97 | 800×480 | 墨水屏，局刷为主；默认关 BLE 保 TLS 堆 |
+| 环境 | 板子 | 插件 |
+|------|------|------|
+| `esp32-s3-bare` | ESP32-S3 模组（16MB + PSRAM，与现有板同一内存配置） | 无屏、无音频。状态走串口，`gfx.*` / `audio.*` 为空操作 |
+| `esp32-s3-rlcd-42` | Waveshare ESP32-S3-RLCD-4.2 | 图像（ST7305 400×300）+ ES8311 + BLE |
+| `esp32-s3-epaper-397` | Waveshare ESP32-S3-ePaper-3.97 | 图像（800×480 局刷）+ ES8311。默认关 BLE，给 TLS 留堆 |
 
-固件版本前缀：`agent-runtime-0.13.x`。
+固件版本前缀：`agent-runtime-0.13.x`（插件拆分从 `0.13.6` 起）。
 
 **墨水屏注意：**
 
@@ -173,9 +174,10 @@ PY
 **OnlyClaws ESP** is a remote-agent + on-device **Lua** framework (no character UI, no on-device LLM).
 
 - **Cloud:** [onlyclaws.world/epaper](https://onlyclaws.world/epaper) · [Agent docs](https://onlyclaws.world/epaper/api/agent/docs)
-- **Runtime:** `rlcd/` (`agent-runtime-0.13.x`) with `PanelDisplay`
-  - `esp32-s3-rlcd-42` — ST7305 400×300  
-  - `esp32-s3-epaper-397` — GxEPD2 800×480 (partial refresh; BLE off by default)
+- **Runtime:** `rlcd/` (`agent-runtime-0.13.x`, plugins since `0.13.6`)
+  - `esp32-s3-bare` — ESP32-S3 core, no panel, no codec
+  - `esp32-s3-rlcd-42` — ST7305 400×300 + ES8311 + BLE
+  - `esp32-s3-epaper-397` — GxEPD2 800×480 + ES8311 (BLE off by default)
 - **Demos:** [`demos/snake/`](demos/snake/) (deploy via `POST /api/scripts`)
 - **Build:** see Chinese「快速开始」or [`rlcd/DEV.md`](rlcd/DEV.md)
 

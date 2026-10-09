@@ -1,6 +1,9 @@
 #pragma once
 
-// Waveshare ESP32-S3-RLCD-4.2
+// Pin map follows the PlatformIO env.
+//   BOARD_PANEL_EPAPER  Waveshare ESP32-S3-ePaper-3.97
+//   BOARD_PANEL_RLCD    Waveshare ESP32-S3-RLCD-4.2
+//   neither             ESP32-S3 bare module (BOOT on GPIO0 only)
 
 #ifdef BOARD_PANEL_EPAPER
 
@@ -34,7 +37,7 @@ constexpr uint8_t ES7210_I2C_ADDR = 0x40;
 constexpr int LCD_WIDTH = 800;
 constexpr int LCD_HEIGHT = 480;
 
-#else  // BOARD_PANEL_RLCD (default)
+#elif defined(BOARD_PANEL_RLCD)
 
 constexpr int PIN_LCD_DC = 5;
 constexpr int PIN_LCD_CS = 40;
@@ -62,5 +65,16 @@ constexpr uint8_t ES7210_I2C_ADDR = 0x40;
 
 constexpr int LCD_WIDTH = 400;
 constexpr int LCD_HEIGHT = 300;
+
+#else  // ESP32-S3 bare module
+
+constexpr int PIN_BOOT_BTN = 0;
+constexpr int PIN_KEY_BTN = 0;  // BOOT doubles as the long-press input
+constexpr int PIN_BAT_ADC = -1;
+constexpr int PIN_I2C_SDA = -1;
+constexpr int PIN_I2C_SCL = -1;
+
+constexpr int LCD_WIDTH = 0;
+constexpr int LCD_HEIGHT = 0;
 
 #endif

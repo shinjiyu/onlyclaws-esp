@@ -34,6 +34,10 @@ int batteryPctFromV(float v) {
 }  // namespace
 
 bool sensorsBegin() {
+  if (PIN_I2C_SDA < 0 || PIN_I2C_SCL < 0) {
+    ready = false;
+    return false;
+  }
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   Wire.setClock(100000);
   delay(5);
@@ -50,6 +54,7 @@ bool sensorsBegin() {
 
 bool sensorsRead(SensorReading &out) {
   out = SensorReading{};
+  if (PIN_I2C_SDA < 0 || PIN_I2C_SCL < 0) return false;
   if (!ready) sensorsBegin();
 
   // SHTC3: wake + normal measure (clock stretching disabled: 0x7866)

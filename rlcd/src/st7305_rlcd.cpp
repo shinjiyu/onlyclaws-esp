@@ -4,6 +4,8 @@
 
 #include "board_pins.h"
 
+#if defined(BOARD_PANEL_RLCD)
+
 namespace {
 constexpr uint32_t kSpiHz = 20000000;
 }
@@ -214,3 +216,5 @@ void St7305Rlcd::display() {
   writeCmd(0x2C);
   writeData(hw_, bytes_);
 }
+
+#endif  // BOARD_PANEL_RLCD
