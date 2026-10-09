@@ -1,0 +1,7 @@
+The OnlyClaws ESP source in this repository is MIT licensed (see LICENSE).
+
+The PlatformIO environment esp32-s3-epaper-397 links GxEPD2
+(https://github.com/ZinggJM/GxEPD2), which is GPL-3.0-or-later.
+Firmware binaries built with that environment, and source written to
+call into GxEPD2, are distributed under GPL-3.0-or-later.
+The bare and RLCD environments do not link GxEPD2.

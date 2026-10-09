@@ -1,5 +1,7 @@
 # OnlyClaws ESP
 
+开源协议：[MIT](LICENSE)。`esp32-s3-epaper-397` 固件链接 [GxEPD2](https://github.com/ZinggJM/GxEPD2)（GPL-3.0），该环境的固件按 GPL-3.0 发布。详见 [NOTICE](NOTICE)。
+
 远端 Agent 控板 + ESP32 端 Lua 运行时。  
 云端下发指令 / 热部署脚本，板子负责显示、按键、音频、本机控制页等能力。
 
