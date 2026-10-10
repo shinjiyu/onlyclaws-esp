@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 import render as epd_render
 import snake_ctrl
 import tenancy
+from capability_policy import tool_allowed_for_caps
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("EPD_DATA_DIR", BASE_DIR / "data"))
@@ -512,6 +513,28 @@ def resolve_user_device_id(
             detail="no devices bound to your account; POST /api/devices/register first",
         )
     return str(row["id"])
+
+
+
+
+
+def device_capabilities(device_id: str) -> Optional[list[str]]:
+    """Last-seen capability list from device /status meta, or None if unknown."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT meta FROM devices WHERE id=?", (device_id,)
+        ).fetchone()
+    if not row or not row["meta"]:
+        return None
+    try:
+        meta = json.loads(row["meta"]) or {}
+    except (TypeError, json.JSONDecodeError):
+        return None
+    caps = meta.get("capabilities")
+    if not isinstance(caps, list):
+        return None
+    out = [str(c) for c in caps if c]
+    return out or None
 
 
 def require_device_token(device_id: str, request: Request) -> str:
@@ -1269,10 +1292,28 @@ async def invoke_tools(
         raise HTTPException(status_code=400, detail="need tools or tool")
     if len(tools) > 32:
         raise HTTPException(status_code=400, detail="too many tools")
+    device_id = resolve_user_device_id(body.device_id, sess)
+    caps = device_capabilities(device_id)
+    if caps is not None:
+        bad = []
+        for step in tools:
+            if not isinstance(step, dict):
+                continue
+            name = str(step.get("tool") or "")
+            if name and not tool_allowed_for_caps(name, caps):
+                bad.append(name)
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "tool not in device capabilities",
+                    "rejected": bad,
+                    "capabilities": caps,
+                },
+            )
     payload = json.dumps({"tools": tools}, ensure_ascii=False, separators=(",", ":"))
     if len(payload) > SCRIPT_SOURCE_MAX:
         raise HTTPException(status_code=400, detail="invoke payload too large")
-    device_id = resolve_user_device_id(body.device_id, sess)
     msg = enqueue_control_message(
         device_id=device_id,
         msg_type="invoke",
@@ -1687,7 +1728,7 @@ async def agent_capabilities(
                     "tools": "[{tool, ...}]",
                     "tool": "object?",
                 },
-                "notes": "One-shot: sensors.read, beep, display, emit, gfx.clear, gfx.flush, play_pcm",
+                "notes": "One-shot whitelist; filtered by device capabilities[] (panel/audio/sensors/arm)",
             },
             {
                 "name": "onlyclaws_list_events",
@@ -1731,10 +1772,18 @@ async def agent_capabilities(
                 "audio.ready",
                 "audio.sample_rate",
             ],
+            "arm": [
+                "arm.feedback",
+                "arm.stream",
+                "arm.move",
+                "arm.stop",
+                "arm.name",
+            ],
             "input": ["input.key", "input.boot"],
             "net": ["net.rssi", "net.ip", "net.ssid"],
-            "display": "400x300 1bpp; color 0/1; call gfx.flush after draw",
+            "display": "panel products: 400x300 or 800x480 1bpp; RoArm: headless (no gfx)",
             "pcm": "base64 int16 LE mono @ sample_rate(); ~2s max",
+            "arm_pose": "radians: base, shoulder, elbow, hand/wrist; spd=0 uses firmware default",
         },
         "invoke_tools": [
             "sensors.read",
@@ -1744,7 +1793,23 @@ async def agent_capabilities(
             "gfx.clear",
             "gfx.flush",
             "play_pcm",
+            "arm.feedback",
+            "arm.stream",
+            "arm.move",
+            "arm.stop",
         ],
+        "capability_tools": {
+            "panel": ["display", "gfx.clear", "gfx.flush"],
+            "audio": ["beep", "play_pcm"],
+            "sensors": ["sensors.read", "sensors"],
+            "arm": ["arm.feedback", "arm.stream", "arm.move", "arm.stop"],
+            "core": ["emit"],
+        },
+        "products": {
+            "rlcd-42": {"caps": ["core", "panel", "audio", "ble_pad", "sensors"]},
+            "epaper-397": {"caps": ["core", "panel", "sensors"]},
+            "roarm-m2": {"caps": ["core", "arm"], "env": "esp32-roarm-m2"},
+        },
         "removed": [
             "POST /api/v1/device/{id}/voice",
             "GET /api/voice",
@@ -1752,10 +1817,11 @@ async def agent_capabilities(
             "JSON tools DSL on device (use Lua)",
         ],
         "device_local": [
-            "KEY short = beep",
+            "KEY short = beep (panel boards)",
             "KEY hold 1.5s = SoftAP Wi-Fi provision",
-            "ES8311 beep + PCM playback",
-            "ST7305 full framebuffer via Lua gfx.*",
+            "ES8311 beep + PCM playback (RLCD)",
+            "ST7305 / ePaper framebuffer via Lua gfx.*",
+            "RoArm-M2: Feetech STS bus; invoke/Lua arm.* only (no anonymous /js)",
             "edge Lua loop when deployed",
         ],
     }

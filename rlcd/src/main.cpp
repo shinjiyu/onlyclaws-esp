@@ -16,16 +16,21 @@
 #include <string.h>
 
 #include "api_config.h"
+#include "arm_driver.h"
+#include "arm_usb_serial.h"
 #include "audio_es8311.h"
 #include "ble_ctrl.h"
 #include "board_pins.h"
+#include "capability.h"
 #include "http_pad.h"
 #include "cloud_config.h"
 #include "device_secrets.h"
 #include "panel_display.h"
 #include "script_engine.h"
 #include "sensors.h"
-#ifdef BOARD_PANEL_EPAPER
+#ifdef BOARD_ROARM
+#include "headless_panel.h"
+#elif defined(BOARD_PANEL_EPAPER)
 #include "epd397_panel.h"
 #else
 #include "st7305_rlcd.h"
@@ -34,11 +39,13 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.13.4";
+constexpr const char *FW_VERSION = "agent-runtime-0.15.2";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr size_t FRAME_BYTES = LCD_WIDTH * LCD_HEIGHT / 8;
 
-#ifdef BOARD_PANEL_EPAPER
+#ifdef BOARD_ROARM
+HeadlessPanel display;
+#elif defined(BOARD_PANEL_EPAPER)
 Epd397Panel display;
 #else
 St7305Rlcd display;
@@ -91,6 +98,12 @@ bool ensureFrameBuf() {
 }
 
 void drawStatus(const char *title, const char *line2, const char *line3 = nullptr) {
+  if (!ocCapPanel()) {
+    Serial.printf("[hud] %s | %s", title, line2);
+    if (line3) Serial.printf(" | %s", line3);
+    Serial.println();
+    return;
+  }
   display.fillScreen(0);
   display.drawRect(4, 4, LCD_WIDTH - 8, LCD_HEIGHT - 8, 1);
   display.setTextColor(1);
@@ -128,7 +141,7 @@ void drawPortalHint() {
 }
 
 void drawBitmapFrame() {
-  if (!frameBuf) return;
+  if (!ocCapPanel() || !frameBuf) return;
   // 1-bit framebuffer already matches panel geometry.
   display.drawBitmap(0, 0, frameBuf, LCD_WIDTH, LCD_HEIGHT, 1, 0);
   display.flush();
@@ -377,7 +390,7 @@ void postStatus() {
   SensorReading r;
   if (sensorsRead(r)) lastSensors = r;
   lastSensorMs = millis();
-  DynamicJsonDocument doc(768);
+  DynamicJsonDocument doc(1024);
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
   doc["fw"] = FW_VERSION;
@@ -395,6 +408,19 @@ void postStatus() {
   meta["script_lang"] = scriptEngineLanguage();
   if (scriptEngineLastError()[0]) meta["script_error"] = scriptEngineLastError();
   meta["api_host"] = apiConfigGet().host;
+  meta["panel"] = display.panelName();
+  meta["panel_w"] = LCD_WIDTH;
+  meta["panel_h"] = LCD_HEIGHT;
+#if defined(BOARD_ROARM)
+  meta["product"] = "roarm-m2";
+#elif defined(BOARD_PANEL_EPAPER)
+  meta["product"] = "epaper-397";
+#else
+  meta["product"] = "rlcd-42";
+#endif
+  if (ocCapArm() && armDriver()) meta["arm"] = armDriver()->name();
+  JsonArray caps = meta.createNestedArray("capabilities");
+  capabilityFillJson(caps);
   String body;
   serializeJson(doc, body);
   String out;
@@ -561,18 +587,20 @@ void setupImpl() {
                 apiConfigGet().host.c_str(), apiConfigGet().pathPrefix.c_str(),
                 ESP.getFreeHeap());
 
-  pinMode(PIN_KEY_BTN, INPUT_PULLUP);
   pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
+#if PIN_KEY_BTN != PIN_BOOT_BTN
+  pinMode(PIN_KEY_BTN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_KEY_BTN), onKeyIsr, CHANGE);
+#endif
 
   display.begin();
-#ifndef BOARD_PANEL_EPAPER
+#if !defined(BOARD_PANEL_EPAPER) && !defined(BOARD_ROARM)
   ensureFrameBuf();
 #endif
-  sensorsBegin();
+  if (ocCapSensors()) sensorsBegin();
 
   ScriptHost host{};
-  host.display = &display;
+  host.display = ocCapPanel() ? &display : nullptr;
   host.readSensors = hostReadSensors;
   host.beep = hostBeep;
   host.playPcm = hostPlayPcm;
@@ -589,19 +617,30 @@ void setupImpl() {
   host.onSensors = hostOnSensors;
   scriptEngineBegin(host);
 
-  if (audioBegin(16000)) audioPlayBeep(880, 80);
+  if (ocCapArm()) {
+    if (armPluginBegin()) {
+      Serial.printf("[arm] %s ready\n", armDriver() ? armDriver()->name() : "?");
+    } else {
+      Serial.println("[arm] begin failed");
+    }
+  }
+
+  if (ocCapAudio() && audioBegin(16000)) audioPlayBeep(880, 80);
 
   while (!ensureWifiConnected()) delay(1000);
 
   // ESP32 requires WiFi modem sleep when BLE is also on (else abort).
   WiFi.setSleep(true);
+  if (ocCapBle()) {
 #ifndef BOARD_PANEL_EPAPER
-  // NimBLE + TLS + 800x480 panel leave too little internal heap for mbedTLS.
-  bleCtrlBegin("OC-Snake");
+    bleCtrlBegin("OC-Snake");
 #else
-  Serial.println("[ble] skipped on ePaper (heap)");
+    Serial.println("[ble] skipped on ePaper (heap)");
 #endif
-  httpPadBegin(80);
+  }
+  if (ocCapBle() || ocCapPanel()) {
+    httpPadBegin(80);
+  }
 
   statusLine1 = "OnlyClaws";
   statusLine2 = WiFi.localIP().toString();
@@ -648,6 +687,7 @@ void loopImpl() {
     handlePayload(String(netJsonBuf));
   }
 
+  armUsbSerialPoll();
   scriptEngineTick();
 
   if (WiFi.status() != WL_CONNECTED) {

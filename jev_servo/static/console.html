@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JEV Servo Console</title>
+  <style>
+    :root {
+      --bg: #e8ece6;
+      --ink: #1a1f1c;
+      --muted: #5a655e;
+      --panel: #f5f7f3;
+      --line: #c5cdc4;
+      --run: #1f6b4a;
+      --run-bg: #d7efe3;
+      --idle: #6b5a1f;
+      --idle-bg: #f3ecd4;
+      --stop: #8b2e2e;
+      --accent: #245c8a;
+      --log: #121612;
+      --log-bg: #1e241f;
+      --ok: #2a7a52;
+      --warn: #a06a10;
+      --err: #b33a3a;
+      --mono: "IBM Plex Mono", "SF Mono", ui-monospace, Menlo, monospace;
+      --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--sans);
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #dfe8d8 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #d4e0e8 0%, transparent 50%),
+        var(--bg);
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 2.5rem;
+    }
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: -0.02em;
+      font-weight: 650;
+    }
+    .sub { color: var(--muted); font-size: 0.9rem; }
+    .badge {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--idle-bg);
+      color: var(--idle);
+      white-space: nowrap;
+    }
+    .badge.run {
+      background: var(--run-bg);
+      color: var(--run);
+      border-color: #9bcbb3;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1rem;
+    }
+    label {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    textarea, input, select {
+      width: 100%;
+      font: inherit;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.55rem 0.7rem;
+    }
+    textarea { min-height: 4.2rem; resize: vertical; }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+      margin-top: 0.85rem;
+    }
+    @media (max-width: 720px) {
+      .row { grid-template-columns: 1fr 1fr; }
+      header { flex-direction: column; align-items: flex-start; }
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 1rem;
+    }
+    button {
+      font-family: var(--sans);
+      font-size: 0.95rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 9px;
+      padding: 0.65rem 1.15rem;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-start { background: var(--run); color: #fff; }
+    .btn-stop { background: var(--stop); color: #fff; }
+    .btn-clear { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+    }
+    @media (max-width: 720px) {
+      .stats { grid-template-columns: 1fr; }
+    }
+    .stat {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.65rem 0.75rem;
+    }
+    .stat b { display: block; color: var(--muted); font-weight: 500; font-size: 0.72rem; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--sans); }
+    .scene { margin-top: 0.85rem; font-family: var(--mono); font-size: 0.82rem; word-break: break-word; }
+    .log {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      background: var(--log-bg);
+      color: #c8d2c9;
+      border-radius: 10px;
+      padding: 0.85rem 0.95rem;
+      height: min(52vh, 420px);
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .log .k-error { color: #ff8f8f; }
+    .log .k-tick_done { color: #8fd4a8; }
+    .log .k-choices { color: #9ec5ef; }
+    .log .k-info { color: #e0d08a; }
+    .hint { margin-top: 0.5rem; color: var(--muted); font-size: 0.82rem; }
+    .err { color: var(--err); font-family: var(--mono); font-size: 0.82rem; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Presence Console</h1>
+        <div class="sub">有限 op · find_any / find_id / follow · face#id 落盘</div>
+      </div>
+      <div id="badge" class="badge">IDLE</div>
+    </header>
+
+    <section class="panel">
+      <label for="op">Op（有限指令）</label>
+      <select id="op">
+        <option value="find_any" selected>find_any — 找任意人，找到后跟踪</option>
+        <option value="find_id">find_id — 找指定 face#N，找到后跟踪</option>
+        <option value="follow">follow — 只跟踪画面里的人（不扫掠）</option>
+      </select>
+      <div class="row" style="margin-top:0.75rem">
+        <div>
+          <label for="faceId">face_id</label>
+          <input id="faceId" type="number" min="1" step="1" placeholder="find_id 必填" />
+        </div>
+        <div>
+          <label for="spd">spd</label>
+          <input id="spd" type="number" value="280" min="50" max="1000" />
+        </div>
+        <div>
+          <label for="transport">transport</label>
+          <select id="transport">
+            <option value="usb" selected>usb</option>
+            <option value="cloud">cloud</option>
+          </select>
+        </div>
+        <div>
+          <label for="settle">settle (s)</label>
+          <input id="settle" type="number" value="0.35" min="0" max="10" step="0.05" />
+        </div>
+        <div>
+          <label for="port">USB port</label>
+          <input id="port" type="text" placeholder="auto" />
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn-start" id="btnStart" type="button">Start</button>
+        <button class="btn-stop" id="btnStop" type="button" disabled>Stop</button>
+        <button class="btn-clear" id="btnClear" type="button">Clear log</button>
+        <label style="display:flex;align-items:center;gap:0.4rem;margin:0;text-transform:none;font-size:0.85rem;color:var(--muted);">
+          <input id="dry" type="checkbox" style="width:auto" /> dry-run
+        </label>
+      </div>
+      <div class="hint">不再输入自然语言。三选一：find_any / find_id / follow。Stop 本拍结束后退出。</div>
+      <div id="err" class="err" hidden></div>
+    </section>
+
+    <section class="panel">
+      <div class="stats">
+        <div class="stat"><b>Ticks</b><span id="ticks">0</span></div>
+        <div class="stat"><b>Last choices</b><span id="choices">—</span></div>
+        <div class="stat"><b>Wall / stream</b><span id="timing">—</span></div>
+      </div>
+      <div class="scene"><b style="font-family:var(--sans);font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Scene</b><div id="scene">—</div></div>
+    </section>
+
+    <section class="panel" style="padding-top:0.75rem">
+      <label>Log</label>
+      <div id="log" class="log"></div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let afterSeq = 0;
+    let running = false;
+    let follow = true;
+
+    const logEl = $("log");
+    logEl.addEventListener("scroll", () => {
+      const nearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+      follow = nearBottom;
+    });
+
+    function fmtChoices(c) {
+      if (!c) return "—";
+      return Object.entries(c).map(([k, v]) => `${k}:${v}`).join("  ");
+    }
+
+    function appendLogs(logs) {
+      if (!logs || !logs.length) return;
+      const frag = document.createDocumentFragment();
+      for (const e of logs) {
+        const div = document.createElement("div");
+        div.className = "k-" + (e.kind || "info");
+        const ts = new Date((e.t || 0) * 1000).toLocaleTimeString();
+        const line = (e.line || e.kind || "").replace(/^\n+/, "");
+        if (!line) continue;
+        div.textContent = `[${ts}] ${line}`;
+        frag.appendChild(div);
+        afterSeq = Math.max(afterSeq, e.seq || 0);
+      }
+      logEl.appendChild(frag);
+      if (follow) logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setRunning(on) {
+      running = !!on;
+      $("badge").textContent = on ? "RUNNING" : "IDLE";
+      $("badge").classList.toggle("run", on);
+      $("btnStart").disabled = on;
+      $("btnStop").disabled = !on;
+      $("op").disabled = on;
+      $("faceId").disabled = on;
+      $("spd").disabled = on;
+      $("transport").disabled = on;
+      $("settle").disabled = on;
+      $("port").disabled = on;
+      $("dry").disabled = on;
+    }
+
+    async function refresh() {
+      try {
+        const r = await fetch(`/api/status?after=${afterSeq}`);
+        const s = await r.json();
+        setRunning(s.running);
+        $("ticks").textContent = String(s.tick_count || 0);
+        $("scene").textContent = s.scene || "—";
+        const lt = s.last_tick;
+        if (lt) {
+          $("choices").textContent = fmtChoices(lt.choices);
+          const wall = lt.jev_ms
+            ? `jev max ${Math.max(...Object.values(lt.jev_ms).map(Number)).toFixed(0)}ms`
+            : "";
+          $("timing").textContent = [lt.stream_status, wall].filter(Boolean).join(" · ") || "—";
+        }
+        if (s.last_error) {
+          $("err").hidden = false;
+          $("err").textContent = s.last_error;
+        }
+        appendLogs(s.logs || []);
+      } catch (e) {
+        $("err").hidden = false;
+        $("err").textContent = String(e);
+      }
+    }
+
+    $("btnStart").onclick = async () => {
+      $("err").hidden = true;
+      afterSeq = 0;
+      logEl.innerHTML = "";
+      follow = true;
+      const body = {
+        op: $("op").value,
+        spd: Number($("spd").value),
+        transport: $("transport").value,
+        settle: Number($("settle").value),
+        dry_run: $("dry").checked,
+      };
+      const fid = $("faceId").value.trim();
+      if (fid) body.face_id = Number(fid);
+      const port = $("port").value.trim();
+      if (port) body.port = port;
+      const r = await fetch("/api/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        $("err").hidden = false;
+        $("err").textContent = j.error || "start failed";
+        return;
+      }
+      setRunning(true);
+      refresh();
+    };
+
+    $("btnStop").onclick = async () => {
+      await fetch("/api/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      refresh();
+    };
+
+    $("btnClear").onclick = () => {
+      logEl.innerHTML = "";
+      follow = true;
+    };
+
+    setInterval(refresh, 500);
+    refresh();
+  </script>
+</body>
+</html>

@@ -81,8 +81,21 @@ Known device IDs:
 }
 ```
 
-Invoke tools: `sensors.read`, `beep`, `display`, `emit`, `gfx.clear`, `gfx.flush`, `play_pcm` (`b64`).
-Prefer **Lua deploy** for pixel drawing and multi-step logic.
+Invoke tools (capability-filtered): `sensors.read`, `beep`, `display`, `emit`, `gfx.clear`, `gfx.flush`, `play_pcm` (`b64`), **`arm.feedback` / `arm.stream` / `arm.move` / `arm.stop`** (RoArm only).
+
+Arm example:
+
+```json
+{
+  "tools": [
+    {"tool": "arm.feedback"},
+    {"tool": "arm.stream", "base": 0, "shoulder": 0, "elbow": 1.57, "hand": 3.14, "spd": 400},
+    {"tool": "arm.stop"}
+  ]
+}
+```
+
+Prefer **Lua deploy** for multi-step logic; use invoke `arm.*` for tight host vision loops.
 
 ---
 
@@ -162,6 +175,17 @@ Drawing is buffered — call `gfx.flush()` after changes (except `display()` / `
 | `net.rssi()` / `wifi_rssi()` | |
 | `net.ip()` / `wifi_ip()` | |
 | `net.ssid()` / `wifi_ssid()` | |
+
+#### Arm (`arm.*` — RoArm product only)
+
+| API | Notes |
+|-----|------|
+| `arm.feedback()` | `{base,shoulder,elbow,hand,q}` radians, or `nil` |
+| `arm.stream(...)` / `arm.move(...)` | `base,shoulder,elbow,hand [,spd]` or `{q={…}, spd=N}` / named keys |
+| `arm.stop()` | hold current pose |
+| `arm.name()` | e.g. `roarm-m2-sts` |
+
+`spd=0` → firmware default. Invoke `arm.feedback` also emits cloud event `arm.feedback` with pose JSON.
 
 Same APIs also under `oc.*` where registered. Lifecycle: optional `on_start` / `setup`, then `on_loop` / `loop`.
 

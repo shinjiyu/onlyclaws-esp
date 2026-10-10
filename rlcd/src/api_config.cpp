@@ -70,8 +70,7 @@ void apiConfigBegin() {
     gCfg.deviceToken = "";
   }
 
-  if (flashForChip &&
-      (!gCfg.deviceId.equalsIgnoreCase(flashId) || gCfg.deviceToken != flashTok)) {
+  if (flashForChip) {
     gCfg.deviceId = flashId;
     gCfg.deviceToken = flashTok;
     apiConfigSave(gCfg);

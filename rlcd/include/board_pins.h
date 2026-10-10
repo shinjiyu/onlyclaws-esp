@@ -1,8 +1,37 @@
 #pragma once
 
-// Waveshare ESP32-S3-RLCD-4.2
+// Waveshare ESP32-S3 panel boards, or RoArm-M2 classic ESP32 driver.
 
-#ifdef BOARD_PANEL_EPAPER
+#ifdef BOARD_ROARM
+
+// Servo TTL UART (Waveshare RoArm-M2_config.h defaults).
+constexpr int PIN_SERVO_RX = 18;
+constexpr int PIN_SERVO_TX = 19;
+
+constexpr int PIN_BOOT_BTN = 0;
+constexpr int PIN_KEY_BTN = 0;
+constexpr int PIN_BAT_ADC = -1;
+
+// OLED I2C on stock board (unused in headless product, pins reserved).
+constexpr int PIN_I2C_SDA = 32;
+constexpr int PIN_I2C_SCL = 33;
+
+// Dummy audio pins so shared sources compile; OC_CAP_AUDIO=0 never begins them.
+constexpr int PIN_I2S_MCLK = -1;
+constexpr int PIN_I2S_BCLK = -1;
+constexpr int PIN_I2S_DIN = -1;
+constexpr int PIN_I2S_WS = -1;
+constexpr int PIN_I2S_DOUT = -1;
+constexpr int PIN_AUDIO_PA = -1;
+constexpr int PIN_AUDIO_I2C_SDA = PIN_I2C_SDA;
+constexpr int PIN_AUDIO_I2C_SCL = PIN_I2C_SCL;
+constexpr uint8_t ES8311_I2C_ADDR = 0x18;
+constexpr uint8_t ES7210_I2C_ADDR = 0x40;
+
+constexpr int LCD_WIDTH = 8;
+constexpr int LCD_HEIGHT = 8;
+
+#elif defined(BOARD_PANEL_EPAPER)
 
 // E-paper SPI
 constexpr int PIN_EPD_BUSY = 3;

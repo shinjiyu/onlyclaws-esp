@@ -1,6 +1,12 @@
 .pio
 rlcd/.pio
 rlcd/include/device_secrets.h
+.local/
+*.oct_token
+jev_servo/runs/
+__pycache__/
+*.pyc
+.DS_Store
 rlcd/nvs-backups/
 # Vendored via scripts/fetch_esp_lua.sh when GitHub is reachable
 rlcd/lib/EspLuaEngine/
@@ -19,3 +25,4 @@ __pycache__/
 scripts/overnight_pio_deps.log
 scripts/overnight_pio_deps.ready
 scripts/download_progress_server.log
+vision/models/*.onnx

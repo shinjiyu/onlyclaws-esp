@@ -36,18 +36,34 @@ On `401`, ask the human to mint/rotate a token at https://onlyclaws.world/epaper
 | **Deploy Lua** | `POST /api/scripts` (`language=lua`, `source` = Lua string) |
 | Events from `emit()` | `GET /api/events` |
 
-## Lua on device (full board)
+## Lua on device
 
-Firmware exposes **graphics, PCM audio, sensors, buttons, WiFi** — not a text-only demo.
+Surface depends on device `capabilities[]` from `/status` (also in `GET /api/devices`).  
+Panel boards expose gfx/audio/sensors; **RoArm-M2** exposes **arm.*** only (no gfx).
 
-### Graphics (400×300, 1bpp)
+### Graphics (panel products)
 
 `gfx.clear` / `pixel` / `line` / `rect` / `fill_rect` / `circle` / `fill_circle` / `text` / `blit(b64)` / `flush`  
-`gfx.W`=400, `gfx.H`=300. Color `0`/`1`. Call `gfx.flush()` after draw ops.
+RLCD: `gfx.W`=400, `gfx.H`=300. Color `0`/`1`. Call `gfx.flush()` after draw ops.
 
-### Audio
+### Audio (panel with codec)
 
 `audio.beep(freq, ms)` · `audio.play_pcm(b64)` (int16 LE mono @ `sample_rate()`) · `audio.pa(on)` · `audio.ready()`
+
+### Arm (RoArm product, `capabilities` includes `arm`)
+
+Invoke (fast path, no Lua):
+
+```json
+{"tools":[
+  {"tool":"arm.feedback"},
+  {"tool":"arm.stream","q":[0,0,1.57,3.14],"spd":400},
+  {"tool":"arm.stop"}
+]}
+```
+
+Lua: `arm.feedback()` → `{base,shoulder,elbow,hand,q}` · `arm.stream(base,shoulder,elbow,hand [,spd])` or table · `arm.move` (=stream) · `arm.stop()` · `arm.name()`  
+Pose is radians (Waveshare-style). `spd=0` → firmware default. `arm.feedback` invoke also emits event `arm.feedback` with `q`.
 
 ### Other
 
@@ -78,6 +94,8 @@ Content-Type: application/json
 - Do not call `POST /api/auth/login` with user passwords
 - Do not use **device** `device_token` as the Agent credential
 - Do not mint agent tokens using an existing agent token
+- Do not send `gfx.*` / `beep` to RoArm devices (capability filter rejects)
+- Do not expect anonymous local joint HTTP on RoArm product firmware
 
 ## Device IDs
 
@@ -86,4 +104,5 @@ Content-Type: application/json
 | `a4cb8fdf8440` | RLCD 4.2" 400×300 (main agent runtime) |
 | `441bf6923320` | ePaper 3.97" 800×480 |
 
-Prefer `GET /api/devices` and use an **online** device you own.
+RoArm boards register like any device; prefer `GET /api/devices` and check `meta.capabilities` / `meta.product=roarm-m2`.
+Prefer an **online** device you own.

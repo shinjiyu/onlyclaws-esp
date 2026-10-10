@@ -25,7 +25,28 @@
 
 应用（例如贪食蛇）放在 [`demos/`](demos/)，通过云端 `POST /api/scripts` 下发即可。
 
+### ADL（与 mcp_guard 同款）
+
+架构权威在 [`doc/structurizr/`](doc/structurizr/)（Structurizr DSL + `graph.json` + `requirements.json`）。
+
+```bash
+python scripts/adl_check.py
+```
+
+插件化目标与 RoArm 产品说明见 [`PLUGIN-RUNTIME.md`](doc/structurizr/PLUGIN-RUNTIME.md)、[`ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md)。Agent 操作见 [`AGENTS.md`](AGENTS.md)。
+
 ### 架构
+
+OnlyClaws 有两条平级通路（Agent 可编排，固件不耦合）：
+
+```
+通路 A — 设备（ESP）                通路 B — 视觉（主机）
+Agent ──HTTPS──► control plane       Camera ──► vision/ pipeline
+              │                              │
+         pending/invoke                 objects + empties + state
+              │                              │
+         panel / arm / …              （可选）再交给 Agent / JEV
+```
 
 ```
 ┌─────────────┐     HTTPS      ┌──────────────────┐
@@ -35,16 +56,18 @@
                                         │ poll / deploy
                                ┌────────▼─────────┐
                                │  ESP32 运行时     │
-                               │  Lua · gfx · pad  │
+                               │  Lua · gfx · arm  │
                                └────────┬─────────┘
                                         │
                     ┌───────────────────┼───────────────────┐
                     ▼                   ▼                   ▼
-              RLCD 400×300         ePaper 800×480      手机浏览器
-              ST7305 快刷          墨水屏局刷          http://板IP/
+              RLCD 400×300         ePaper 800×480      RoArm STS
+              ST7305 快刷          墨水屏局刷          无摄像头
 ```
 
-1. **远端 Agent（主路径）**：列设备、invoke、部署 Lua、收事件  
+视觉细节：[`VISION-PATHWAY.md`](doc/structurizr/VISION-PATHWAY.md)、代码 [`vision/`](vision/)。
+
+1. **远端 Agent（主路径）**：列设备、invoke、部署 Lua、收事件；也可消费视觉 state  
 2. **板端可选 loop**：`on_start` / `on_loop`，适合游戏、仪表、本地交互  
 3. **多租户**：kuroneko 用户只管自己的设备；每台板独立 `device_token`
 
@@ -56,8 +79,9 @@
 |------|------|--------|------|
 | `esp32-s3-rlcd-42` | Waveshare ESP32-S3-RLCD-4.2 | 400×300 | 反射 LCD，刷新快；可开 BLE |
 | `esp32-s3-epaper-397` | Waveshare ESP32-S3-ePaper-3.97 | 800×480 | 墨水屏，局刷为主；默认关 BLE 保 TLS 堆 |
+| `esp32-roarm-m2` | Waveshare RoArm-M2 驱动板 | headless | classic ESP32；Feetech STS；仅 `arm.*` |
 
-固件版本前缀：`agent-runtime-0.13.x`。
+固件版本前缀：`agent-runtime-0.15.x`（capability 插件矩阵 + RoArm STS + `/status.capabilities`）。
 
 **墨水屏注意：**
 
@@ -88,8 +112,9 @@ end
 
 | 模块 | 能力 |
 |------|------|
-| `gfx.*` | 点线圆、文字、`gfx.qr`、`gfx.flush`、`gfx.slow()` |
-| `audio.*` | beep / PCM |
+| `gfx.*` | 点线圆、文字、`gfx.qr`、`gfx.flush`、`gfx.slow()`（面板产品） |
+| `audio.*` | beep / PCM（有编解码器的板） |
+| `arm.*` | RoArm：`feedback` / `stream` / `stop`（host invoke 可抢占 Lua） |
 | `input.*` | KEY / BOOT |
 | `http.*` | 任意 HTTP(S)，**不**带设备 Bearer |
 | 本机 Pad | `http://<板IP>/` 方向键页（同 Wi‑Fi 手机浏览器） |
@@ -105,6 +130,8 @@ end
 | [`rlcd/DEV.md`](rlcd/DEV.md) | 本机构建 / 烧录细节 |
 | [`demos/`](demos/) | 应用 demo（热部署 Lua） |
 | [`demos/snake/`](demos/snake/) | 贪食蛇（KEY / 本机 Pad+QR / 远端 HTTP） |
+| [`demos/arm-hold/`](demos/arm-hold/) | RoArm 读关节并 hold |
+| [`vision/`](vision/) | 通路 B：画面 → 对象/空描述（主机） |
 | [`server/`](server/) | 可选本地 FastAPI 辅助（如 `/snake`） |
 | [`src/`](src/) | 旧版仅 ePaper 固件（已由统一运行时替代） |
 
@@ -173,10 +200,11 @@ PY
 **OnlyClaws ESP** is a remote-agent + on-device **Lua** framework (no character UI, no on-device LLM).
 
 - **Cloud:** [onlyclaws.world/epaper](https://onlyclaws.world/epaper) · [Agent docs](https://onlyclaws.world/epaper/api/agent/docs)
-- **Runtime:** `rlcd/` (`agent-runtime-0.13.x`) with `PanelDisplay`
+- **Runtime:** `rlcd/` (`agent-runtime-0.14.x`) with `PanelDisplay` + compile-time `OC_CAP_*`
   - `esp32-s3-rlcd-42` — ST7305 400×300  
   - `esp32-s3-epaper-397` — GxEPD2 800×480 (partial refresh; BLE off by default)
 - **Demos:** [`demos/snake/`](demos/snake/) (deploy via `POST /api/scripts`)
+- **ADL:** same gates as mcp_guard — `python scripts/adl_check.py` · [`doc/structurizr/`](doc/structurizr/)
 - **Build:** see Chinese「快速开始」or [`rlcd/DEV.md`](rlcd/DEV.md)
 
 ```bash
