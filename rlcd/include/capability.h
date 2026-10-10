@@ -14,6 +14,7 @@ inline constexpr bool ocCapAudio() { return OC_HAS_AUDIO != 0; }
 inline constexpr bool ocCapBle() { return OC_HAS_BLE != 0; }
 inline constexpr bool ocCapSensors() { return OC_HAS_SENSORS != 0; }
 inline constexpr bool ocCapArm() { return OC_HAS_ARM != 0; }
+inline constexpr bool ocCapMl() { return OC_HAS_ML != 0; }
 
 // Fill meta.capabilities as a JSON array of strings.
 void capabilityFillJson(JsonArray out);

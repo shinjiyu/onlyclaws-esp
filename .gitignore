@@ -26,3 +26,6 @@ scripts/overnight_pio_deps.log
 scripts/overnight_pio_deps.ready
 scripts/download_progress_server.log
 vision/models/*.onnx
+# Vendored via scripts/fetch_tflm.sh
+rlcd/lib/tflm/
+rlcd/lib/esp-nn/

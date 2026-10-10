@@ -9,3 +9,6 @@ bool audioPluginReady();
 bool audioPluginBeep(uint16_t freqHz, uint16_t ms);
 void audioPluginAttach(ScriptHost &host);
 const char *audioPluginName();
+// 16 kHz mono mic samples (louder channel); 0 when none ready or no mic.
+size_t audioPluginMicRead(int16_t *out, size_t maxSamples);
+bool audioPluginMicReady();

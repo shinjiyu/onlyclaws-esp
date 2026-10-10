@@ -18,6 +18,7 @@
 #include "claude_buddy.h"
 #include "cloud_http.h"
 #include "http_pad.h"
+#include "ml_engine.h"
 #include "cloud_config.h"
 #include "device_secrets.h"
 #include "oc_features.h"
@@ -28,7 +29,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.17.1";
+constexpr const char *FW_VERSION = "agent-runtime-0.18.0";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr uint32_t BATTERY_INTERVAL_MS = 30UL * 1000UL;
 
@@ -318,6 +319,7 @@ void postStatus() {
   meta["api_host"] = apiConfigGet().host;
   meta["panel"] = panelPluginName();
   meta["audio"] = audioPluginName();
+  if (ocCapMl()) mlFillStatus(meta);
 #if defined(BOARD_ROARM)
   meta["product"] = "roarm-m2";
 #elif defined(BOARD_PANEL_EPAPER)
@@ -528,6 +530,9 @@ void setupImpl() {
   }
 
   if (audioPluginBegin(16000)) audioPluginBeep(880, 80);
+  MlHooks mlHooks;
+  if (audioPluginMicReady()) mlHooks.micRead = audioPluginMicRead;
+  mlBegin(mlHooks);
 
   Serial.printf("fw=%s panel=%s audio=%s device=%s cloud=%s%s heap=%u\n", FW_VERSION,
                 panelPluginName(), audioPluginName(), apiConfigGet().deviceId.c_str(),

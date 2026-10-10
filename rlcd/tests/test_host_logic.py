@@ -1,7 +1,8 @@
 """Compile and run the firmware's pure C++ logic on the host.
 
-Covers rlcd/src/claude_proto.cpp (Claude Hardware Buddy protocol) and
-rlcd/include/oc_battery.h (battery badge). Needs a C++17 compiler and the
+Covers rlcd/src/claude_proto.cpp (Claude Hardware Buddy protocol),
+rlcd/include/oc_battery.h (battery badge) and rlcd/src/ml_manifest.cpp (model
+manifest), including a manifest built by server/ml_registry.py. Needs a C++17 compiler and the
 ArduinoJson copy PlatformIO fetched into rlcd/.pio/libdeps.
 """
 
@@ -14,6 +15,21 @@ import tempfile
 from pathlib import Path
 
 RLCD = Path(__file__).resolve().parents[1]
+ROOT = RLCD.parent
+
+
+def _server_manifest(out: Path) -> Path:
+    """micro_speech manifest exactly as the control plane would sign it."""
+    sys.path.insert(0, str(ROOT / "server"))
+    import json
+
+    import ml_registry
+
+    models = ROOT / "ml" / "models" / "micro_speech"
+    meta = json.loads((models / "micro_speech.meta.json").read_text())
+    blob = (models / "micro_speech.tflite").read_bytes()
+    out.write_bytes(ml_registry.manifest_bytes(ml_registry.build_manifest(meta, blob, 1)))
+    return out
 
 
 def _arduinojson_include() -> Path | None:
@@ -48,12 +64,14 @@ def test_host_logic() -> None:
                 str(aj),
                 str(RLCD / "tests" / "host_logic_test.cpp"),
                 str(RLCD / "src" / "claude_proto.cpp"),
+                str(RLCD / "src" / "ml_manifest.cpp"),
                 "-o",
                 str(exe),
             ],
             check=True,
         )
-        run = subprocess.run([str(exe)], capture_output=True, text=True)
+        manifest = _server_manifest(Path(tmp) / "manifest.json")
+        run = subprocess.run([str(exe), str(manifest)], capture_output=True, text=True)
         assert run.returncode == 0, run.stderr
         assert run.stdout.strip() == "ok"
 

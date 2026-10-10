@@ -14,3 +14,8 @@ bool cloudHttpGetExact(const String &url, uint8_t *dst, size_t need, uint32_t ti
 // GET a named bitmap. On success, *data is malloc'd and owned by the caller.
 // Width/height come from X-Width / X-Height. Caps at 800x480, width multiple of 8.
 bool cloudHttpGetBitmap(const String &url, int *w, int *h, uint8_t **data, size_t *n);
+
+// GET a body of known Content-Length (<= maxBytes) into PSRAM, 16-byte
+// aligned (TFLite Micro model buffers). On success the caller owns *data (free()).
+bool cloudHttpGetBlob(const String &url, size_t maxBytes, uint8_t **data, size_t *n,
+                      uint32_t timeoutMs);

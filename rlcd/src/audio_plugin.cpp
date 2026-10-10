@@ -73,3 +73,24 @@ const char *audioPluginName() {
   return "none";
 #endif
 }
+
+size_t audioPluginMicRead(int16_t *out, size_t maxSamples) {
+#if OC_HAS_AUDIO
+  if (!audioMicReady() || !audioLockI2S(100)) return 0;
+  const size_t n = audioMicReadMono(out, maxSamples);
+  audioUnlockI2S();
+  return n;
+#else
+  (void)out;
+  (void)maxSamples;
+  return 0;
+#endif
+}
+
+bool audioPluginMicReady() {
+#if OC_HAS_AUDIO
+  return audioIsReady() && audioMicReady();
+#else
+  return false;
+#endif
+}

@@ -116,6 +116,7 @@ Requires Python 3 and PlatformIO 6.
 
 ```bash
 python3 -m pip install -U platformio --user
+bash scripts/fetch_tflm.sh   # once: TFLite Micro + esp-nn for the ESP32-S3 builds
 cd rlcd
 cp include/device_secrets.h.example include/device_secrets.h
 # Set EPD_DEVICE_ID and EPD_DEVICE_TOKEN, or leave the token empty and provision it over NVS.
@@ -156,13 +157,16 @@ On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 
 
 On the RLCD, pair the board with Claude desktop (Developer → Hardware Buddy, enter the passkey shown on the panel). When Claude asks to run a tool, the panel shows the request: press KEY to allow it once or BOOT to deny. Arm product notes: [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md).
 
+The ESP32-S3 builds also run small neural networks that an agent uploads at runtime, with no reflash: a keyword spotter, a sound classifier, a sensor model. The agent posts a TensorFlow Lite Micro model to `/api/ml/models`; the control plane rejects ops the firmware can't run and signs the manifest; the board verifies the signature and the hash, caches the model in flash, and Lua calls `ml.listen("micro_speech")` or `ml.run(name, inputs)`. On the RLCD, the `micro_speech` yes/no model takes about 50 ms per one-second clip. Format and op set: [`doc/structurizr/ML-PLUGIN.md`](doc/structurizr/ML-PLUGIN.md).
+
 ## Repository
 
 | Path | What's there |
 |------|--------------|
 | [`rlcd/`](rlcd/) | Firmware. Build and flash from here |
 | [`server/`](server/) | Control plane: devices, scripts, events, bitmaps, console |
-| [`demos/`](demos/) | Lua apps to deploy: Snake (key, phone D-pad or HTTP controller), a live RL-training dashboard, a Wi-Fi quality monitor, and RoArm pose hold |
+| [`demos/`](demos/) | Lua apps to deploy: Snake (key, phone D-pad or HTTP controller), a live RL-training dashboard, a Wi-Fi quality monitor, RoArm pose hold, and yes/no keyword spotting |
+| [`ml/`](ml/) | Models ready to upload to `/api/ml/models` (`.tflite` + meta) |
 | [`jev_servo/`](jev_servo/) | Host-side arm control: forward kinematics, USB and cloud arm channels, MCP server, web console |
 | [`vision/`](vision/) | Host-side camera pipeline (YuNet, SFace, YOLOv8n) the agent can bridge into arm moves. Models: `bash vision/scripts/fetch_models.sh` |
 | [`doc/structurizr/`](doc/structurizr/) | Architecture model and product notes (`python scripts/adl_check.py`) |
@@ -177,7 +181,7 @@ On the RLCD, pair the board with Claude desktop (Developer → Hardware Buddy, e
 
 ## Status
 
-Firmware line `agent-runtime-0.16.x`: panel and audio plugins since `0.13.6`, RoArm-M2 arm plugin since `0.16.0`. The hosted console is invite-only while we keep costs and abuse in check. Issues and pull requests are welcome, especially new panel plugins and demo apps.
+Firmware line `agent-runtime-0.18.x`: panel and audio plugins since `0.13.6`, RoArm-M2 arm plugin since `0.16.0`, Claude Hardware Buddy since `0.17.0`, on-device models since `0.18.0`. The hosted console is invite-only while we keep costs and abuse in check. Issues and pull requests are welcome, especially new panel plugins and demo apps.
 
 ## License
 

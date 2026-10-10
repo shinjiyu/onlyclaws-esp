@@ -280,6 +280,51 @@
       "test_kind": "unit",
       "tests": ["jev_servo/tests/test_face_id.py"],
       "acceptance": "Unknown faces get new integer ids saved under face_gallery/; rematch reuses id; faces list/rename CLI; state shows face#id"
+    },
+    {
+      "id": "REQ-ML-OPSET",
+      "title": "Uploaded models are checked against the firmware op set",
+      "component": "ml_registry",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["server/tests/test_ml_registry.py"],
+      "acceptance": "POST /api/ml/models parses the .tflite flatbuffer and rejects (422) any builtin or custom op outside op set v1; server ml_opset.py and firmware registerOpsetV1() list the same ops; malformed files only raise TfliteError"
+    },
+    {
+      "id": "REQ-ML-SIGNED-DELIVERY",
+      "title": "Model manifests are signed; devices fetch envelope + blob",
+      "component": "ml_registry",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["server/tests/test_ml_registry.py"],
+      "acceptance": "Manifest bytes signed with ECDSA P-256 (openssl); GET /api/v1/device/{id}/models/{name} returns {manifest, sig} for the device owner's models only; /blob returns the bytes with Content-Length; version increments per upload; audio models require their frontend first; 503 without a key"
+    },
+    {
+      "id": "REQ-ML-MANIFEST",
+      "title": "Firmware validates model manifests",
+      "component": "ml",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["rlcd/tests/test_host_logic.py"],
+      "acceptance": "ml_manifest.cpp accepts the server-built micro_speech manifest; rejects bad name/kind/sha256/bytes/arena, opset newer than firmware, non-16 kHz audio, clips over 10 s, self-referencing frontend"
+    },
+    {
+      "id": "REQ-ML-RUN",
+      "title": "Device downloads, verifies, caches and runs models from Lua",
+      "component": "ml",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "ml.load verifies the signature against OC_ML_PUBKEY_PEM and the blob sha256, caches both on LittleFS (works offline after first load), builds a PSRAM interpreter; ml.listen records one clip, runs the frontend per frame and the classifier; ml.run takes a float table; results {label, index, score, scores, ms}; /status meta.ml lists loaded models; capability 'ml' on S3 builds only"
+    },
+    {
+      "id": "REQ-ML-KWS",
+      "title": "Keyword spotting (micro_speech yes/no) delivered as data",
+      "component": "ml",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Upload ml/models/micro_speech (frontend + classifier) without reflashing; a Lua script on the RLCD shows and emits 'yes' / 'no' when spoken"
     }
   ]
 }

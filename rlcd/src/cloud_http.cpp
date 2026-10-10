@@ -144,3 +144,53 @@ bool cloudHttpGetBitmap(const String &url, int *w, int *h, uint8_t **data, size_
   *n = got;
   return true;
 }
+
+bool cloudHttpGetBlob(const String &url, size_t maxBytes, uint8_t **data, size_t *n,
+                      uint32_t timeoutMs) {
+  if (data) *data = nullptr;
+  if (n) *n = 0;
+  if (!data || !n || !maxBytes || WiFi.status() != WL_CONNECTED) return false;
+  if (!lockCloud(20000)) return false;
+  bool ok = false;
+  uint8_t *raw = nullptr;
+  size_t got = 0;
+  HTTPClient http;
+  http.setTimeout(timeoutMs > 30000 ? 30000 : timeoutMs);
+  http.setReuse(false);
+  tlsCloud.setInsecure();
+  tlsCloud.setTimeout(timeoutMs > 30000 ? 30000 : timeoutMs);
+  Serial.printf("GET blob %s\n", url.c_str());
+  if (http.begin(tlsCloud, url)) {
+    http.addHeader("Authorization", String("Bearer ") + apiDeviceToken());
+    const int code = http.GET();
+    const int len = http.getSize();
+    if (code == 200 && len > 0 && (size_t)len <= maxBytes) {
+      const size_t need = (size_t)len;
+      raw = (uint8_t *)heap_caps_aligned_alloc(16, need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      WiFiClient *stream = http.getStreamPtr();
+      const uint32_t t0 = millis();
+      while (raw && got < need && millis() - t0 < timeoutMs) {
+        const size_t avail = stream->available();
+        if (!avail) {
+          if (!http.connected()) break;
+          delay(2);
+          yield();
+          continue;
+        }
+        got += stream->readBytes(raw + got, min(avail, need - got));
+      }
+      ok = raw && got == need;
+    } else {
+      Serial.printf("blob HTTP %d len=%d\n", code, len);
+    }
+    http.end();
+  }
+  unlockCloud();
+  if (!ok) {
+    free(raw);
+    return false;
+  }
+  *data = raw;
+  *n = got;
+  return true;
+}

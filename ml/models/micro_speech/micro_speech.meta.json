@@ -1,0 +1,7 @@
+{
+  "name": "micro_speech",
+  "kind": "audio",
+  "arena_kb": 40,
+  "labels": ["silence", "unknown", "yes", "no"],
+  "audio": {"rate": 16000, "window_ms": 30, "stride_ms": 20, "frames": 49, "features": 40, "frontend": "ms_frontend"}
+}

@@ -17,6 +17,11 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 | REQ-SENSORS | sensors | manual | `sensors.read` / Lua sensors() |
 | REQ-BATTERY-BADGE | panel | unit | `rlcd/tests/test_host_logic.py` (label + pct curve); badge visible on RLCD |
 | REQ-CLAUDE-BUDDY | claude_buddy | unit | `rlcd/tests/test_host_logic.py` (protocol); pair with Claude desktop Hardware Buddy, KEY/BOOT on a prompt |
+| REQ-ML-OPSET | ml_registry | unit | `server/tests/test_ml_registry.py` (firmware/server op-set parity, real models, malformed input) |
+| REQ-ML-SIGNED-DELIVERY | ml_registry | unit | `server/tests/test_ml_registry.py` (upload → signed envelope verified by openssl → blob; owner isolation) |
+| REQ-ML-MANIFEST | ml | unit | `rlcd/tests/test_host_logic.py` (parser rules + server-built manifest) |
+| REQ-ML-RUN | ml | manual | `ml.load` online then offline from cache; tampered blob refused; `/status` meta.ml |
+| REQ-ML-KWS | ml | manual | Upload `ml/models/micro_speech`; Lua yes/no on RLCD |
 | REQ-PUSH-BITMAP | control_plane | manual | push image matches panel size |
 | REQ-CAPABILITIES | contracts | unit | `server/tests/test_capabilities.py` + `/status` meta.capabilities |
 | REQ-PLUGIN-BUILD | device_runtime | manual | `OC_PLUGIN_*` in platformio.ini; Lua/invoke gated |

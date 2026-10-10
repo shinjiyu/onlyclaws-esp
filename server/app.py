@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field
 
 import access
 import accounts
+import ml_registry
 import render as epd_render
 import snake_ctrl
 import tenancy
@@ -600,6 +601,16 @@ def require_device_token(device_id: str, request: Request) -> str:
 # FastAPI dependency: path {device_id} + bearer must match that device's token.
 def require_known_device(device_id: str, request: Request) -> str:
     return require_device_token(device_id, request)
+
+
+app.include_router(
+    ml_registry.make_router(
+        require_user=require_user,
+        require_device=require_known_device,
+        db=db,
+        data_dir=DATA_DIR,
+    )
+)
 
 
 def enqueue_bitmap(
@@ -2174,11 +2185,13 @@ async def agent_capabilities(
                 "arm.stop",
                 "arm.name",
             ],
+            "ml": ["ml.load", "ml.listen", "ml.run", "ml.info", "ml.unload"],
             "input": ["input.key", "input.boot"],
             "net": ["net.rssi", "net.ip", "net.ssid"],
             "display": "panel products: 400x300 or 800x480 1bpp; RoArm: headless (no gfx)",
             "pcm": "base64 int16 LE mono @ sample_rate(); ~2s max",
             "arm_pose": "radians: base, shoulder, elbow, hand/wrist; spd=0 uses firmware default",
+            "models": "capability ml: POST /api/ml/models (file + meta) then Lua ml.listen/ml.run by name; GET /api/ml/opset",
         },
         "invoke_tools": [
             "sensors.read",
@@ -2201,8 +2214,8 @@ async def agent_capabilities(
             "core": ["emit"],
         },
         "products": {
-            "rlcd-42": {"caps": ["core", "panel", "audio", "ble_pad", "sensors"]},
-            "epaper-397": {"caps": ["core", "panel", "sensors"]},
+            "rlcd-42": {"caps": ["core", "panel", "audio", "ble_pad", "sensors", "claude_buddy", "ml"]},
+            "epaper-397": {"caps": ["core", "panel", "audio", "sensors", "ml"]},
             "roarm-m2": {"caps": ["core", "arm"], "env": "esp32-roarm-m2"},
         },
         "removed": [

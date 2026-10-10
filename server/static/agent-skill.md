@@ -96,6 +96,34 @@ KEY = allow once, BOOT = deny. Lua:
 `claude.takeover(false)` (handle prompts in Lua; back on at next script load) ·
 `claude.allow(id)` / `claude.deny(id)`
 
+### On-device models (capability `ml`, ESP32-S3 boards)
+
+Upload a TFLite Micro model once; Lua loads it by name. No reflash.
+
+```bash
+curl -H "Authorization: Bearer oct_..." https://onlyclaws.world/api/ml/models \
+  -F file=@ms_frontend.tflite -F 'meta={"name":"ms_frontend","kind":"frontend","arena_kb":24}'
+curl -H "Authorization: Bearer oct_..." https://onlyclaws.world/api/ml/models \
+  -F file=@micro_speech.tflite \
+  -F 'meta={"name":"micro_speech","kind":"audio","arena_kb":40,"labels":["silence","unknown","yes","no"],
+            "audio":{"rate":16000,"window_ms":30,"stride_ms":20,"frames":49,"features":40,"frontend":"ms_frontend"}}'
+```
+
+- `kind`: `audio` (mic classifier; needs a `frontend` model uploaded first), `frontend`, or `tensor` (fed by `ml.run`)
+- ≤ 2 MB, `arena_kb` ≤ 1024, int8 recommended. Upload is rejected (422) if the model uses an op the firmware lacks; `GET /api/ml/opset` lists them
+- `GET /api/ml/models` · `DELETE /api/ml/models/{name}` · re-upload bumps `version`, devices pick it up on next `ml.load`
+
+Lua: `ml.listen(name)` → `{label, index, score, scores, ms}` (records one clip, blocks ~1 s) ·
+`ml.run(name, {numbers})` → same · `ml.load(name)` → `true` or `nil, err` (first load downloads; later loads work offline) ·
+`ml.info(name)` · `ml.unload(name)`. `/status` `meta.ml` lists loaded models.
+
+```lua
+function on_loop()
+  local r, err = ml.listen("micro_speech")
+  if r and r.score > 0.8 and (r.label == "yes" or r.label == "no") then emit("heard", {word = r.label}) end
+end
+```
+
 ### Deploy example
 
 ```http

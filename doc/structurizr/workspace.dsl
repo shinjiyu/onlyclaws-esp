@@ -117,6 +117,17 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                     }
                 }
 
+                mlPlugin = container "ML plugin" "TFLite Micro + esp-nn; signed models as data, LittleFS cache, Lua ml.*" "C++" {
+                    tags "Plugin"
+                    properties {
+                        "path" "rlcd/src/ml_engine.cpp + ml_manifest.cpp"
+                        "role" "plugin"
+                        "horizon.intention" "Run Agent-delivered models (keyword spotting, bird calls, sensor classifiers) without reflashing"
+                        "horizon.deps" "contracts + cloud_http"
+                        "adl" "decisions/0006-ml-models-as-data.md"
+                    }
+                }
+
                 sensorsPlugin = container "Sensors plugin" "Temp / humidity / battery (RLCD ADC, ePaper TG28 fuel gauge)" "C++" {
                     tags "Plugin"
                     properties {
@@ -148,10 +159,10 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                     }
                 }
 
-                cloudHttp = container "Cloud HTTP" "tlsCloud pending/status/ack; tlsLua for scripts" "C++" {
+                cloudHttp = container "Cloud HTTP" "tlsCloud pending/status/ack, bitmaps, model blobs; tlsLua for scripts" "C++" {
                     tags "Infra"
                     properties {
-                        "path" "rlcd/src/main.cpp (target extract)"
+                        "path" "rlcd/src/cloud_http.cpp + main.cpp tlsLua"
                         "role" "infra"
                     }
                 }
@@ -160,6 +171,14 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                     tags "Infra"
                     properties {
                         "path" "server/tenancy.py"
+                        "role" "infra"
+                    }
+                }
+
+                mlRegistry = container "ML registry" "Model upload, op-set check, ECDSA manifest signing, device download" "Python" {
+                    tags "Infra"
+                    properties {
+                        "path" "server/ml_registry.py + ml_opset.py"
                         "role" "infra"
                     }
                 }
@@ -196,6 +215,12 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
         deviceRuntime -> armPlugin "wires when product includes arm"
         deviceRuntime -> claudeBuddyPlugin "pipes BLE UART bytes; passes PanelDisplay + battery"
         scriptEngine -> claudeBuddyPlugin "registers claude.*"
+        mlPlugin -> contracts "implements"
+        mlPlugin -> cloudHttp "signed manifest + .tflite"
+        deviceRuntime -> mlPlugin "wires mic hook; status meta.ml"
+        scriptEngine -> mlPlugin "registers ml.*"
+        controlPlane -> mlRegistry "mounts /api/ml + device model routes"
+        mlRegistry -> tenancy "device owner"
         claudeDesktop -> blePadPlugin "Hardware Buddy JSON over Nordic UART"
     }
 

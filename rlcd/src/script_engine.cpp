@@ -11,6 +11,7 @@
 #include "board_pins.h"
 #include "ble_ctrl.h"
 #include "claude_buddy.h"
+#include "ml_engine.h"
 #include "capability.h"
 #include "arm_driver.h"
 #include "arm_ctl.h"
@@ -375,6 +376,97 @@ int l_claude_decide(lua_State *L) {
 int l_claude_takeover(lua_State *L) {
   claudeBuddySetTakeover(lua_isnoneornil(L, 1) || lua_toboolean(L, 1));
   return 0;
+}
+
+// ---- ml (on-device inference) ----
+
+int pushMlError(lua_State *L, const std::string &err) {
+  lua_pushnil(L);
+  lua_pushlstring(L, err.data(), err.size());
+  return 2;
+}
+
+// {label, index, score, scores = {...}, ms}; label only when the manifest has labels.
+int pushMlResult(lua_State *L, const char *name, const MlResult &r) {
+  lua_newtable(L);
+  setInt(L, "index", r.top);
+  setInt(L, "ms", r.ms);
+  lua_pushnumber(L, r.top >= 0 ? r.scores[(size_t)r.top] : 0.0);
+  lua_setfield(L, -2, "score");
+  MlInfo info;
+  if (r.top >= 0 && mlInfo(name, info) && (size_t)r.top < info.manifest->labels.size()) {
+    setStr(L, "label", info.manifest->labels[(size_t)r.top].c_str());
+  }
+  lua_newtable(L);
+  for (size_t i = 0; i < r.scores.size(); ++i) {
+    lua_pushnumber(L, r.scores[i]);
+    lua_rawseti(L, -2, (lua_Integer)i + 1);
+  }
+  lua_setfield(L, -2, "scores");
+  return 1;
+}
+
+// ml_load(name) -> true | nil, err
+int l_ml_load(lua_State *L) {
+  std::string err;
+  if (!mlLoad(luaL_checkstring(L, 1), err)) return pushMlError(L, err);
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
+int l_ml_unload(lua_State *L) {
+  mlUnload(luaL_checkstring(L, 1));
+  return 0;
+}
+
+// ml_listen(name) -> result | nil, err. Blocks for one clip plus inference.
+int l_ml_listen(lua_State *L) {
+  const char *name = luaL_checkstring(L, 1);
+  MlResult r;
+  std::string err;
+  if (!mlListen(name, r, err)) return pushMlError(L, err);
+  return pushMlResult(L, name, r);
+}
+
+// ml_run(name, {numbers}) -> result | nil, err
+int l_ml_run(lua_State *L) {
+  const char *name = luaL_checkstring(L, 1);
+  luaL_checktype(L, 2, LUA_TTABLE);
+  const size_t n = (size_t)lua_rawlen(L, 2);
+  std::vector<float> in(n);
+  for (size_t i = 0; i < n; ++i) {
+    lua_rawgeti(L, 2, (lua_Integer)i + 1);
+    in[i] = (float)lua_tonumber(L, -1);
+    lua_pop(L, 1);
+  }
+  MlResult r;
+  std::string err;
+  if (!mlRun(name, in.data(), n, r, err)) return pushMlError(L, err);
+  return pushMlResult(L, name, r);
+}
+
+// ml_info(name) -> {name, version, kind, labels, arena_used, inputs, outputs} | nil
+int l_ml_info(lua_State *L) {
+  MlInfo info;
+  if (!mlInfo(luaL_checkstring(L, 1), info)) {
+    lua_pushnil(L);
+    return 1;
+  }
+  const MlManifest &m = *info.manifest;
+  lua_newtable(L);
+  setStr(L, "name", m.name.c_str());
+  setInt(L, "version", m.version);
+  setStr(L, "kind", m.kind.c_str());
+  setInt(L, "arena_used", (lua_Integer)info.arenaUsed);
+  setInt(L, "inputs", (lua_Integer)info.inputElems);
+  setInt(L, "outputs", (lua_Integer)info.outputElems);
+  lua_newtable(L);
+  for (size_t i = 0; i < m.labels.size(); ++i) {
+    lua_pushstring(L, m.labels[i].c_str());
+    lua_rawseti(L, -2, (lua_Integer)i + 1);
+  }
+  lua_setfield(L, -2, "labels");
+  return 1;
 }
 
 // ---- graphics ----
@@ -818,6 +910,13 @@ bool bindApis() {
     ok &= gLua->registerFunction("gfx_blit", l_gfx_blit_b64);
     ok &= gLua->registerFunction("gfx_image", l_gfx_image);
   }
+  if (ocCapMl() || portable) {
+    ok &= gLua->registerFunction("ml_load", l_ml_load);
+    ok &= gLua->registerFunction("ml_unload", l_ml_unload);
+    ok &= gLua->registerFunction("ml_listen", l_ml_listen);
+    ok &= gLua->registerFunction("ml_run", l_ml_run);
+    ok &= gLua->registerFunction("ml_info", l_ml_info);
+  }
 #if OC_HAS_ARM
   if (ocCapArm()) {
     ok &= gLua->registerFunction("arm_feedback", l_arm_feedback);
@@ -886,6 +985,13 @@ gfx.image = gfx_image
 gfx.qr = gfx_qr
 gfx.slow = panel_slow
 gfx.badge = gfx_badge
+)LUA";
+  }
+  if (ocCapMl() || portable) {
+    boot += R"LUA(
+ml = ml or {}
+ml.load = ml_load; ml.unload = ml_unload; ml.listen = ml_listen
+ml.run = ml_run; ml.info = ml_info
 )LUA";
   }
   if (ocCapArm()) {

@@ -116,6 +116,7 @@ end
 
 ```bash
 python3 -m pip install -U platformio --user
+bash scripts/fetch_tflm.sh   # 只需一次：ESP32-S3 构建用的 TFLite Micro + esp-nn
 cd rlcd
 cp include/device_secrets.h.example include/device_secrets.h
 # 填 EPD_DEVICE_ID 和 EPD_DEVICE_TOKEN；令牌也可以留空，之后写进 NVS。
@@ -156,13 +157,16 @@ uvicorn app:app --host 127.0.0.1 --port 8787
 
 RLCD 可以和 Claude 桌面端配对（Developer → Hardware Buddy，输入屏上显示的配对码）。Claude 请求执行工具时，屏上会显示请求内容：按 KEY 允许一次，按 BOOT 拒绝。机械臂产品说明见 [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md)。
 
+ESP32-S3 构建还能跑 Agent 运行时下发的小模型，不用重新烧录：关键词识别、声音分类、传感器模型都行。Agent 把 TensorFlow Lite Micro 模型传到 `/api/ml/models`，控制面拒收固件跑不了的算子并给清单签名；板子校验签名和哈希后把模型缓存在 flash 里，Lua 调 `ml.listen("micro_speech")` 或 `ml.run(name, inputs)`。RLCD 上 `micro_speech` 的 yes/no 模型处理一秒音频约 50 ms。格式和算子集见 [`doc/structurizr/ML-PLUGIN.md`](doc/structurizr/ML-PLUGIN.md)。
+
 ## 仓库结构
 
 | 路径 | 内容 |
 |------|------|
 | [`rlcd/`](rlcd/) | 固件，在这里编译烧录 |
 | [`server/`](server/) | 控制面：设备、脚本、事件、位图、控制台 |
-| [`demos/`](demos/) | 可部署的 Lua 应用：贪食蛇（按键、手机方向键或 HTTP 控制）、实时 RL 训练看板、Wi-Fi 质量监控、机械臂姿态保持 |
+| [`demos/`](demos/) | 可部署的 Lua 应用：贪食蛇（按键、手机方向键或 HTTP 控制）、实时 RL 训练看板、Wi-Fi 质量监控、机械臂姿态保持、yes/no 语音关键词识别 |
+| [`ml/`](ml/) | 可直接上传到 `/api/ml/models` 的模型（`.tflite` + 元数据） |
 | [`jev_servo/`](jev_servo/) | 主机侧机械臂控制：正运动学、USB 和云端两种通道、MCP 服务、网页控制台 |
 | [`vision/`](vision/) | 主机侧摄像头管线（YuNet、SFace、YOLOv8n），Agent 可以把识别结果转成机械臂动作。模型用 `bash vision/scripts/fetch_models.sh` 下载 |
 | [`doc/structurizr/`](doc/structurizr/) | 架构模型和产品说明（`python scripts/adl_check.py`） |
@@ -177,7 +181,7 @@ RLCD 可以和 Claude 桌面端配对（Developer → Hardware Buddy，输入屏
 
 ## 状态
 
-固件版本线 `agent-runtime-0.16.x`：屏和音频插件从 `0.13.6` 开始，RoArm-M2 机械臂插件从 `0.16.0` 开始。为控制成本和滥用，托管控制台目前邀请制。欢迎提 Issue 和 PR，尤其是新的屏幕插件和示例应用。
+固件版本线 `agent-runtime-0.18.x`：屏和音频插件从 `0.13.6` 开始，RoArm-M2 机械臂插件从 `0.16.0` 开始，Claude Hardware Buddy 从 `0.17.0` 开始，端侧模型从 `0.18.0` 开始。为控制成本和滥用，托管控制台目前邀请制。欢迎提 Issue 和 PR，尤其是新的屏幕插件和示例应用。
 
 ## 许可
 

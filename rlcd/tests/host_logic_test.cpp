@@ -1,5 +1,6 @@
-// Host-side checks for the pure firmware logic: Claude Buddy protocol and the
-// battery badge helpers. Built and run by test_host_logic.py.
+// Host-side checks for the pure firmware logic: Claude Buddy protocol, the
+// battery badge helpers and the ml model manifest. Built and run by
+// test_host_logic.py; argv[1] is a manifest the server code produced.
 
 #include <stdio.h>
 #include <string.h>
@@ -7,6 +8,7 @@
 #include <string>
 
 #include "claude_proto.h"
+#include "ml_manifest.h"
 #include "oc_battery.h"
 
 static int gFailures = 0;
@@ -225,12 +227,102 @@ static void testChargeTrend() {
   }
 }
 
-int main() {
+static const char *kSha = "09e5e2a9dfb2c0ffee00112233445566778899aabbccddeeff00112233445566";
+
+static std::string audioManifest(const char *patch) {
+  std::string s = "{\"name\":\"kws\",\"version\":2,\"opset\":1,\"kind\":\"audio\",\"sha256\":\"";
+  s += kSha;
+  s += "\",\"bytes\":18800,\"arena_kb\":40,\"labels\":[\"silence\",\"unknown\",\"yes\",\"no\"],"
+       "\"audio\":{\"rate\":16000,\"window_ms\":30,\"stride_ms\":20,\"frames\":49,"
+       "\"features\":40,\"frontend\":\"fe\"}";
+  s += patch;
+  s += "}";
+  return s;
+}
+
+static bool parses(const std::string &json, std::string *err = nullptr) {
+  MlManifest m;
+  std::string e;
+  const bool ok = mlParseManifest(json.data(), json.size(), m, e);
+  if (err) *err = e;
+  return ok;
+}
+
+static void testMlManifest() {
+  CHECK(mlNameOk("micro_speech") && mlNameOk("a-1"));
+  CHECK(!mlNameOk("") && !mlNameOk("Bad") && !mlNameOk("a/b") && !mlNameOk("a.tfl"));
+  CHECK(!mlNameOk("abcdefghijklmnopqrstuvwxyz0123456"));
+
+  MlManifest m;
+  std::string err;
+  const std::string good = audioManifest("");
+  CHECK(mlParseManifest(good.data(), good.size(), m, err));
+  CHECK(m.name == "kws" && m.version == 2 && m.kind == "audio" && m.bytes == 18800);
+  CHECK(m.arenaKb == 40 && m.labels.size() == 4 && m.labels[2] == "yes");
+  CHECK(m.audio.windowSamples() == 480 && m.audio.strideSamples() == 320);
+  CHECK(m.audio.totalSamples() == 48 * 320 + 480);
+  CHECK(m.audio.frontend == "fe");
+
+  // Later keys win in ArduinoJson, so each patch overrides one field.
+  CHECK(!parses(audioManifest(",\"opset\":2"), &err) && err == "opset newer than firmware");
+  CHECK(!parses(audioManifest(",\"opset\":0")));
+  CHECK(!parses(audioManifest(",\"kind\":\"video\"")));
+  CHECK(!parses(audioManifest(",\"sha256\":\"ABC\"")));
+  CHECK(!parses(audioManifest(",\"bytes\":0")));
+  CHECK(!parses(audioManifest(",\"bytes\":3000000")));
+  CHECK(!parses(audioManifest(",\"arena_kb\":2048")));
+  CHECK(!parses(audioManifest(",\"name\":\"../x\"")));
+  CHECK(!parses(audioManifest(",\"audio\":{\"rate\":44100,\"window_ms\":30,\"stride_ms\":20,"
+                              "\"frames\":49,\"features\":40,\"frontend\":\"fe\"}"),
+                &err) &&
+        err == "audio rate must be 16000");
+  CHECK(!parses(audioManifest(",\"audio\":{\"rate\":16000,\"window_ms\":30,\"stride_ms\":1000,"
+                              "\"frames\":20,\"features\":40,\"frontend\":\"fe\"}"),
+                &err) &&
+        err == "clip longer than 10 s");
+  CHECK(!parses(audioManifest(",\"audio\":{\"rate\":16000,\"window_ms\":30,\"stride_ms\":20,"
+                              "\"frames\":49,\"features\":40,\"frontend\":\"kws\"}"),
+                &err) &&
+        err == "bad frontend");
+  CHECK(!parses(audioManifest(",\"audio\":1"), &err) && err == "audio spec missing");
+  CHECK(!parses("not json") && !parses("[1,2]"));
+
+  std::string tensor = "{\"name\":\"t\",\"version\":1,\"opset\":1,\"kind\":\"tensor\",\"sha256\":\"";
+  tensor += kSha;
+  tensor += "\",\"bytes\":10,\"arena_kb\":8}";
+  CHECK(parses(tensor));
+
+  CHECK(mlArgMax({}) == -1);
+  CHECK(mlArgMax({0.1f, 0.7f, 0.2f}) == 1);
+  CHECK(mlArgMax({0.5f, 0.5f}) == 0);
+}
+
+static void testServerManifest(const char *path) {
+  FILE *f = fopen(path, "rb");
+  CHECK(f);
+  if (!f) return;
+  std::string json;
+  char buf[512];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0) json.append(buf, n);
+  fclose(f);
+  MlManifest m;
+  std::string err;
+  CHECK(mlParseManifest(json.data(), json.size(), m, err));
+  if (!err.empty()) fprintf(stderr, "server manifest: %s\n", err.c_str());
+  CHECK(m.name == "micro_speech" && m.kind == "audio" && m.opset == kMlOpsetVersion);
+  CHECK(m.audio.frontend == "ms_frontend" && m.audio.frames == 49 && m.audio.features == 40);
+  CHECK(m.labels.size() == 4 && m.sha256.size() == 64);
+}
+
+int main(int argc, char **argv) {
   testHeartbeatAndPrompt();
   testCommands();
   testTimeTurnAndJunk();
   testBattery();
   testChargeTrend();
+  testMlManifest();
+  if (argc > 1) testServerManifest(argv[1]);
   if (gFailures) {
     fprintf(stderr, "%d failure(s)\n", gFailures);
     return 1;

@@ -12,6 +12,7 @@ void capabilityFillJson(JsonArray out) {
   }
   if (ocCapSensors()) out.add("sensors");
   if (ocCapArm()) out.add("arm");
+  if (ocCapMl()) out.add("ml");
 }
 
 bool capabilityAllowsTool(const char *tool) {
