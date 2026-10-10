@@ -28,7 +28,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.17.0";
+constexpr const char *FW_VERSION = "agent-runtime-0.17.1";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr uint32_t BATTERY_INTERVAL_MS = 30UL * 1000UL;
 

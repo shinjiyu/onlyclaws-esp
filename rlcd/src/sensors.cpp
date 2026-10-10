@@ -2,6 +2,9 @@
 
 #include <Wire.h>
 #include <math.h>
+#if CONFIG_IDF_TARGET_ESP32S3
+#include <soc/usb_serial_jtag_reg.h>
+#endif
 
 #include "board_pins.h"
 
@@ -74,21 +77,51 @@ bool axpBattery(OcBattery &b) {
   return true;
 }
 
+// A USB host sends a start-of-frame every 1 ms; a wall charger sends none.
+bool usbHostActive() {
+#if CONFIG_IDF_TARGET_ESP32S3
+  const uint32_t a = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & USB_SERIAL_JTAG_SOF_FRAME_INDEX;
+  delayMicroseconds(2500);
+  const uint32_t b = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & USB_SERIAL_JTAG_SOF_FRAME_INDEX;
+  return a != b;
+#else
+  return false;
+#endif
+}
+
+// sensorsBattery() runs on the main loop and the net task; the trend only
+// takes one sample per kTrendEveryMs so both callers see the same estimate.
+constexpr uint32_t kTrendEveryMs = 25000;
+OcChargeTrend gTrend;
+uint32_t gTrendAtMs = 0;
+bool gTrendFed = false;
+portMUX_TYPE gTrendMux = portMUX_INITIALIZER_UNLOCKED;
+
 bool adcBattery(OcBattery &b) {
   b.sensed = true;
   uint32_t sum = 0;
-  const int n = 8;
+  const int n = 32;
   for (int i = 0; i < n; ++i) {
     sum += analogReadMilliVolts(PIN_BAT_ADC);
-    delay(2);
+    delayMicroseconds(300);
   }
   // 1/3 divider on the RLCD. USB-only boards read near 0 or nonsense.
   const int mv = (int)(sum / n) * 3;
-  if (mv >= 2800 && mv <= 4400) {
-    b.present = true;
-    b.mv = mv;
-    b.pct = ocBatteryPctFromMv(mv);
+  const bool host = usbHostActive();
+  b.usb = host;
+  if (mv < 2800 || mv > 4400) return true;
+  b.present = true;
+  b.mv = mv;
+  b.pct = ocBatteryPctFromMv(mv);
+  const uint32_t now = millis();
+  portENTER_CRITICAL(&gTrendMux);
+  if (!gTrendFed || now - gTrendAtMs >= kTrendEveryMs) {
+    gTrend.update(mv, host);
+    gTrendAtMs = now;
+    gTrendFed = true;
   }
+  b.charging = gTrend.charging();
+  portEXIT_CRITICAL(&gTrendMux);
   return true;
 }
 }  // namespace

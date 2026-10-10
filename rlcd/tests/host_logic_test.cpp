@@ -188,11 +188,49 @@ static void testBattery() {
   CHECK(!ocBatterySame(a, b));
 }
 
+static void testChargeTrend() {
+  // USB host (computer) means charging until the cell reads full.
+  {
+    OcChargeTrend t;
+    CHECK(t.update(3700, true));
+    CHECK(!t.update(4180, true));
+  }
+  // Wall charger: plug-in jump, then unplug drop.
+  {
+    OcChargeTrend t;
+    for (int i = 0; i < 6; ++i) CHECK(!t.update(3700 - i, false));
+    CHECK(t.update(3790, false));
+    CHECK(t.update(3792, false));
+    CHECK(t.update(3795, false));
+    CHECK(!t.update(3730, false));
+    // Old high samples are gone, so the slope does not flip it back.
+    for (int i = 0; i < OcChargeTrend::kWindow; ++i) CHECK(!t.update(3730 - i / 4, false));
+  }
+  // No jump: a slow rise across the window turns it on, a slow fall off.
+  {
+    OcChargeTrend t;
+    bool on = false;
+    for (int i = 0; i < OcChargeTrend::kWindow; ++i) on = t.update(3600 + i, false);
+    CHECK(on);
+    for (int i = 0; i < OcChargeTrend::kWindow; ++i) on = t.update(3620 - i, false);
+    CHECK(!on);
+  }
+  // ADC noise (+-15 mV around a flat cell) never reads as charging.
+  {
+    OcChargeTrend t;
+    const int noise[] = {0, 12, -9, 15, -14, 3, -6, 10, -12, 7};
+    bool any = false;
+    for (int i = 0; i < 60; ++i) any |= t.update(3700 + noise[i % 10] - i / 10, false);
+    CHECK(!any);
+  }
+}
+
 int main() {
   testHeartbeatAndPrompt();
   testCommands();
   testTimeTurnAndJunk();
   testBattery();
+  testChargeTrend();
   if (gFailures) {
     fprintf(stderr, "%d failure(s)\n", gFailures);
     return 1;

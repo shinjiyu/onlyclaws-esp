@@ -57,14 +57,20 @@ void drawBatteryBadge(PanelDisplay &d) {
   if (!label[0]) return;
 
   const int16_t s = d.width() >= 600 ? 2 : 1;
-  const int16_t textW = (int16_t)(strlen(label) * 6 * s);
   const bool icon = gBattery.present && gBattery.pct >= 0;
+  // Charging shows as a bolt, not the label's trailing '+'.
+  const bool bolt = icon && gBattery.charging;
+  const size_t len = strlen(label);
+  if (bolt && len && label[len - 1] == '+') label[len - 1] = 0;
+  const int16_t textW = (int16_t)(strlen(label) * 6 * s);
   const int16_t bodyW = 18 * s, bodyH = 9 * s, nubW = 2 * s;
+  const int16_t boltW = 6 * s;
   const int16_t pad = 2 * s;
   const int16_t right = d.width() - 3 * s;
   const int16_t top = 3 * s;
   const int16_t iconX = right - nubW - bodyW;
-  const int16_t textX = (icon ? iconX - 3 * s : right) - textW;
+  const int16_t boltX = iconX - 2 * s - boltW;
+  const int16_t textX = (icon ? (bolt ? boltX : iconX) - 3 * s : right) - textW;
 
   d.fillRect(textX - pad, top - pad, right - textX + 2 * pad, bodyH + 2 * pad, 0);
   d.setFont(nullptr);
@@ -74,6 +80,12 @@ void drawBatteryBadge(PanelDisplay &d) {
   d.print(label);
   d.setTextSize(1);
   if (!icon) return;
+
+  if (bolt) {
+    d.fillTriangle(boltX + 4 * s, top, boltX, top + 5 * s, boltX + 3 * s, top + 5 * s, 1);
+    d.fillTriangle(boltX + 2 * s, top + 4 * s, boltX + 6 * s, top + 4 * s, boltX + 2 * s,
+                   top + bodyH, 1);
+  }
 
   d.drawRect(iconX, top, bodyW, bodyH, 1);
   d.fillRect(iconX + bodyW, top + bodyH / 2 - 2 * s, nubW, 4 * s, 1);

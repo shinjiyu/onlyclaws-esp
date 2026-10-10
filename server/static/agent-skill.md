@@ -82,7 +82,8 @@ Pose is radians (Waveshare-style). `spd=0` → firmware default. `arm.feedback` 
 `gfx.qr(x, y, scale, text)` · `ble.dir()` / `ble.restart()` / `ble.connected()` (LAN pad / BLE) ·
 `log` / `sleep` / `stop` / `millis` · `display(l1,l2)` convenience
 
-The framework draws a battery badge top-right on every flush (`87%`, `87%+` charging, `USB`).
+The framework draws a battery badge top-right on every flush (`87%`, a lightning bolt while charging, `USB`).
+`meta.charging` in `/status` is exact on ePaper (PMU); RLCD estimates it from USB host presence and the voltage trend.
 `gfx.badge(false)` hides it until the next script load.
 
 ### Claude desktop (capability `claude_buddy`, RLCD)

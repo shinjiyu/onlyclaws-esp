@@ -152,7 +152,7 @@ uvicorn app:app --host 127.0.0.1 --port 8787
 | `esp32-s3-epaper-397` | 微雪 ESP32-S3-ePaper-3.97 | 800×480 电子纸局刷、ES8311 音频。BLE 关闭，给 TLS 留堆 |
 | `esp32-roarm-m2` | 微雪 RoArm-M2 驱动板（经典 ESP32） | 飞特 STS 舵机总线（GPIO18/19），Lua 和 invoke 都能用 `arm.*`。无屏、无音频、无 BLE，出厂那套开放 Wi-Fi 关节接口不编进去 |
 
-电子纸上 `gfx.slow()` 返回 true，动画可以把一帧拉长到约 900 ms。同一段脚本两块屏都能跑。两块屏默认在右上角显示电量（RLCD 通过 ADC 分压读电池，电子纸板通过板载 TG28 电源芯片读取），`gfx.badge(false)` 可以隐藏。
+电子纸上 `gfx.slow()` 返回 true，动画可以把一帧拉长到约 900 ms。同一段脚本两块屏都能跑。两块屏默认在右上角显示电量，充电时带闪电图标（RLCD 通过 ADC 分压读电池，并根据 USB 连接和电压走势估计是否在充电；电子纸板直接读板载 TG28 电源芯片），`gfx.badge(false)` 可以隐藏。
 
 RLCD 可以和 Claude 桌面端配对（Developer → Hardware Buddy，输入屏上显示的配对码）。Claude 请求执行工具时，屏上会显示请求内容：按 KEY 允许一次，按 BOOT 拒绝。机械臂产品说明见 [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md)。
 

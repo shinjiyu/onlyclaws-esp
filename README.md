@@ -152,7 +152,7 @@ One source tree, four PlatformIO environments. Rewire any of them by editing [`r
 | `esp32-s3-epaper-397` | Waveshare ESP32-S3-ePaper-3.97 | 800×480 e-paper with partial refresh, ES8311 audio. BLE off to leave heap for TLS |
 | `esp32-roarm-m2` | Waveshare RoArm-M2 driver board (classic ESP32) | Feetech STS servo bus on GPIO18/19, `arm.*` in Lua and invoke. Headless: no panel, audio or BLE, and the factory open Wi-Fi joint API is not compiled in |
 
-On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 900 ms. The same script runs on both panels. Both panels show a battery badge in the top-right corner by default (RLCD reads the cell through an ADC divider, the e-paper board through its TG28 power chip); `gfx.badge(false)` hides it.
+On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 900 ms. The same script runs on both panels. Both panels show a battery badge in the top-right corner by default, with a lightning bolt while charging (RLCD reads the cell through an ADC divider and estimates charging from USB and the voltage trend; the e-paper board asks its TG28 power chip); `gfx.badge(false)` hides it.
 
 On the RLCD, pair the board with Claude desktop (Developer → Hardware Buddy, enter the passkey shown on the panel). When Claude asks to run a tool, the panel shows the request: press KEY to allow it once or BOOT to deny. Arm product notes: [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md).
 
