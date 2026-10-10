@@ -1,0 +1,14 @@
+{
+ "frames": 149,
+ "params": 9346,
+ "val_auc": 0.9292,
+ "test_auc": 0.933,
+ "test_acc@0.5": 0.864,
+ "test_auc_ff1010": 0.8983,
+ "test_auc_warblr": 0.9205,
+ "clips": 1566,
+ "int8_auc": 0.9366,
+ "int8_acc@0.5": 0.8621,
+ "int8_auc_warblr": 0.9299,
+ "int8_auc_ff1010": 0.8967
+}

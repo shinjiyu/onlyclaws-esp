@@ -63,6 +63,15 @@ Source of truth: `registerOpsetV1()` in `rlcd/src/ml_engine.cpp`; `server/ml_ops
 
 Up to 6 models stay loaded; the least recently used is evicted (an audio model's frontend is kept while it loads).
 
+## Shipped models
+
+| Model | Input | Size / arena budget | Source |
+|-------|-------|---------------------|--------|
+| `micro_speech` (+ `ms_frontend`) | 49 × 40 (1 s) | 18 KB / 40 KB, ~55 ms on S3 | TFLM example; demo `demos/kws-yes-no` |
+| `bird_detect` | 149 × 40 (3 s), same `ms_frontend` | 26 KB / 64 KB (61 KB used), ~180 ms on S3 | `ml/bird/` (DCASE 2018 warblr + freefield); demo `demos/bird-detect` |
+
+`bird_detect` is retrained with `ml/bird/prepare.py` → `train.py` → `validate.py`. Features come from `ml/tools/build/tflm_host` (built by `ml/tools/build_host.sh` from the vendored TFLM), so training sees the device's exact frontend output. The classifier input must keep `ms_frontend`'s quantization (scale 0.1017, zero point −128); `train.py` asserts it. Held-out test AUC on the int8 model through `tflm_host`: 0.937.
+
 ## Keys
 
 - Private key: server only, `EPD_ML_SIGNING_KEY` (default `<data>/ml_signing_key.pem`), mode 600. Without it uploads return 503.

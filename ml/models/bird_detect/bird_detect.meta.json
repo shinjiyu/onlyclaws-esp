@@ -1,0 +1,17 @@
+{
+  "name": "bird_detect",
+  "kind": "audio",
+  "arena_kb": 64,
+  "labels": [
+    "no_bird",
+    "bird"
+  ],
+  "audio": {
+    "rate": 16000,
+    "window_ms": 30,
+    "stride_ms": 20,
+    "frames": 149,
+    "features": 40,
+    "frontend": "ms_frontend"
+  }
+}
