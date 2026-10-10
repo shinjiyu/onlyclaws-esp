@@ -9,9 +9,12 @@
 #include <string.h>
 
 #include "api_config.h"
+#include "arm_driver.h"
+#include "arm_usb_serial.h"
 #include "audio_plugin.h"
 #include "ble_ctrl.h"
 #include "board_pins.h"
+#include "capability.h"
 #include "cloud_http.h"
 #include "http_pad.h"
 #include "cloud_config.h"
@@ -24,7 +27,7 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.13.6";
+constexpr const char *FW_VERSION = "agent-runtime-0.16.0";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 
 // Lua http.* uses its own TLS session so it cannot starve cloud pending/status.
@@ -277,6 +280,18 @@ void postStatus() {
   meta["api_host"] = apiConfigGet().host;
   meta["panel"] = panelPluginName();
   meta["audio"] = audioPluginName();
+#if defined(BOARD_ROARM)
+  meta["product"] = "roarm-m2";
+#elif defined(BOARD_PANEL_EPAPER)
+  meta["product"] = "epaper-397";
+#elif defined(BOARD_PANEL_RLCD)
+  meta["product"] = "rlcd-42";
+#else
+  meta["product"] = "s3-bare";
+#endif
+  if (ocCapArm() && armDriver()) meta["arm"] = armDriver()->name();
+  JsonArray caps = meta.createNestedArray("capabilities");
+  capabilityFillJson(caps);
   String body;
   serializeJson(doc, body);
   String out;
@@ -460,6 +475,14 @@ void setupImpl() {
   host.onSensors = hostOnSensors;
   scriptEngineBegin(host);
 
+  if (ocCapArm()) {
+    if (armPluginBegin()) {
+      Serial.printf("[arm] %s ready\n", armDriver() ? armDriver()->name() : "?");
+    } else {
+      Serial.println("[arm] begin failed");
+    }
+  }
+
   if (audioPluginBegin(16000)) audioPluginBeep(880, 80);
 
   Serial.printf("fw=%s panel=%s audio=%s device=%s cloud=%s%s heap=%u\n", FW_VERSION,
@@ -476,7 +499,8 @@ void setupImpl() {
 #else
   Serial.println("[ble] off");
 #endif
-  httpPadBegin(80);
+  // HTTP D-pad only drives snake/panel games; skip it on headless arm builds.
+  if (!ocCapArm()) httpPadBegin(80);
 
   statusLine1 = "OnlyClaws";
   statusLine2 = WiFi.localIP().toString();
@@ -520,6 +544,7 @@ void loopImpl() {
     handlePayload(String(netJsonBuf));
   }
 
+  armUsbSerialPoll();
   scriptEngineTick();
 
   if (WiFi.status() != WL_CONNECTED) {

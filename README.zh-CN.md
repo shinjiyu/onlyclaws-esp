@@ -4,12 +4,12 @@
 
 **给你的 Agent 一只伸进现实世界的爪子。**
 
-ESP32-S3 只烧一次固件。之后 AI Agent 通过 HTTP 下发 Lua，<br>
-板子负责画图、发声、读传感器，再把结果报回来。
+ESP32 只烧一次固件。之后 AI Agent 通过 HTTP 下发 Lua，<br>
+板子负责画图、发声、动机械臂、读传感器，再把结果报回来。
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-1c1d17)](LICENSE)
 ![ESP32-S3](https://img.shields.io/badge/chip-ESP32--S3-e2432a)
-![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.13-1c1d17)
+![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.16-1c1d17)
 ![Lua](https://img.shields.io/badge/apps-Lua-2c2d72)
 [![Agent skill](https://img.shields.io/badge/agent-skill.md-1c1d17)](https://onlyclaws.world/api/agent/skill.md)
 
@@ -29,6 +29,7 @@ Agent 擅长决定"该做什么"，但它没有手。OnlyClaws 把一块便宜�
 - **板上不跑模型。** Agent 在云端思考，板子只执行脚本、回报事件。
 - **放心交给 Agent。** Agent 拿的是有范围的 `oct_…` 令牌，碰不到你的密码。每块板有自己的 `device_token`。
 - **同一份 Lua 到处跑。** 屏和音频是编译期插件。裸模组上 `gfx.*`、`audio.*` 安全地什么都不做。
+- **能管屏，也能管机械臂。** 同一套运行时驱动微雪 RoArm-M2 桌面机械臂：Agent 用同一个令牌、同一条队列读关节角度、下发姿态。
 
 ## 工作原理
 
@@ -38,7 +39,7 @@ flowchart LR
     C -- "事件" --> A
     C -- "脚本<br/>长轮询" --> B["ESP32-S3<br/>Lua 运行时"]
     B -- "emit()" --> C
-    B --- P["屏 · 音频 · 传感器 · 按键 · HTTP"]
+    B --- P["屏 · 音频 · 机械臂 · 传感器 · 按键 · HTTP"]
 ```
 
 1. **烧录**对应板子的固件，在控制台登记设备 ID。
@@ -84,6 +85,19 @@ curl https://onlyclaws.world/api/events -H "Authorization: Bearer oct_…"
 | `http` | `http.get` / `http.post` 访问任意 HTTP(S) 地址（不带设备凭据） |
 | `emit(name, table)` | 向控制面上报事件，供 Agent 读取 |
 | `ble`、`net` | BLE 手柄方向、Wi-Fi 状态 |
+| `arm` | 仅机械臂固件：`arm.feedback()` 读关节角度，`arm.move` / `arm.stream` 按弧度下发姿态，`arm.stop()` 停住 |
+
+机械臂板跑的也是同样的脚本。下面这段读出当前姿态、上报，再把臂竖直收起：
+
+```lua
+function on_start()
+  local p = arm.feedback()          -- {base, shoulder, elbow, hand, q={...}}，单位弧度
+  emit("pose", { q = p.q })
+  arm.move({ base = 0, shoulder = 0, elbow = 3.05, hand = 3.14, spd = 200 })
+end
+```
+
+要低延迟控制时，Agent 可以绕过 Lua，直接用 `POST /api/invoke` 发一次性的 `arm.move` / `arm.feedback` / `arm.stop`。板子会上报 `capabilities[]`（例如 `["core","arm"]`），控制面会拒绝板子不具备的指令。
 
 完整约定见 [skill.md](https://onlyclaws.world/api/agent/skill.md)，更多应用见 [`demos/`](demos/)。
 
@@ -128,15 +142,16 @@ uvicorn app:app --host 127.0.0.1 --port 8787
 
 ## 硬件
 
-一套源码，三个 PlatformIO 环境。改接线只需编辑 [`rlcd/include/board_pins.h`](rlcd/include/board_pins.h)，Lua 和云端 API 不变。
+一套源码，四个 PlatformIO 环境。改接线只需编辑 [`rlcd/include/board_pins.h`](rlcd/include/board_pins.h)，Lua 和云端 API 不变。
 
 | 环境 | 板子 | 编进去的内容 |
 |------|------|--------------|
 | `esp32-s3-bare` | 任意 16 MB flash + octal PSRAM 的 ESP32-S3 模组 | 只有核心：云通道、Lua、HTTP、事件。状态打到串口 |
 | `esp32-s3-rlcd-42` | 微雪 ESP32-S3-RLCD-4.2 | ST7305 400×300 反射屏（约 140 ms/帧）、ES8311 音频、传感器、BLE `OC-Snake` |
 | `esp32-s3-epaper-397` | 微雪 ESP32-S3-ePaper-3.97 | 800×480 电子纸局刷、ES8311 音频。BLE 关闭，给 TLS 留堆 |
+| `esp32-roarm-m2` | 微雪 RoArm-M2 驱动板（经典 ESP32） | 飞特 STS 舵机总线（GPIO18/19），Lua 和 invoke 都能用 `arm.*`。无屏、无音频、无 BLE，出厂那套开放 Wi-Fi 关节接口不编进去 |
 
-电子纸上 `gfx.slow()` 返回 true，动画可以把一帧拉长到约 900 ms。同一段脚本两块屏都能跑。
+电子纸上 `gfx.slow()` 返回 true，动画可以把一帧拉长到约 900 ms。同一段脚本两块屏都能跑。机械臂产品说明见 [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md)。
 
 ## 仓库结构
 
@@ -144,7 +159,10 @@ uvicorn app:app --host 127.0.0.1 --port 8787
 |------|------|
 | [`rlcd/`](rlcd/) | 固件，在这里编译烧录 |
 | [`server/`](server/) | 控制面：设备、脚本、事件、位图、控制台 |
-| [`demos/`](demos/) | 可部署的 Lua 应用：贪食蛇（按键、手机方向键或 HTTP 控制）和实时 RL 训练看板 |
+| [`demos/`](demos/) | 可部署的 Lua 应用：贪食蛇（按键、手机方向键或 HTTP 控制）、实时 RL 训练看板、Wi-Fi 质量监控、机械臂姿态保持 |
+| [`jev_servo/`](jev_servo/) | 主机侧机械臂控制：正运动学、USB 和云端两种通道、MCP 服务、网页控制台 |
+| [`vision/`](vision/) | 主机侧摄像头管线（YuNet、SFace、YOLOv8n），Agent 可以把识别结果转成机械臂动作。模型用 `bash vision/scripts/fetch_models.sh` 下载 |
+| [`doc/structurizr/`](doc/structurizr/) | 架构模型和产品说明（`python scripts/adl_check.py`） |
 | [`scripts/`](scripts/) | 主机环境辅助脚本 |
 
 <details>
@@ -156,7 +174,7 @@ uvicorn app:app --host 127.0.0.1 --port 8787
 
 ## 状态
 
-固件版本线 `agent-runtime-0.13.x`，屏和音频插件从 `0.13.6` 开始。为控制成本和滥用，托管控制台目前邀请制。欢迎提 Issue 和 PR，尤其是新的屏幕插件和示例应用。
+固件版本线 `agent-runtime-0.16.x`：屏和音频插件从 `0.13.6` 开始，RoArm-M2 机械臂插件从 `0.16.0` 开始。为控制成本和滥用，托管控制台目前邀请制。欢迎提 Issue 和 PR，尤其是新的屏幕插件和示例应用。
 
 ## 许可
 

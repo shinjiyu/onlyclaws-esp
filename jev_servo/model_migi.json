@@ -1,0 +1,28 @@
+{
+  "name": "Migi",
+  "source": "roarm_ident/runs/measure/model.json",
+  "units": {"length": "mm", "angle": "rad"},
+  "frame": "base: origin at base joint, +Z up, right-handed; camera: OpenCV (+X right, +Y down, +Z optical axis)",
+  "signs": [-1, 1, 1, 1],
+  "theta": [
+    126.06,
+    236.81999999028358,
+    30.00000001152592,
+    89.65416151642795,
+    1.73,
+    1.7534748364225026,
+    -0.12606680333104842,
+    1.3148711969357036,
+    -1.5326521448049908,
+    -0.08919750040865809,
+    -24.91540158883477,
+    1.8721493675683434,
+    21.049417069241517,
+    0.21903844024800637,
+    -0.3103061000688188,
+    -1.4941198542264797
+  ],
+  "fov_h_rad": 1.05,
+  "fov_v_rad": 0.78,
+  "note": "Calibrated tip-camera arm. L3A shorter than stock (tip mount)."
+}

@@ -1,0 +1,267 @@
+{
+  "schema": "onlyclaws-esp.requirements.v1",
+  "description": "Feature set R. R_U = unit|contract with non-empty tests. R_manual = R \\ R_U. Same schema as mcp_guard.",
+  "requirements": [
+    {
+      "id": "REQ-CLOUD-WIRE",
+      "title": "Device wire: pending / status / ack with device_token",
+      "component": "device_runtime",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Registered device polls GET /pending, POSTs /status heartbeat and /ack; Authorization Bearer device_token; rejects missing/invalid token"
+    },
+    {
+      "id": "REQ-AGENT-INVOKE",
+      "title": "Control plane queues invoke; device runs whitelist tools",
+      "component": "control_plane",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "POST /api/invoke with oct_ token enqueues invoke message; device executes only tools present in its compiled capabilities"
+    },
+    {
+      "id": "REQ-LUA-DEPLOY",
+      "title": "Hot-deploy Lua once/loop without reflashed firmware",
+      "component": "script_engine",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "POST /api/scripts deploys source; device runs on_start/on_loop; /api/script/stop ends loop; emit() reaches GET /api/events"
+    },
+    {
+      "id": "REQ-DEVICE-REGISTER",
+      "title": "Multi-tenant device register and rotate token",
+      "component": "control_plane",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Owner binds device_id; device_token returned once; rotate invalidates old bearer; agents never see user password"
+    },
+    {
+      "id": "REQ-WIFI-PROV",
+      "title": "Wi-Fi provisioning via AP portal / stored NVS",
+      "component": "wifi_nvs",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Empty NVS opens OC-Setup portal; successful STA stores SSID; safe_upload keeps NVS tokens"
+    },
+    {
+      "id": "REQ-PANEL-SURFACE",
+      "title": "PanelDisplay abstracts RLCD 400x300 and ePaper 800x480",
+      "component": "panel",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "pio env selects BOARD_PANEL_*; Lua gfx.W/H match compiled size; flush/showGxBitmap work; slowPanel true on e-ink"
+    },
+    {
+      "id": "REQ-LUA-GFX",
+      "title": "Lua gfx.* draws on active PanelDisplay",
+      "component": "panel",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "clear/pixel/line/rect/circle/text/blit/flush/qr behave; demos layout via gfx.W/H not hard-coded single size"
+    },
+    {
+      "id": "REQ-AUDIO",
+      "title": "Audio plugin beep and PCM on boards with ES8311",
+      "component": "audio",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "invoke beep / Lua audio.beep and play_pcm work on RLCD; product without codec omits audio plugin"
+    },
+    {
+      "id": "REQ-BLE-PAD",
+      "title": "BLE + LAN HTTP pad share direction state",
+      "component": "ble_pad",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "http://device-ip/ pad and BLE OC-* expose ble.dir(); ePaper product may compile without BLE"
+    },
+    {
+      "id": "REQ-SENSORS",
+      "title": "Sensors read for status and Lua",
+      "component": "sensors",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "sensors() / sensors.read expose available temp/humidity/battery fields without crashing when ADC missing"
+    },
+    {
+      "id": "REQ-PUSH-BITMAP",
+      "title": "Server renders and pushes panel-sized bitmaps",
+      "component": "control_plane",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "POST /api/push|/push/image uses device panel size from registry; device shows frame via PanelDisplay"
+    },
+    {
+      "id": "REQ-CAPABILITIES",
+      "title": "Device reports capabilities[]; control plane filters tools",
+      "component": "contracts",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["server/tests/test_capabilities.py"],
+      "acceptance": "/status meta.capabilities lists compiled plugins; invoke of absent tool is rejected server-side or no-oped on device; agent docs reflect per-device map"
+    },
+    {
+      "id": "REQ-PLUGIN-BUILD",
+      "title": "PlatformIO envs compile capability subsets",
+      "component": "device_runtime",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Panel envs exclude arm sources; RoArm env excludes panel/audio/gfx registration; binary size and Lua global table match product"
+    },
+    {
+      "id": "REQ-ARM-PASSTHROUGH",
+      "title": "Motor passthrough invoke reaches servos without Lua",
+      "component": "arm",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Authenticated arm.move/stream/feedback/stop (or equivalent) drive joints under software limits; does not require a deployed script; concurrent Lua motion yields to stop/passthrough lock"
+    },
+    {
+      "id": "REQ-ARM-LUA",
+      "title": "Lua arm.* for slow orchestration on RoArm product",
+      "component": "arm",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Deployed Lua can read joints and command poses via arm.*; panel product firmware does not expose arm.*"
+    },
+    {
+      "id": "REQ-ARM-AUTH-WIFI",
+      "title": "No anonymous local joint control on RoArm product",
+      "component": "arm",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Factory-style open AP /js JSON control is disabled or token-gated; only device_token cloud path and authenticated local debug control joints"
+    },
+    {
+      "id": "REQ-VISION-SCENE",
+      "title": "Host vision pathway detects objects from a frame",
+      "component": "vision_path",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["vision/tests/test_pipeline.py"],
+      "acceptance": "Given a BGR/JPEG frame, vision pipeline returns SceneDesc.objects with normalized u,v,span,kind; runs on host only (not ESP firmware)"
+    },
+    {
+      "id": "REQ-VISION-EMPTY",
+      "title": "Host vision pathway reports empty-space regions",
+      "component": "vision_path",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["vision/tests/test_pipeline.py"],
+      "acceptance": "SceneDesc.empties lists free-space regions with where/area after object occupancy masking"
+    },
+    {
+      "id": "REQ-VISION-STATE",
+      "title": "Compact one-line state for text judges",
+      "component": "vision_path",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["vision/tests/test_pipeline.py"],
+      "acceptance": "SceneDesc.state is a single line encoding objects + empties (no raw image bytes); suitable as JEV/Agent state"
+    },
+    {
+      "id": "REQ-VISION-HOST-ONLY",
+      "title": "Vision is pathway B — not RoArm/panel firmware",
+      "component": "vision_path",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "esp32-roarm-m2 and panel envs do not link vision models; VISION-PATHWAY.md and ADR 0003 document separation; Agent may bridge pathways"
+    },
+    {
+      "id": "REQ-JEV-SERVO-TICK",
+      "title": "Slow JEV decision tick with history window",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Host loop runs at T_dec (slow; JEV-bound); each tick loads goal+scene+mech+q_all+hist(W); records DecisionTick for replay"
+    },
+    {
+      "id": "REQ-JEV-SERVO-INTERVAL",
+      "title": "Per-joint action is a safe angle interval",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["jev_servo/tests/test_interval.py"],
+      "acceptance": "JEV choice maps to [lo,hi] within limits, width>=w_min, |mid-q|<=Δ_max; q already in range means hold; success if end q in interval"
+    },
+    {
+      "id": "REQ-JEV-SERVO-PER-JOINT",
+      "title": "Independent parallel JEV judge per servo",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "One JEV choice call per joint per tick, shared state text, joint-specific instructions; calls issued in parallel"
+    },
+    {
+      "id": "REQ-JEV-SERVO-CLOUD-GOAL",
+      "title": "Cloud carries goals not trajectories",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "At most one arm.stream(q*,spd) per tick via cloud invoke; no dense cloud waypoint interpolation; inter-tick motion is servo spd or future ESP T_move"
+    },
+    {
+      "id": "REQ-JEV-SERVO-HOST-ONLY",
+      "title": "JEV servo is pathway C — not ESP firmware",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "No JEV client or vision models in esp32-roarm-m2; JEV-SERVO-PATHWAY.md and ADR 0004; may consume vision state and arm invoke only"
+    },
+    {
+      "id": "REQ-PRESENCE-DETECT",
+      "title": "Tip-cam YuNet face → binary presence (+u,v for follow)",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["jev_servo/tests/test_presence_mission.py"],
+      "acceptance": "presence_from_scene parses face@u,v; ignores COCO person alone; present bool is mission input"
+    },
+    {
+      "id": "REQ-PRESENCE-TRAVERSE",
+      "title": "Joint-space raise then j0 sweep while missing",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["jev_servo/tests/test_presence_mission.py"],
+      "acceptance": "TraversePlanner raises pitch then steps j0 with visited coverage; no FK look_az authority; PRESENCE-FOLLOW-PATHWAY.md"
+    },
+    {
+      "id": "REQ-PRESENCE-FOLLOW",
+      "title": "Follow keeps face in frame; miss streak returns to traverse",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["jev_servo/tests/test_presence_mission.py"],
+      "acceptance": "On present: UV heuristic δq; on miss_limit: back to traverse; mode=presence loop does not require JEV"
+    },
+    {
+      "id": "REQ-FACE-ID",
+      "title": "Persistent face#id gallery with auto-enroll",
+      "component": "jev_servo_path",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["jev_servo/tests/test_face_id.py"],
+      "acceptance": "Unknown faces get new integer ids saved under face_gallery/; rematch reuses id; faces list/rename CLI; state shows face#id"
+    }
+  ]
+}

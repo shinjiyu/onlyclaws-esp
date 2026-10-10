@@ -10,10 +10,15 @@
 
 #include "board_pins.h"
 #include "ble_ctrl.h"
+#include "capability.h"
+#include "arm_driver.h"
+#include "arm_ctl.h"
 #include "pad_ctrl.h"
 #include "panel_display.h"
 
+#if OC_HAS_PANEL
 #include <qrcode.h>
+#endif
 
 namespace {
 ScriptHost gHost{};
@@ -412,6 +417,11 @@ int l_panel_slow(lua_State *L) {
 // gfx_qr(x, y, scale, text [, color=1]) -> modules (0 on fail)
 // Encodes text as QR. Uses ECC_M + 4-module quiet zone (WeChat-friendly).
 int l_gfx_qr(lua_State *L) {
+#if !OC_HAS_PANEL
+  (void)L;
+  lua_pushinteger(L, 0);
+  return 1;
+#else
   PanelDisplay *d = lcd();
   if (!d) {
     lua_pushinteger(L, 0);
@@ -480,7 +490,112 @@ int l_gfx_qr(lua_State *L) {
   free(buf);
   lua_pushinteger(L, qr.size);
   return 1;
+#endif
 }
+
+#if OC_HAS_ARM
+// arm.feedback() -> {base,shoulder,elbow,hand,q={...}} or nil
+int l_arm_feedback(lua_State *L) {
+  ArmDriver *arm = armDriver();
+  if (!arm) {
+    lua_pushnil(L);
+    return 1;
+  }
+  ArmPose p{};
+  if (!arm->feedback(p)) {
+    lua_pushnil(L);
+    return 1;
+  }
+  lua_newtable(L);
+  lua_pushnumber(L, p.q[0]);
+  lua_setfield(L, -2, "base");
+  lua_pushnumber(L, p.q[1]);
+  lua_setfield(L, -2, "shoulder");
+  lua_pushnumber(L, p.q[2]);
+  lua_setfield(L, -2, "elbow");
+  lua_pushnumber(L, p.q[3]);
+  lua_setfield(L, -2, "hand");
+  lua_newtable(L);
+  for (int i = 0; i < 4; ++i) {
+    lua_pushnumber(L, p.q[i]);
+    lua_rawseti(L, -2, i + 1);
+  }
+  lua_setfield(L, -2, "q");
+  return 1;
+}
+
+// arm.stream(base, shoulder, elbow, hand [, spd]) -> bool
+// Also accepts a single table: arm.stream({q={...}, spd=N}) or named keys.
+int l_arm_stream(lua_State *L) {
+  ArmDriver *arm = armDriver();
+  if (!arm || armCtlIsPreempted()) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  ArmPose p{};
+  int spd = 0;
+  if (lua_istable(L, 1)) {
+    lua_getfield(L, 1, "q");
+    if (lua_istable(L, -1)) {
+      for (int i = 0; i < 4; ++i) {
+        lua_rawgeti(L, -1, i + 1);
+        p.q[i] = (float)luaL_optnumber(L, -1, 0.0);
+        lua_pop(L, 1);
+      }
+    } else {
+      lua_pop(L, 1);
+      lua_getfield(L, 1, "base");
+      p.q[0] = (float)luaL_optnumber(L, -1, 0.0);
+      lua_pop(L, 1);
+      lua_getfield(L, 1, "shoulder");
+      p.q[1] = (float)luaL_optnumber(L, -1, 0.0);
+      lua_pop(L, 1);
+      lua_getfield(L, 1, "elbow");
+      p.q[2] = (float)luaL_optnumber(L, -1, 1.57);
+      lua_pop(L, 1);
+      lua_getfield(L, 1, "hand");
+      if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "wrist");
+      }
+      p.q[3] = (float)luaL_optnumber(L, -1, 3.14);
+      lua_pop(L, 1);
+      goto spd_from_table;
+    }
+    lua_pop(L, 1);
+  spd_from_table:
+    lua_getfield(L, 1, "spd");
+    spd = (int)luaL_optinteger(L, -1, 0);
+    lua_pop(L, 1);
+  } else {
+    p.q[0] = (float)luaL_optnumber(L, 1, 0.0);
+    p.q[1] = (float)luaL_optnumber(L, 2, 0.0);
+    p.q[2] = (float)luaL_optnumber(L, 3, 1.57);
+    p.q[3] = (float)luaL_optnumber(L, 4, 3.14);
+    spd = (int)luaL_optinteger(L, 5, 0);
+  }
+  lua_pushboolean(L, arm->stream(p, spd) ? 1 : 0);
+  return 1;
+}
+
+int l_arm_stop(lua_State *L) {
+  ArmDriver *arm = armDriver();
+  // Hold pose even while host-preempted (safe); does not clear preempt.
+  lua_pushboolean(L, (arm && arm->stop()) ? 1 : 0);
+  return 1;
+}
+
+int l_arm_name(lua_State *L) {
+  ArmDriver *arm = armDriver();
+  lua_pushstring(L, arm ? arm->name() : "");
+  return 1;
+}
+
+int l_arm_preempted(lua_State *L) {
+  lua_pushboolean(L, armCtlIsPreempted() ? 1 : 0);
+  return 1;
+}
+#endif  // OC_HAS_ARM
 
 // Embedded sprites stay small: a full 800x480 frame is 48KB and will not fit
 // in the 24KB Lua source cap. Use gfx.image() for those.
@@ -584,61 +699,76 @@ int l_display(lua_State *L) {
 bool bindApis() {
   if (!gLua) return false;
   bool ok = true;
-  ok &= gLua->registerFunction("sensors", l_sensors);
+  // Core Lua surface (always)
   ok &= gLua->registerFunction("log", l_log);
   ok &= gLua->registerFunction("millis", l_millis);
   ok &= gLua->registerFunction("sleep", l_sleep);
   ok &= gLua->registerFunction("stop", l_stop);
   ok &= gLua->registerFunction("emit", l_emit);
-  ok &= gLua->registerFunction("beep", l_beep);
-  ok &= gLua->registerFunction("audio_ready", l_audio_ready);
-  ok &= gLua->registerFunction("sample_rate", l_sample_rate);
-  ok &= gLua->registerFunction("pa", l_pa);
-  ok &= gLua->registerFunction("play_pcm", l_play_pcm_b64);
   ok &= gLua->registerFunction("key", l_key);
   ok &= gLua->registerFunction("boot", l_boot);
   ok &= gLua->registerFunction("wifi_rssi", l_wifi_rssi);
   ok &= gLua->registerFunction("wifi_ip", l_wifi_ip);
   ok &= gLua->registerFunction("wifi_ssid", l_wifi_ssid);
   ok &= gLua->registerFunction("http_request", l_http_request);
-  ok &= gLua->registerFunction("ble_dir", l_ble_dir);
-  ok &= gLua->registerFunction("ble_connected", l_ble_connected);
-  ok &= gLua->registerFunction("ble_restart", l_ble_restart);
-  ok &= gLua->registerFunction("display", l_display);
-  ok &= gLua->registerFunction("gfx_w", l_gfx_w);
-  ok &= gLua->registerFunction("gfx_h", l_gfx_h);
-  ok &= gLua->registerFunction("gfx_clear", l_gfx_clear);
-  ok &= gLua->registerFunction("gfx_pixel", l_gfx_pixel);
-  ok &= gLua->registerFunction("gfx_line", l_gfx_line);
-  ok &= gLua->registerFunction("gfx_rect", l_gfx_rect);
-  ok &= gLua->registerFunction("gfx_fill_rect", l_gfx_fill_rect);
-  ok &= gLua->registerFunction("gfx_circle", l_gfx_circle);
-  ok &= gLua->registerFunction("gfx_fill_circle", l_gfx_fill_circle);
-  ok &= gLua->registerFunction("gfx_text", l_gfx_text);
-  ok &= gLua->registerFunction("gfx_flush", l_gfx_flush);
-  ok &= gLua->registerFunction("panel_slow", l_panel_slow);
-  ok &= gLua->registerFunction("gfx_qr", l_gfx_qr);
-  ok &= gLua->registerFunction("gfx_blit", l_gfx_blit_b64);
-  ok &= gLua->registerFunction("gfx_image", l_gfx_image);
 
-  const char *boot = R"LUA(
+  // Panel builds and the bare S3 register every module so one script runs on
+  // any of them (missing hardware no-ops). Arm builds expose only core + arm.
+  const bool portable = !ocCapArm();
+
+  if (ocCapSensors() || portable) {
+    ok &= gLua->registerFunction("sensors", l_sensors);
+  }
+  if (ocCapAudio() || portable) {
+    ok &= gLua->registerFunction("beep", l_beep);
+    ok &= gLua->registerFunction("audio_ready", l_audio_ready);
+    ok &= gLua->registerFunction("sample_rate", l_sample_rate);
+    ok &= gLua->registerFunction("pa", l_pa);
+    ok &= gLua->registerFunction("play_pcm", l_play_pcm_b64);
+  }
+  if (ocCapBle() || portable) {
+    ok &= gLua->registerFunction("ble_dir", l_ble_dir);
+    ok &= gLua->registerFunction("ble_connected", l_ble_connected);
+    ok &= gLua->registerFunction("ble_restart", l_ble_restart);
+  }
+  if (ocCapPanel() || portable) {
+    ok &= gLua->registerFunction("display", l_display);
+    ok &= gLua->registerFunction("gfx_w", l_gfx_w);
+    ok &= gLua->registerFunction("gfx_h", l_gfx_h);
+    ok &= gLua->registerFunction("gfx_clear", l_gfx_clear);
+    ok &= gLua->registerFunction("gfx_pixel", l_gfx_pixel);
+    ok &= gLua->registerFunction("gfx_line", l_gfx_line);
+    ok &= gLua->registerFunction("gfx_rect", l_gfx_rect);
+    ok &= gLua->registerFunction("gfx_fill_rect", l_gfx_fill_rect);
+    ok &= gLua->registerFunction("gfx_circle", l_gfx_circle);
+    ok &= gLua->registerFunction("gfx_fill_circle", l_gfx_fill_circle);
+    ok &= gLua->registerFunction("gfx_text", l_gfx_text);
+    ok &= gLua->registerFunction("gfx_flush", l_gfx_flush);
+    ok &= gLua->registerFunction("panel_slow", l_panel_slow);
+    ok &= gLua->registerFunction("gfx_qr", l_gfx_qr);
+    ok &= gLua->registerFunction("gfx_blit", l_gfx_blit_b64);
+    ok &= gLua->registerFunction("gfx_image", l_gfx_image);
+  }
+#if OC_HAS_ARM
+  if (ocCapArm()) {
+    ok &= gLua->registerFunction("arm_feedback", l_arm_feedback);
+    ok &= gLua->registerFunction("arm_stream", l_arm_stream);
+    ok &= gLua->registerFunction("arm_move", l_arm_stream);
+    ok &= gLua->registerFunction("arm_stop", l_arm_stop);
+    ok &= gLua->registerFunction("arm_name", l_arm_name);
+    ok &= gLua->registerFunction("arm_preempted", l_arm_preempted);
+  }
+#endif
+
+  String boot = R"LUA(
 oc = oc or {}
-gfx = gfx or {}
-audio = audio or {}
 input = input or {}
 net = net or {}
-ble = ble or {}
 
-oc.sensors = sensors; oc.log = log; oc.millis = millis; oc.sleep = sleep
-oc.stop = stop; oc.emit = emit; oc.display = display
-oc.beep = beep; oc.play_pcm = play_pcm; oc.key = key
-
-audio.beep = beep; audio.ready = audio_ready; audio.sample_rate = sample_rate
-audio.pa = pa; audio.play_pcm = play_pcm
+oc.log = log; oc.millis = millis; oc.sleep = sleep
+oc.stop = stop; oc.emit = emit; oc.key = key
 
 input.key = key; input.boot = boot
-
-ble.dir = ble_dir; ble.connected = ble_connected; ble.restart = ble_restart
 
 net.rssi = wifi_rssi; net.ip = wifi_ip; net.ssid = wifi_ssid
 net.http = http_request
@@ -650,7 +780,29 @@ end
 http.post = function(url, body, timeout_ms)
   return http_request("POST", url, body or "", timeout_ms or 8000)
 end
+)LUA";
 
+  if (ocCapSensors() || portable) {
+    boot += "oc.sensors = sensors\n";
+  }
+  if (ocCapAudio() || portable) {
+    boot += R"LUA(
+audio = audio or {}
+oc.beep = beep; oc.play_pcm = play_pcm
+audio.beep = beep; audio.ready = audio_ready; audio.sample_rate = sample_rate
+audio.pa = pa; audio.play_pcm = play_pcm
+)LUA";
+  }
+  if (ocCapBle() || portable) {
+    boot += R"LUA(
+ble = ble or {}
+ble.dir = ble_dir; ble.connected = ble_connected; ble.restart = ble_restart
+)LUA";
+  }
+  if (ocCapPanel() || portable) {
+    boot += R"LUA(
+gfx = gfx or {}
+oc.display = display
 gfx.W = gfx_w(); gfx.H = gfx_h()
 gfx.clear = gfx_clear; gfx.pixel = gfx_pixel; gfx.line = gfx_line
 gfx.rect = gfx_rect; gfx.fill_rect = gfx_fill_rect
@@ -660,7 +812,20 @@ gfx.image = gfx_image
 gfx.qr = gfx_qr
 gfx.slow = panel_slow
 )LUA";
-  ok &= gLua->executeScript(boot);
+  }
+  if (ocCapArm()) {
+    boot += R"LUA(
+arm = arm or {}
+arm.feedback = arm_feedback
+arm.stream = arm_stream
+arm.move = arm_move
+arm.stop = arm_stop
+arm.name = arm_name
+arm.preempted = arm_preempted
+)LUA";
+  }
+
+  ok &= gLua->executeScript(boot.c_str());
   return ok;
 }
 
@@ -730,6 +895,9 @@ bool scriptEngineLoadLua(const char *scriptId, const char *luaSource, const char
     return false;
   }
   if (!resetEngine()) return false;
+#if OC_HAS_ARM
+  armCtlClearPreempt();
+#endif
   gScriptId = scriptId ? scriptId : "";
   gSource = luaSource;
   gMode = (mode && !strcmp(mode, "once")) ? "once" : "loop";
@@ -750,6 +918,9 @@ bool scriptEngineLoadLua(const char *scriptId, const char *luaSource, const char
 void scriptEngineStop(const char *reason) {
   gState = "stopped";
   if (reason && reason[0]) gError = reason;
+#if OC_HAS_ARM
+  armCtlClearPreempt();
+#endif
   Serial.printf("[lua] stop: %s\n", gError.c_str());
 }
 
@@ -808,6 +979,10 @@ bool scriptEngineInvokeJson(const char *json) {
 
   auto runOne = [&](JsonObject step) -> bool {
     const char *tool = step["tool"] | "";
+    if (!capabilityAllowsTool(tool)) {
+      Serial.printf("[invoke] tool not in capabilities: %s\n", tool);
+      return false;
+    }
     if (!strcmp(tool, "beep")) {
       return gHost.beep &&
              gHost.beep(step["freq"] | 880, step["ms"] | 100);
@@ -862,6 +1037,43 @@ bool scriptEngineInvokeJson(const char *json) {
       bool ok = lua_toboolean(L, -1);
       lua_pop(L, 1);
       return ok;
+    }
+    if (!strncmp(tool, "arm.", 4)) {
+      ArmDriver *arm = armDriver();
+      if (!arm) return false;
+      if (!strcmp(tool, "arm.stop")) {
+        armCtlHostPreempt();
+        return arm->stop();
+      }
+      if (!strcmp(tool, "arm.feedback")) {
+        ArmPose p{};
+        if (!arm->feedback(p)) return false;
+        if (gHost.emitEvent) {
+          char buf[160];
+          snprintf(buf, sizeof(buf),
+                   "{\"q\":[%.5f,%.5f,%.5f,%.5f],\"base\":%.5f,\"shoulder\":%.5f,"
+                   "\"elbow\":%.5f,\"hand\":%.5f}",
+                   p.q[0], p.q[1], p.q[2], p.q[3], p.q[0], p.q[1], p.q[2],
+                   p.q[3]);
+          gHost.emitEvent("arm.feedback", buf);
+        }
+        return true;
+      }
+      if (!strcmp(tool, "arm.move") || !strcmp(tool, "arm.stream")) {
+        armCtlHostPreempt();
+        ArmPose p{};
+        if (step["q"].is<JsonArray>()) {
+          JsonArray q = step["q"].as<JsonArray>();
+          for (int i = 0; i < 4; ++i) p.q[i] = q[i] | 0.f;
+        } else {
+          p.q[0] = step["base"] | 0.f;
+          p.q[1] = step["shoulder"] | 0.f;
+          p.q[2] = step["elbow"] | 1.57f;
+          p.q[3] = step["hand"] | step["wrist"] | 3.14f;
+        }
+        return arm->stream(p, step["spd"] | 0);
+      }
+      return false;
     }
     return false;
   };

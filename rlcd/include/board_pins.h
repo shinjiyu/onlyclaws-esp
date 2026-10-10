@@ -3,9 +3,26 @@
 // Pin map follows the PlatformIO env.
 //   BOARD_PANEL_EPAPER  Waveshare ESP32-S3-ePaper-3.97
 //   BOARD_PANEL_RLCD    Waveshare ESP32-S3-RLCD-4.2
+//   BOARD_ROARM         Waveshare RoArm-M2 driver (classic ESP32, STS servo bus)
 //   neither             ESP32-S3 bare module (BOOT on GPIO0 only)
 
-#ifdef BOARD_PANEL_EPAPER
+#ifdef BOARD_ROARM
+
+// Servo TTL UART (Waveshare RoArm-M2_config.h defaults).
+constexpr int PIN_SERVO_RX = 18;
+constexpr int PIN_SERVO_TX = 19;
+
+constexpr int PIN_BOOT_BTN = 0;
+constexpr int PIN_KEY_BTN = 0;
+constexpr int PIN_BAT_ADC = -1;
+// Stock OLED sits on I2C 32/33; left alone so sensorsBegin() skips the bus.
+constexpr int PIN_I2C_SDA = -1;
+constexpr int PIN_I2C_SCL = -1;
+
+constexpr int LCD_WIDTH = 0;
+constexpr int LCD_HEIGHT = 0;
+
+#elif defined(BOARD_PANEL_EPAPER)
 
 // E-paper SPI
 constexpr int PIN_EPD_BUSY = 3;

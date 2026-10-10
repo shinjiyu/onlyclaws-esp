@@ -4,12 +4,12 @@
 
 **Give your agent a claw in the real world.**
 
-Flash an ESP32-S3 once. After that your AI agent sends Lua over HTTP,<br>
-and the board draws, plays sound, reads sensors and reports back.
+Flash an ESP32 once. After that your AI agent sends Lua over HTTP,<br>
+and the board draws, plays sound, moves a robot arm, reads sensors and reports back.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-1c1d17)](LICENSE)
 ![ESP32-S3](https://img.shields.io/badge/chip-ESP32--S3-e2432a)
-![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.13-1c1d17)
+![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.16-1c1d17)
 ![Lua](https://img.shields.io/badge/apps-Lua-2c2d72)
 [![Agent skill](https://img.shields.io/badge/agent-skill.md-1c1d17)](https://onlyclaws.world/api/agent/skill.md)
 
@@ -29,6 +29,7 @@ Agents are good at deciding *what* should happen. They have no hands. OnlyClaws 
 - **No model on the board.** The agent thinks in the cloud; the board runs the script and reports events.
 - **Safe to hand over.** The agent holds a scoped `oct_…` token, never your password. Each board has its own `device_token`.
 - **Same Lua everywhere.** Panel and audio are compile-time plugins. On a bare module, `gfx.*` and `audio.*` safely do nothing.
+- **Screens and arms.** The same runtime drives a Waveshare RoArm-M2 desk arm: the agent reads joint angles and sends poses through the same token and queue.
 
 ## How it works
 
@@ -38,7 +39,7 @@ flowchart LR
     C -- "events" --> A
     C -- "script<br/>long-poll" --> B["ESP32-S3<br/>Lua runtime"]
     B -- "emit()" --> C
-    B --- P["panel · audio · sensors · keys · HTTP"]
+    B --- P["panel · audio · arm · sensors · keys · HTTP"]
 ```
 
 1. **Flash** the firmware for your board and register its device ID.
@@ -84,6 +85,19 @@ curl https://onlyclaws.world/api/events -H "Authorization: Bearer oct_…"
 | `http` | `http.get` / `http.post` to any HTTP(S) endpoint (no device credentials attached) |
 | `emit(name, table)` | Report an event to the control plane for the agent |
 | `ble`, `net` | BLE controller direction, Wi-Fi status |
+| `arm` | RoArm builds only: `arm.feedback()` joint angles, `arm.move` / `arm.stream` poses in radians, `arm.stop()` |
+
+An arm board runs the same kind of script. This one reads the pose, reports it, then folds the arm upright:
+
+```lua
+function on_start()
+  local p = arm.feedback()          -- {base, shoulder, elbow, hand, q={...}} in radians
+  emit("pose", { q = p.q })
+  arm.move({ base = 0, shoulder = 0, elbow = 3.05, hand = 3.14, spd = 200 })
+end
+```
+
+For low-latency control the agent can skip Lua and send one-shot `arm.move` / `arm.feedback` / `arm.stop` tools through `POST /api/invoke`. The board reports `capabilities[]` (for example `["core","arm"]`), and the control plane rejects tools a board does not have.
 
 Full contract: [skill.md](https://onlyclaws.world/api/agent/skill.md). More apps: [`demos/`](demos/).
 
@@ -128,15 +142,16 @@ Sign-in is delegated to an auth service set by `EPD_AUTH_UPSTREAM`: it must acce
 
 ## Hardware
 
-One source tree, three PlatformIO environments. Rewire any of them by editing [`rlcd/include/board_pins.h`](rlcd/include/board_pins.h); the Lua and cloud APIs stay the same.
+One source tree, four PlatformIO environments. Rewire any of them by editing [`rlcd/include/board_pins.h`](rlcd/include/board_pins.h); the Lua and cloud APIs stay the same.
 
 | Environment | Board | What's compiled in |
 |-------------|-------|--------------------|
 | `esp32-s3-bare` | Any ESP32-S3 module with 16 MB flash and octal PSRAM | Core only: cloud channel, Lua, HTTP, events. Status goes to serial |
 | `esp32-s3-rlcd-42` | Waveshare ESP32-S3-RLCD-4.2 | ST7305 400×300 reflective LCD (~140 ms/frame), ES8311 audio, sensors, BLE `OC-Snake` |
 | `esp32-s3-epaper-397` | Waveshare ESP32-S3-ePaper-3.97 | 800×480 e-paper with partial refresh, ES8311 audio. BLE off to leave heap for TLS |
+| `esp32-roarm-m2` | Waveshare RoArm-M2 driver board (classic ESP32) | Feetech STS servo bus on GPIO18/19, `arm.*` in Lua and invoke. Headless: no panel, audio or BLE, and the factory open Wi-Fi joint API is not compiled in |
 
-On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 900 ms. The same script runs on both panels.
+On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 900 ms. The same script runs on both panels. Arm product notes: [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md).
 
 ## Repository
 
@@ -144,7 +159,10 @@ On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 
 |------|--------------|
 | [`rlcd/`](rlcd/) | Firmware. Build and flash from here |
 | [`server/`](server/) | Control plane: devices, scripts, events, bitmaps, console |
-| [`demos/`](demos/) | Lua apps to deploy: Snake (key, phone D-pad or HTTP controller) and a live RL-training dashboard |
+| [`demos/`](demos/) | Lua apps to deploy: Snake (key, phone D-pad or HTTP controller), a live RL-training dashboard, a Wi-Fi quality monitor, and RoArm pose hold |
+| [`jev_servo/`](jev_servo/) | Host-side arm control: forward kinematics, USB and cloud arm channels, MCP server, web console |
+| [`vision/`](vision/) | Host-side camera pipeline (YuNet, SFace, YOLOv8n) the agent can bridge into arm moves. Models: `bash vision/scripts/fetch_models.sh` |
+| [`doc/structurizr/`](doc/structurizr/) | Architecture model and product notes (`python scripts/adl_check.py`) |
 | [`scripts/`](scripts/) | Host setup helpers |
 
 <details>
@@ -156,7 +174,7 @@ On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 
 
 ## Status
 
-Firmware line `agent-runtime-0.13.x`, with panel and audio plugins since `0.13.6`. The hosted console is invite-only while we keep costs and abuse in check. Issues and pull requests are welcome, especially new panel plugins and demo apps.
+Firmware line `agent-runtime-0.16.x`: panel and audio plugins since `0.13.6`, RoArm-M2 arm plugin since `0.16.0`. The hosted console is invite-only while we keep costs and abuse in check. Issues and pull requests are welcome, especially new panel plugins and demo apps.
 
 ## License
 

@@ -1,0 +1,3 @@
+# Generated / large weights — keep YuNet small onnx in git if desired; YOLO via fetch.
+*.pt
+__pycache__/

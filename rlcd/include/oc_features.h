@@ -6,6 +6,9 @@
 //   OC_PLUGIN_PANEL   ST7305 or GxEPD2, selected by BOARD_PANEL_*
 //   OC_PLUGIN_AUDIO   ES8311 playback
 //   OC_PLUGIN_BLE     NimBLE D-pad (RLCD only; ePaper leaves it off for heap)
+//   OC_PLUGIN_ARM     Feetech STS arm (RoArm-M2, BOARD_ROARM)
+//
+// Sensors (SHTC3 + battery ADC) follow the board: present on both panel boards.
 
 #if defined(OC_PLUGIN_PANEL)
 #define OC_HAS_PANEL 1
@@ -23,4 +26,16 @@
 #define OC_HAS_BLE 1
 #else
 #define OC_HAS_BLE 0
+#endif
+
+#if defined(OC_PLUGIN_ARM)
+#define OC_HAS_ARM 1
+#else
+#define OC_HAS_ARM 0
+#endif
+
+#if defined(BOARD_PANEL_RLCD) || defined(BOARD_PANEL_EPAPER)
+#define OC_HAS_SENSORS 1
+#else
+#define OC_HAS_SENSORS 0
 #endif
