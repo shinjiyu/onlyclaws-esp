@@ -13,13 +13,13 @@ core
   device_runtime · script_engine · wifi_nvs · cloud_http · contracts
 
 plugins (link-time)
-  panel | audio | ble_pad | sensors | arm
+  panel | audio | ble_pad | claude_buddy | sensors | arm
 ```
 
 | Product env | Plugins (`OC_PLUGIN_*`) |
 |-------------|-------------------------|
 | `esp32-s3-bare` | core only |
-| `esp32-s3-rlcd-42` | panel + audio + ble_pad + sensors |
+| `esp32-s3-rlcd-42` | panel + audio + ble_pad + claude_buddy + sensors |
 | `esp32-s3-epaper-397` | panel + audio + sensors (BLE off) |
 | `esp32-roarm-m2` | arm — **no panel/gfx** |
 
@@ -28,6 +28,8 @@ plugins (link-time)
 - Each plugin implements a small port on `contracts` (e.g. `PanelDisplay`, `ArmDriver`, `InvokeTool[]`).
 - `script_engine`: panel and bare builds register every non-arm module (missing hardware no-ops, so one script runs anywhere); arm builds register only core + `arm.*`.
 - `device_runtime` reports `capabilities: ["panel","audio",…]` on `/status`.
+- `claude_buddy` rides on `OC_PLUGIN_BLE`: it never touches NimBLE; `device_runtime` pipes `ble_pad`'s Nordic UART bytes into it ([ADR 0005](./decisions/0005-claude-buddy-ble.md)).
+- The panel draws the battery badge as a flush overlay; `device_runtime` feeds it from `sensors`.
 - Control plane **filters** `/api/invoke` and Agent docs by that set.
 
 ## Rules (ADL)

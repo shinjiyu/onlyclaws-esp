@@ -74,7 +74,9 @@ pio device monitor -b 115200
 - `http.*`、本机 Pad `http://<ip>/`、`gfx.qr`、`gfx.slow()`（墨水屏为 true）
 - `gfx.image(name, x, y)`（`0.13.5+`）：画云端具名位图，先 `POST /api/bitmaps`，再 `gfx.flush()`。整屏 800×480 不要嵌进 Lua（脚本上限 24000 字节）  
 - `/status` meta：`capabilities[]`、`product`（`rlcd-42` / `epaper-397` / `roarm-m2` / `s3-bare`）、`arm` 驱动名。Lua 只注册本机有的模块（无面板就没有 `gfx`，无机械臂就没有 `arm`）  
-- ePaper 默认 **不开 BLE**（给 mbedTLS 留内部堆）；RLCD 可开 `OC-Snake`  
+- ePaper 默认 **不开 BLE**（给 mbedTLS 留内部堆）；RLCD 广播名 `Claude-OC-XXXX`（BT MAC 后两字节）  
+- **电量角标**（`0.17.0+`）：`PanelDisplay::flush()` 前画右上角电量（RLCD 走 GPIO4 分压，ePaper 走 I2C 0x34 的 TG28/AXP2101）；`gfx.badge(false)` 隐藏，下次加载脚本恢复  
+- **Claude Hardware Buddy**（`0.17.0+`）：Nordic UART + LE Secure 配对（屏上显示 6 位码）。协议逻辑在 `claude_proto.cpp`（主机可测：`python3 tests/test_host_logic.py`），卡片/按键在 `claude_buddy.cpp`。权限卡片显示时 Lua tick 暂停；`claude.takeover(false)` 交给脚本处理  
 - RoArm：**无** factory 匿名 `/js` 关节 API；只用 cloud invoke / Lua `arm.*`  
 - 墨水屏以 **局刷** 为主；全刷会闪黑白，仅偶尔清残影  
 

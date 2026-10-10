@@ -15,6 +15,8 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 | REQ-AUDIO | audio | manual | beep on RLCD |
 | REQ-BLE-PAD | ble_pad | manual | Pad URL + BLE dir |
 | REQ-SENSORS | sensors | manual | `sensors.read` / Lua sensors() |
+| REQ-BATTERY-BADGE | panel | unit | `rlcd/tests/test_host_logic.py` (label + pct curve); badge visible on RLCD |
+| REQ-CLAUDE-BUDDY | claude_buddy | unit | `rlcd/tests/test_host_logic.py` (protocol); pair with Claude desktop Hardware Buddy, KEY/BOOT on a prompt |
 | REQ-PUSH-BITMAP | control_plane | manual | push image matches panel size |
 | REQ-CAPABILITIES | contracts | unit | `server/tests/test_capabilities.py` + `/status` meta.capabilities |
 | REQ-PLUGIN-BUILD | device_runtime | manual | `OC_PLUGIN_*` in platformio.ini; Lua/invoke gated |
@@ -39,4 +41,4 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 
 - Control plane: tenancy token verify (pytest)
 
-Shipped: `server/tests/test_capabilities.py` (`tool_allowed_for_caps`); `vision/tests/test_pipeline.py`.
+Shipped: `server/tests/test_capabilities.py` (`tool_allowed_for_caps`); `vision/tests/test_pipeline.py`; `rlcd/tests/test_host_logic.py` (compiles `claude_proto.cpp` + `oc_battery.h` on the host; needs `pio run` once for ArduinoJson).

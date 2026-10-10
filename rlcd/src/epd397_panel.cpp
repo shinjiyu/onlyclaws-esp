@@ -59,7 +59,7 @@ bool Epd397Panel::showGxBitmap(const uint8_t *gx, size_t n) {
   return true;
 }
 
-void Epd397Panel::flush() {
+void Epd397Panel::flushPanel() {
   if (!fb_) return;
 
   // Always partial during gameplay. Full refresh flashes black/white and looks

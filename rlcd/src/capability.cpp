@@ -6,7 +6,10 @@ void capabilityFillJson(JsonArray out) {
   out.add("core");
   if (ocCapPanel()) out.add("panel");
   if (ocCapAudio()) out.add("audio");
-  if (ocCapBle()) out.add("ble_pad");
+  if (ocCapBle()) {
+    out.add("ble_pad");
+    out.add("claude_buddy");
+  }
   if (ocCapSensors()) out.add("sensors");
   if (ocCapArm()) out.add("arm");
 }

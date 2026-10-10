@@ -182,7 +182,7 @@ bool St7305Rlcd::showGxBitmap(const uint8_t *gx, size_t n) {
   if (!fb_ || !gx || n != bytes_) return false;
   // Gx: 1=white,0=black  →  our canvas: 1=ink,0=background
   for (size_t i = 0; i < bytes_; ++i) fb_[i] = (uint8_t)~gx[i];
-  display();
+  flush();
   return true;
 }
 

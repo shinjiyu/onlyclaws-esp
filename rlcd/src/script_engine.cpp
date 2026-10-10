@@ -10,6 +10,7 @@
 
 #include "board_pins.h"
 #include "ble_ctrl.h"
+#include "claude_buddy.h"
 #include "capability.h"
 #include "arm_driver.h"
 #include "arm_ctl.h"
@@ -318,6 +319,64 @@ int l_ble_restart(lua_State *L) {
   return 1;
 }
 
+// ---- Claude Hardware Buddy ----
+
+void setStr(lua_State *L, const char *k, const std::string &v) {
+  lua_pushlstring(L, v.data(), v.size());
+  lua_setfield(L, -2, k);
+}
+void setInt(lua_State *L, const char *k, lua_Integer v) {
+  lua_pushinteger(L, v);
+  lua_setfield(L, -2, k);
+}
+
+// claude_state() -> table, or nil if Claude desktop never connected.
+int l_claude_state(lua_State *L) {
+  const ClaudeState *s = claudeBuddyState();
+  if (!s || !s->seen) {
+    lua_pushnil(L);
+    return 1;
+  }
+  lua_newtable(L);
+  lua_pushboolean(L, claudeBuddyConnected() ? 1 : 0);
+  lua_setfield(L, -2, "connected");
+  setInt(L, "total", s->total);
+  setInt(L, "running", s->running);
+  setInt(L, "waiting", s->waiting);
+  setInt(L, "tokens", s->tokens);
+  setInt(L, "tokens_today", s->tokensToday);
+  setStr(L, "msg", s->msg);
+  setStr(L, "text", s->lastText);
+  setStr(L, "owner", s->owner);
+  lua_newtable(L);
+  for (size_t i = 0; i < s->entries.size(); ++i) {
+    lua_pushlstring(L, s->entries[i].data(), s->entries[i].size());
+    lua_rawseti(L, -2, (lua_Integer)i + 1);
+  }
+  lua_setfield(L, -2, "entries");
+  if (claudeBuddyPromptPending()) {
+    lua_newtable(L);
+    setStr(L, "id", s->prompt.id);
+    setStr(L, "tool", s->prompt.tool);
+    setStr(L, "hint", s->prompt.hint);
+    lua_setfield(L, -2, "prompt");
+  }
+  return 1;
+}
+
+// claude_decide(id, allow) -> true if the decision was sent.
+int l_claude_decide(lua_State *L) {
+  const char *id = luaL_checkstring(L, 1);
+  const bool allow = lua_toboolean(L, 2) != 0;
+  lua_pushboolean(L, claudeBuddyDecide(id, allow) ? 1 : 0);
+  return 1;
+}
+
+int l_claude_takeover(lua_State *L) {
+  claudeBuddySetTakeover(lua_isnoneornil(L, 1) || lua_toboolean(L, 1));
+  return 0;
+}
+
 // ---- graphics ----
 
 int l_gfx_w(lua_State *L) {
@@ -405,6 +464,12 @@ int l_gfx_flush(lua_State *L) {
   (void)L;
   PanelDisplay *d = lcd();
   if (d) d->flush();
+  return 0;
+}
+
+// gfx_badge(on): framework battery badge; back on at the next script load.
+int l_gfx_badge(lua_State *L) {
+  if (gHost.setBadge) gHost.setBadge(lua_isnoneornil(L, 1) || lua_toboolean(L, 1));
   return 0;
 }
 
@@ -730,6 +795,9 @@ bool bindApis() {
     ok &= gLua->registerFunction("ble_dir", l_ble_dir);
     ok &= gLua->registerFunction("ble_connected", l_ble_connected);
     ok &= gLua->registerFunction("ble_restart", l_ble_restart);
+    ok &= gLua->registerFunction("claude_state", l_claude_state);
+    ok &= gLua->registerFunction("claude_decide", l_claude_decide);
+    ok &= gLua->registerFunction("claude_takeover", l_claude_takeover);
   }
   if (ocCapPanel() || portable) {
     ok &= gLua->registerFunction("display", l_display);
@@ -744,6 +812,7 @@ bool bindApis() {
     ok &= gLua->registerFunction("gfx_fill_circle", l_gfx_fill_circle);
     ok &= gLua->registerFunction("gfx_text", l_gfx_text);
     ok &= gLua->registerFunction("gfx_flush", l_gfx_flush);
+    ok &= gLua->registerFunction("gfx_badge", l_gfx_badge);
     ok &= gLua->registerFunction("panel_slow", l_panel_slow);
     ok &= gLua->registerFunction("gfx_qr", l_gfx_qr);
     ok &= gLua->registerFunction("gfx_blit", l_gfx_blit_b64);
@@ -797,6 +866,11 @@ audio.pa = pa; audio.play_pcm = play_pcm
     boot += R"LUA(
 ble = ble or {}
 ble.dir = ble_dir; ble.connected = ble_connected; ble.restart = ble_restart
+claude = claude or {}
+claude.state = claude_state; claude.takeover = claude_takeover
+claude.connected = function() local s = claude_state(); return s ~= nil and s.connected end
+claude.allow = function(id) return claude_decide(id, true) end
+claude.deny = function(id) return claude_decide(id, false) end
 )LUA";
   }
   if (ocCapPanel() || portable) {
@@ -811,6 +885,7 @@ gfx.text = gfx_text; gfx.flush = gfx_flush; gfx.blit = gfx_blit
 gfx.image = gfx_image
 gfx.qr = gfx_qr
 gfx.slow = panel_slow
+gfx.badge = gfx_badge
 )LUA";
   }
   if (ocCapArm()) {

@@ -13,6 +13,12 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
         waveshareArm = softwareSystem "Waveshare RoArm servos" "STS/SCS bus on driver board" {
             tags "External" "Env"
         }
+        claudeDesktop = softwareSystem "Claude desktop (Hardware Buddy)" "Claude Cowork / Claude Code desktop; BLE Nordic UART, newline JSON; developer mode" {
+            tags "External" "Env"
+            properties {
+                "adl" "decisions/0005-claude-buddy-ble.md"
+            }
+        }
         visionHost = softwareSystem "OnlyClaws Vision pathway" "Host frame→objects+empties (vision/); not ESP" {
             tags "External" "Env"
             properties {
@@ -91,7 +97,7 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                     }
                 }
 
-                blePadPlugin = container "BLE/Pad plugin" "NimBLE + LAN HTTP pad" "C++" {
+                blePadPlugin = container "BLE/Pad plugin" "NimBLE D-pad + Nordic UART transport + LAN HTTP pad" "C++" {
                     tags "Plugin"
                     properties {
                         "path" "rlcd/src/ble_ctrl.cpp + http_pad + pad_ctrl"
@@ -100,7 +106,18 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                     }
                 }
 
-                sensorsPlugin = container "Sensors plugin" "Temp / humidity / battery when wired" "C++" {
+                claudeBuddyPlugin = container "Claude Buddy plugin" "Hardware Buddy protocol: session state, permission prompt card, Lua claude.*" "C++" {
+                    tags "Plugin"
+                    properties {
+                        "path" "rlcd/src/claude_buddy.cpp + claude_proto.cpp"
+                        "role" "plugin"
+                        "horizon.intention" "Show Claude sessions; approve/deny tool calls on device buttons"
+                        "horizon.deps" "contracts"
+                        "adl" "decisions/0005-claude-buddy-ble.md"
+                    }
+                }
+
+                sensorsPlugin = container "Sensors plugin" "Temp / humidity / battery (RLCD ADC, ePaper TG28 fuel gauge)" "C++" {
                     tags "Plugin"
                     properties {
                         "path" "rlcd/src/sensors.cpp"
@@ -174,8 +191,12 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
         blePadPlugin -> contracts "implements"
         sensorsPlugin -> contracts "implements"
         armPlugin -> contracts "implements"
+        claudeBuddyPlugin -> contracts "implements"
         deviceRuntime -> panelPlugin "wires when product includes panel"
         deviceRuntime -> armPlugin "wires when product includes arm"
+        deviceRuntime -> claudeBuddyPlugin "pipes BLE UART bytes; passes PanelDisplay + battery"
+        scriptEngine -> claudeBuddyPlugin "registers claude.*"
+        claudeDesktop -> blePadPlugin "Hardware Buddy JSON over Nordic UART"
     }
 
     views {

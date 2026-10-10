@@ -12,12 +12,15 @@ class St7305Rlcd : public PanelDisplay {
   bool begin(SPIClass *spi);
   void drawPixel(int16_t x, int16_t y, uint16_t color) override;
   void fillScreen(uint16_t color) override;
-  void flush() override { display(); }
-  void display();  // legacy alias
+  void display();  // raw push, no overlay
   void invertDisplay(bool i);
   bool showGxBitmap(const uint8_t *gx, size_t n) override;
   size_t frameBytes() const override { return bytes_; }
+  uint8_t *canvas() override { return fb_; }
   const char *panelName() const override { return "ST7305-RLCD-4.2"; }
+
+ protected:
+  void flushPanel() override { display(); }
 
  private:
   SPIClass *spi_ = nullptr;

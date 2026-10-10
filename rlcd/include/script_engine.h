@@ -40,6 +40,9 @@ struct ScriptHost {
 
   bool (*emitEvent)(const char *name, const char *jsonData) = nullptr;
   void (*onSensors)(const SensorReading &r) = nullptr;
+
+  // Framework battery badge on/off (gfx.badge).
+  void (*setBadge)(bool on) = nullptr;
 };
 
 void scriptEngineBegin(const ScriptHost &host);

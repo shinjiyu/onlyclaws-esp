@@ -82,6 +82,19 @@ Pose is radians (Waveshare-style). `spd=0` → firmware default. `arm.feedback` 
 `gfx.qr(x, y, scale, text)` · `ble.dir()` / `ble.restart()` / `ble.connected()` (LAN pad / BLE) ·
 `log` / `sleep` / `stop` / `millis` · `display(l1,l2)` convenience
 
+The framework draws a battery badge top-right on every flush (`87%`, `87%+` charging, `USB`).
+`gfx.badge(false)` hides it until the next script load.
+
+### Claude desktop (capability `claude_buddy`, RLCD)
+
+The board advertises as `Claude-OC-XXXX` and speaks Claude desktop's Hardware Buddy BLE protocol
+(Developer Mode → Hardware Buddy; pairing shows a 6-digit passkey on the panel).
+When Claude asks for a tool permission the framework pauses the script and shows a card:
+KEY = allow once, BOOT = deny. Lua:
+`claude.state()` → `nil` or `{connected, total, running, waiting, tokens, tokens_today, msg, entries, text, owner, prompt={id,tool,hint}?}` ·
+`claude.takeover(false)` (handle prompts in Lua; back on at next script load) ·
+`claude.allow(id)` / `claude.deny(id)`
+
 ### Deploy example
 
 ```http

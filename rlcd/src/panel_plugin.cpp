@@ -47,6 +47,41 @@ struct CachedBmp {
 CachedBmp gBmpCache[8];
 uint32_t gBmpClock = 1;
 
+OcBattery gBattery{};
+bool gBadgeOn = true;
+
+void drawBatteryBadge(PanelDisplay &d) {
+  if (!gBadgeOn) return;
+  char label[8];
+  ocBatteryLabel(gBattery, label, sizeof(label));
+  if (!label[0]) return;
+
+  const int16_t s = d.width() >= 600 ? 2 : 1;
+  const int16_t textW = (int16_t)(strlen(label) * 6 * s);
+  const bool icon = gBattery.present && gBattery.pct >= 0;
+  const int16_t bodyW = 18 * s, bodyH = 9 * s, nubW = 2 * s;
+  const int16_t pad = 2 * s;
+  const int16_t right = d.width() - 3 * s;
+  const int16_t top = 3 * s;
+  const int16_t iconX = right - nubW - bodyW;
+  const int16_t textX = (icon ? iconX - 3 * s : right) - textW;
+
+  d.fillRect(textX - pad, top - pad, right - textX + 2 * pad, bodyH + 2 * pad, 0);
+  d.setFont(nullptr);
+  d.setTextSize(s);
+  d.setTextColor(1);
+  d.setCursor(textX, top + (bodyH - 7 * s) / 2);
+  d.print(label);
+  d.setTextSize(1);
+  if (!icon) return;
+
+  d.drawRect(iconX, top, bodyW, bodyH, 1);
+  d.fillRect(iconX + bodyW, top + bodyH / 2 - 2 * s, nubW, 4 * s, 1);
+  const int16_t inner = bodyW - 4 * s;
+  const int16_t fill = (int16_t)(inner * gBattery.pct / 100);
+  if (fill > 0) d.fillRect(iconX + 2 * s, top + 2 * s, fill, bodyH - 4 * s, 1);
+}
+
 bool ensureFrameBuf() {
   if (frameBuf) return true;
   if (!FRAME_BYTES) return false;
@@ -135,6 +170,7 @@ void panelPluginBegin(const char *fw) {
 #if OC_HAS_PANEL
   fwVersion = fw ? fw : "";
   display.begin();
+  display.setOverlay(drawBatteryBadge);
 #ifndef BOARD_PANEL_EPAPER
   ensureFrameBuf();
 #endif
@@ -165,13 +201,41 @@ void panelPluginAttach(ScriptHost &host) {
 #if OC_HAS_PANEL
   host.display = &display;
   host.fetchBitmap = hostFetchBitmap;
+  host.setBadge = panelPluginSetBadge;
 #else
   host.display = nullptr;
   host.fetchBitmap = nullptr;
+  host.setBadge = nullptr;
 #endif
 }
 
-void panelPluginDrawStatus(const char *title, const char *line2, const char *line3) {
+bool panelPluginSetBattery(const OcBattery &b) {
+#if OC_HAS_PANEL
+  if (ocBatterySame(gBattery, b)) return false;
+  gBattery = b;
+  return gBadgeOn;
+#else
+  (void)b;
+  return false;
+#endif
+}
+
+void panelPluginRefresh() {
+#if OC_HAS_PANEL
+  display.flush();
+#endif
+}
+
+void panelPluginSetBadge(bool on) {
+#if OC_HAS_PANEL
+  gBadgeOn = on;
+#else
+  (void)on;
+#endif
+}
+
+void panelPluginDrawStatus(const char *title, const char *line2, const char *line3,
+                           const char *line4) {
 #if OC_HAS_PANEL
   display.fillScreen(0);
   display.drawRect(4, 4, LCD_WIDTH - 8, LCD_HEIGHT - 8, 1);
@@ -191,11 +255,16 @@ void panelPluginDrawStatus(const char *title, const char *line2, const char *lin
   display.print(macSuffix());
   display.setCursor(24, 216);
   display.print(fwVersion);
+  if (line4) {
+    display.setCursor(24, 252);
+    display.print(line4);
+  }
   display.flush();
 #else
   (void)title;
   (void)line2;
   (void)line3;
+  (void)line4;
 #endif
 }
 

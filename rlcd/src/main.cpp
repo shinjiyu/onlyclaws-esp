@@ -15,6 +15,7 @@
 #include "ble_ctrl.h"
 #include "board_pins.h"
 #include "capability.h"
+#include "claude_buddy.h"
 #include "cloud_http.h"
 #include "http_pad.h"
 #include "cloud_config.h"
@@ -27,8 +28,9 @@
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.16.0";
+constexpr const char *FW_VERSION = "agent-runtime-0.17.0";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
+constexpr uint32_t BATTERY_INTERVAL_MS = 30UL * 1000UL;
 
 // Lua http.* uses its own TLS session so it cannot starve cloud pending/status.
 WiFiClientSecure tlsLua;
@@ -37,6 +39,11 @@ uint32_t lastSensorMs = 0;
 SensorReading lastSensors{};
 String statusLine1 = "OnlyClaws";
 String statusLine2 = "runtime";
+OcBattery battery{};
+uint32_t lastBatteryMs = 0;
+bool bootWasDown = false;
+bool hudVisible = false;
+char hudClaudeLine[48] = "";
 
 void forcePublicDns() {
   esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -60,10 +67,12 @@ bool bootButtonHeld(uint32_t ms = 1500) {
 }
 
 void drawStatus(const char *title, const char *line2, const char *line3 = nullptr) {
+  hudVisible = false;
   panelPluginDrawStatus(title, line2, line3);
 }
 
 void drawRuntimeHud(bool forceSensors = false) {
+  if (claudeBuddyOwnsScreen()) return;
   if (forceSensors || millis() - lastSensorMs > 30000) {
     SensorReading r;
     if (sensorsRead(r)) lastSensors = r;
@@ -71,7 +80,35 @@ void drawRuntimeHud(bool forceSensors = false) {
   }
   char line3[48];
   snprintf(line3, sizeof(line3), "script %s", scriptEngineState());
-  drawStatus(statusLine1.c_str(), statusLine2.c_str(), line3);
+  claudeBuddySummary(hudClaudeLine, sizeof(hudClaudeLine));
+  panelPluginDrawStatus(statusLine1.c_str(), statusLine2.c_str(), line3,
+                        hudClaudeLine[0] ? hudClaudeLine : nullptr);
+  hudVisible = true;
+}
+
+// Keep the HUD's Claude line current while nothing else owns the panel.
+void refreshHudClaudeLine() {
+  if (!hudVisible || scriptEngineIsRunning() || claudeBuddyOwnsScreen()) return;
+  char now[sizeof(hudClaudeLine)];
+  claudeBuddySummary(now, sizeof(now));
+  if (strcmp(now, hudClaudeLine) != 0) drawRuntimeHud(false);
+}
+
+// Badge refresh: always on fast panels; on e-ink only when no script owns it.
+void pollBattery() {
+  if (millis() - lastBatteryMs < BATTERY_INTERVAL_MS) return;
+  lastBatteryMs = millis();
+  OcBattery b;
+  sensorsBattery(b);
+  battery = b;
+  if (!panelPluginSetBattery(b) || claudeBuddyOwnsScreen()) return;
+  if (!panelPluginSlow() || !scriptEngineIsRunning()) panelPluginRefresh();
+}
+
+// Script load/stop hands the panel back to framework defaults.
+void resetFrameworkUi() {
+  panelPluginSetBadge(true);
+  claudeBuddySetTakeover(true);
 }
 
 void drawPortalHint() {
@@ -272,6 +309,7 @@ void postStatus() {
   if (lastSensors.okBattery) {
     meta["battery_v"] = lastSensors.batteryV;
     meta["battery_pct"] = lastSensors.batteryPct;
+    meta["charging"] = lastSensors.charging;
   }
   meta["script_id"] = scriptEngineScriptId();
   meta["script_state"] = scriptEngineState();
@@ -352,6 +390,7 @@ bool handlePayload(const String &json) {
 
   if (!strcmp(type, "script_stop")) {
     scriptEngineStop("remote stop");
+    resetFrameworkUi();
     statusLine1 = "OnlyClaws";
     statusLine2 = "script stopped";
     if (!panelPluginSlow()) drawRuntimeHud(true);
@@ -360,6 +399,7 @@ bool handlePayload(const String &json) {
   } else if (!strcmp(type, "script")) {
     String scriptId = msg["title"] | "";
     String body = msg["body"] | "";
+    resetFrameworkUi();
     ok = loadLuaFromEnvelope(scriptId, body);
     if (ok) {
       statusLine1 = "script";
@@ -380,6 +420,7 @@ bool handlePayload(const String &json) {
     String title = msg["title"] | "";
     if (asset.length()) {
       ok = panelPluginShowAsset(asset);
+      if (ok) hudVisible = false;
     } else if (title.length()) {
       statusLine1 = title;
       statusLine2 = msg["body"] | "";
@@ -460,6 +501,9 @@ void setupImpl() {
 
   panelPluginBegin(FW_VERSION);
   sensorsBegin();
+  sensorsBattery(battery);
+  panelPluginSetBattery(battery);
+  lastBatteryMs = millis();
 
   ScriptHost host{};
   panelPluginAttach(host);
@@ -495,7 +539,17 @@ void setupImpl() {
   // ESP32 requires WiFi modem sleep when BLE is also on (else abort).
   WiFi.setSleep(true);
 #if OC_HAS_BLE
-  bleCtrlBegin("OC-Snake");
+  bleCtrlBegin();
+  ClaudeBuddyHooks buddy;
+  buddy.display = host.display;
+  buddy.send = bleCtrlUartSend;
+  buddy.secure = bleCtrlUartSecure;
+  buddy.forgetBonds = bleCtrlForgetBonds;
+  buddy.beep = audioPluginBeep;
+  buddy.deviceName = bleCtrlName();
+  claudeBuddyBegin(buddy);
+  bleCtrlSetUartRx(claudeBuddyFeed);
+  bleCtrlSetPairing(claudeBuddyPasskey);
 #else
   Serial.println("[ble] off");
 #endif
@@ -534,10 +588,17 @@ void loopImpl() {
     while (PIN_KEY_BTN >= 0 && digitalRead(PIN_KEY_BTN) == LOW) delay(20);
   }
 
+  pollBattery();
+  claudeBuddyPoll(battery);
+  refreshHudClaudeLine();
+
   if (keyShortPending) {
     keyShortPending = false;
-    if (audioPluginReady()) audioPluginBeep(1000, 120);
+    if (!claudeBuddyButton(true) && audioPluginReady()) audioPluginBeep(1000, 120);
   }
+  const bool bootDown = hostBootDown();
+  if (bootDown && !bootWasDown && claudeBuddyOwnsScreen()) claudeBuddyButton(false);
+  bootWasDown = bootDown;
 
   if (netJsonReady) {
     netJsonReady = false;
@@ -545,7 +606,8 @@ void loopImpl() {
   }
 
   armUsbSerialPoll();
-  scriptEngineTick();
+  // A Claude card owns the panel; the script resumes when it closes.
+  if (!claudeBuddyOwnsScreen()) scriptEngineTick();
 
   if (WiFi.status() != WL_CONNECTED) {
     WifiCreds creds;

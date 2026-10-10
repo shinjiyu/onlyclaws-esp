@@ -81,7 +81,7 @@
       "ui": false,
       "test_kind": "manual",
       "tests": [],
-      "acceptance": "http://device-ip/ pad and BLE OC-* expose ble.dir(); ePaper product may compile without BLE"
+      "acceptance": "http://device-ip/ pad and BLE Claude-OC-* expose ble.dir(); ePaper product may compile without BLE"
     },
     {
       "id": "REQ-SENSORS",
@@ -90,7 +90,25 @@
       "ui": false,
       "test_kind": "manual",
       "tests": [],
-      "acceptance": "sensors() / sensors.read expose available temp/humidity/battery fields without crashing when ADC missing"
+      "acceptance": "sensors() / sensors.read expose available temp/humidity/battery fields without crashing when ADC/PMU missing; ePaper reads the TG28 (AXP2101) fuel gauge when present"
+    },
+    {
+      "id": "REQ-BATTERY-BADGE",
+      "title": "Panel shows battery level by default",
+      "component": "panel",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["rlcd/tests/test_host_logic.py"],
+      "acceptance": "Every flush overlays a top-right badge (icon + pct, '+' when charging, 'USB' when sensed but no cell); boards that cannot sense battery show nothing; Lua gfx.badge(false) hides it until the next script load"
+    },
+    {
+      "id": "REQ-CLAUDE-BUDDY",
+      "title": "Claude desktop Hardware Buddy over BLE",
+      "component": "claude_buddy",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["rlcd/tests/test_host_logic.py"],
+      "acceptance": "BLE builds advertise Claude-OC-* with Nordic UART; heartbeat/turn/time update state; status/name/owner/unpair acked, folder push declined; permission prompt card (KEY allow, BOOT deny) pauses Lua and restores the screen; LE Secure passkey shown on panel; Lua claude.state/allow/deny/takeover"
     },
     {
       "id": "REQ-PUSH-BITMAP",

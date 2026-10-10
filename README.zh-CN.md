@@ -85,6 +85,7 @@ curl https://onlyclaws.world/api/events -H "Authorization: Bearer oct_…"
 | `http` | `http.get` / `http.post` 访问任意 HTTP(S) 地址（不带设备凭据） |
 | `emit(name, table)` | 向控制面上报事件，供 Agent 读取 |
 | `ble`、`net` | BLE 手柄方向、Wi-Fi 状态 |
+| `claude` | RLCD：通过 BLE 读 Claude 桌面端的会话状态、处理权限请求（`claude.state()`、`claude.allow(id)`） |
 | `arm` | 仅机械臂固件：`arm.feedback()` 读关节角度，`arm.move` / `arm.stream` 按弧度下发姿态，`arm.stop()` 停住 |
 
 机械臂板跑的也是同样的脚本。下面这段读出当前姿态、上报，再把臂竖直收起：
@@ -147,11 +148,13 @@ uvicorn app:app --host 127.0.0.1 --port 8787
 | 环境 | 板子 | 编进去的内容 |
 |------|------|--------------|
 | `esp32-s3-bare` | 任意 16 MB flash + octal PSRAM 的 ESP32-S3 模组 | 只有核心：云通道、Lua、HTTP、事件。状态打到串口 |
-| `esp32-s3-rlcd-42` | 微雪 ESP32-S3-RLCD-4.2 | ST7305 400×300 反射屏（约 140 ms/帧）、ES8311 音频、传感器、BLE `OC-Snake` |
+| `esp32-s3-rlcd-42` | 微雪 ESP32-S3-RLCD-4.2 | ST7305 400×300 反射屏（约 140 ms/帧）、ES8311 音频、传感器、BLE `Claude-OC-XXXX`（手柄 + Claude 桌面端 Hardware Buddy） |
 | `esp32-s3-epaper-397` | 微雪 ESP32-S3-ePaper-3.97 | 800×480 电子纸局刷、ES8311 音频。BLE 关闭，给 TLS 留堆 |
 | `esp32-roarm-m2` | 微雪 RoArm-M2 驱动板（经典 ESP32） | 飞特 STS 舵机总线（GPIO18/19），Lua 和 invoke 都能用 `arm.*`。无屏、无音频、无 BLE，出厂那套开放 Wi-Fi 关节接口不编进去 |
 
-电子纸上 `gfx.slow()` 返回 true，动画可以把一帧拉长到约 900 ms。同一段脚本两块屏都能跑。机械臂产品说明见 [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md)。
+电子纸上 `gfx.slow()` 返回 true，动画可以把一帧拉长到约 900 ms。同一段脚本两块屏都能跑。两块屏默认在右上角显示电量（RLCD 通过 ADC 分压读电池，电子纸板通过板载 TG28 电源芯片读取），`gfx.badge(false)` 可以隐藏。
+
+RLCD 可以和 Claude 桌面端配对（Developer → Hardware Buddy，输入屏上显示的配对码）。Claude 请求执行工具时，屏上会显示请求内容：按 KEY 允许一次，按 BOOT 拒绝。机械臂产品说明见 [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md)。
 
 ## 仓库结构
 

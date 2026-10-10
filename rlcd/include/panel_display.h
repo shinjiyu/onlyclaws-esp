@@ -11,9 +11,37 @@ class PanelDisplay : public Adafruit_GFX {
   ~PanelDisplay() override = default;
 
   virtual bool begin() = 0;
-  virtual void flush() = 0;
   virtual size_t frameBytes() const = 0;
   virtual bool showGxBitmap(const uint8_t *gx, size_t n) = 0;
+
+  // Framework overlay (battery badge) is drawn into the canvas right before
+  // every flush, Lua gfx.flush() included. Text state (font, size, colors,
+  // cursor, wrap) is restored afterwards so scripts never see it change.
+  using Overlay = void (*)(PanelDisplay &);
+  void setOverlay(Overlay fn) { overlay_ = fn; }
+  void flush() {
+    if (overlay_) {
+      const GFXfont *font = gfxFont;
+      const int16_t cx = cursor_x, cy = cursor_y;
+      const uint16_t fg = textcolor, bg = textbgcolor;
+      const uint8_t sx = textsize_x, sy = textsize_y;
+      const bool wr = wrap;
+      overlay_(*this);
+      gfxFont = (GFXfont *)font;
+      cursor_x = cx;
+      cursor_y = cy;
+      textcolor = fg;
+      textbgcolor = bg;
+      textsize_x = sx;
+      textsize_y = sy;
+      wrap = wr;
+    }
+    flushPanel();
+  }
+
+  // Raw 1bpp canvas, frameBytes() long. Used to save/restore the screen
+  // around framework cards. nullptr if the panel has no canvas.
+  virtual uint8_t *canvas() { return nullptr; }
 
   // Sprite blit, Gx MONO_HLSB (1=white, 0=black, MSB left). Width must be a
   // multiple of 8. Does not flush; pixels outside the panel are clipped.
@@ -36,4 +64,10 @@ class PanelDisplay : public Adafruit_GFX {
   // e-ink / slow panels: demos should lengthen loop ticks.
   virtual bool slowPanel() const { return false; }
   virtual const char *panelName() const { return "panel"; }
+
+ protected:
+  virtual void flushPanel() = 0;
+
+ private:
+  Overlay overlay_ = nullptr;
 };

@@ -18,11 +18,14 @@ class Epd397Panel : public PanelDisplay {
   bool begin() override;
   void drawPixel(int16_t x, int16_t y, uint16_t color) override;
   void fillScreen(uint16_t color) override;
-  void flush() override;
   bool showGxBitmap(const uint8_t *gx, size_t n) override;
   size_t frameBytes() const override { return bytes_; }
+  uint8_t *canvas() override { return fb_; }
   bool slowPanel() const override { return true; }
   const char *panelName() const override { return "GxEPD2-397"; }
+
+ protected:
+  void flushPanel() override;
 
  private:
   GxEPD2_BW<Driver, kPageH> epd_;

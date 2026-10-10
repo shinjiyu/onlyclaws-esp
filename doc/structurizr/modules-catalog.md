@@ -5,7 +5,7 @@ Same O(1) rule as mcp_guard.
 
 | id | role | path | allowed deps | notes |
 |----|------|------|--------------|-------|
-| contracts | contracts | `rlcd/include/panel_display.h`, `capability.h`, `arm_driver.h` | — | Capability flags + PanelDisplay + ArmDriver ports |
+| contracts | contracts | `rlcd/include/panel_display.h`, `capability.h`, `arm_driver.h`, `oc_battery.h` | — | Capability flags + PanelDisplay (flush overlay) + ArmDriver ports + battery state |
 | wifi_nvs | infra | `rlcd/src/wifi_store.cpp`, `wifi_ap_prov`, `api_config` | — | Provision + device identity NVS |
 | cloud_http | infra | `rlcd/src/main.cpp` HTTP helpers | wifi_nvs | Dual TLS channels; extract later |
 | tenancy | infra | `server/tenancy.py` | — | Ownership + tokens |
@@ -18,8 +18,9 @@ Same O(1) rule as mcp_guard.
 | control_plane | compose | `server/app.py` | tenancy, render, contracts | Filters invoke by `capabilities[]` |
 | panel | plugin | `panel_display` + ST7305 / ePaper | contracts | Compile-time W×H; not in RoArm product |
 | audio | plugin | `audio_es8311.cpp` | contracts | Optional; omit on ePaper/RoArm if no codec |
-| ble_pad | plugin | `ble_ctrl` + `http_pad` + `pad_ctrl` | contracts, wifi_nvs | Optional on ePaper |
-| sensors | plugin | `sensors.cpp` | contracts | Soft-fail when pins missing |
+| ble_pad | plugin | `ble_ctrl` + `http_pad` + `pad_ctrl` | contracts, wifi_nvs | D-pad + Nordic UART transport; off on ePaper |
+| claude_buddy | plugin | `claude_proto.cpp` (pure) + `claude_buddy.cpp` | contracts | Claude desktop Hardware Buddy protocol + prompt card; bytes piped in by device_runtime |
+| sensors | plugin | `sensors.cpp` | contracts | SHTC3, battery ADC or TG28 fuel gauge; soft-fail when missing |
 | arm | plugin | `arm_driver.h`, `arm_ctl.*`, `sts_bus.*`, `arm_roarm.cpp` / `arm_stub.cpp` | contracts | Feetech STS on Serial1 RX18/TX19 when `BOARD_ROARM`; host preempt via `arm_ctl` |
 
 ## AS-IS vs target

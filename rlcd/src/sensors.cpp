@@ -7,7 +7,11 @@
 
 namespace {
 constexpr uint8_t kShtc3Addr = 0x70;
+// TG28 is a renamed AXP2101 (ePaper 3.97 PMU on the shared I2C bus).
+constexpr uint8_t kAxpAddr = 0x34;
+constexpr uint8_t kAxpChipId = 0x4A;
 bool ready = false;
+bool axpReady = false;
 
 bool shtcWriteCmd(uint16_t cmd) {
   Wire.beginTransmission(kShtc3Addr);
@@ -23,17 +27,78 @@ bool shtcRead(uint8_t *buf, size_t n) {
   return true;
 }
 
-int batteryPctFromV(float v) {
-  // Coarse Li-ion curve for 18650 single cell.
-  if (v <= 3.30f) return 0;
-  if (v >= 4.15f) return 100;
-  if (v < 3.60f) return (int)((v - 3.30f) / 0.30f * 20.0f);
-  if (v < 3.90f) return 20 + (int)((v - 3.60f) / 0.30f * 50.0f);
-  return 70 + (int)((v - 3.90f) / 0.25f * 30.0f);
+bool axpRead(uint8_t reg, uint8_t *val) {
+  Wire.beginTransmission(kAxpAddr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)kAxpAddr, 1) != 1) return false;
+  *val = Wire.read();
+  return true;
+}
+
+bool axpSetBit(uint8_t reg, uint8_t bit) {
+  uint8_t v = 0;
+  if (!axpRead(reg, &v)) return false;
+  if (v & (1u << bit)) return true;
+  Wire.beginTransmission(kAxpAddr);
+  Wire.write(reg);
+  Wire.write((uint8_t)(v | (1u << bit)));
+  return Wire.endTransmission() == 0;
+}
+
+// Read-mostly: only turns on the VBAT ADC channel and the fuel gauge.
+void axpProbe() {
+  uint8_t id = 0;
+  axpReady = axpRead(0x03, &id) && id == kAxpChipId;
+  if (!axpReady) return;
+  axpSetBit(0x30, 0);  // ADC channel enable: VBAT
+  axpSetBit(0x18, 3);  // fuel gauge enable
+  Serial.println("[sensors] TG28/AXP2101 fuel gauge");
+}
+
+bool axpBattery(OcBattery &b) {
+  uint8_t s1 = 0, s2 = 0;
+  if (!axpRead(0x00, &s1) || !axpRead(0x01, &s2)) return false;
+  b.sensed = true;
+  b.usb = (s1 & 0x20) != 0;
+  b.present = (s1 & 0x08) != 0;
+  if (!b.present) return true;
+  uint8_t hi = 0, lo = 0, pct = 0;
+  if (axpRead(0x34, &hi) && axpRead(0x35, &lo)) b.mv = ((hi & 0x3F) << 8) | lo;
+  if (axpRead(0xA4, &pct) && pct <= 100) {
+    b.pct = pct;
+  } else if (b.mv > 0) {
+    b.pct = ocBatteryPctFromMv(b.mv);
+  }
+  b.charging = ((s2 >> 5) & 0x03) == 0x01;
+  return true;
+}
+
+bool adcBattery(OcBattery &b) {
+  b.sensed = true;
+  uint32_t sum = 0;
+  const int n = 8;
+  for (int i = 0; i < n; ++i) {
+    sum += analogReadMilliVolts(PIN_BAT_ADC);
+    delay(2);
+  }
+  // 1/3 divider on the RLCD. USB-only boards read near 0 or nonsense.
+  const int mv = (int)(sum / n) * 3;
+  if (mv >= 2800 && mv <= 4400) {
+    b.present = true;
+    b.mv = mv;
+    b.pct = ocBatteryPctFromMv(mv);
+  }
+  return true;
 }
 }  // namespace
 
 bool sensorsBegin() {
+  if (PIN_BAT_ADC >= 0) {
+    pinMode(PIN_BAT_ADC, INPUT);
+    analogReadResolution(12);
+    analogSetPinAttenuation(PIN_BAT_ADC, ADC_11db);
+  }
   if (PIN_I2C_SDA < 0 || PIN_I2C_SCL < 0) {
     ready = false;
     return false;
@@ -44,12 +109,17 @@ bool sensorsBegin() {
   // Wake SHTC3
   shtcWriteCmd(0x3517);
   delay(2);
-  if (PIN_BAT_ADC >= 0) {
-    pinMode(PIN_BAT_ADC, INPUT);
-    analogReadResolution(12);
-  }
+  if (PIN_BAT_ADC < 0) axpProbe();
   ready = true;
   return true;
+}
+
+bool sensorsBattery(OcBattery &out) {
+  out = OcBattery{};
+  if (PIN_BAT_ADC >= 0) return adcBattery(out);
+  if (PIN_I2C_SDA < 0 || PIN_I2C_SCL < 0) return false;
+  if (!ready) sensorsBegin();
+  return axpReady && axpBattery(out);
 }
 
 bool sensorsRead(SensorReading &out) {
@@ -74,28 +144,12 @@ bool sensorsRead(SensorReading &out) {
     }
   }
 
-  // Battery: 3x divider (RLCD). Skip when pin not wired (ePaper map).
-  if (PIN_BAT_ADC < 0) {
-    out.batteryV = NAN;
-    out.batteryPct = -1;
-    return out.okTemp || out.okBattery;
-  }
-  uint32_t sum = 0;
-  const int n = 8;
-  for (int i = 0; i < n; ++i) {
-    sum += analogReadMilliVolts(PIN_BAT_ADC);
-    delay(2);
-  }
-  const float pinV = (sum / (float)n) / 1000.0f;
-  out.batteryV = pinV * 3.0f;
-  // USB-only boards often read near 0 or nonsense; treat plausible pack range.
-  if (out.batteryV >= 2.8f && out.batteryV <= 4.4f) {
+  OcBattery b;
+  if (sensorsBattery(b) && b.present && b.mv > 0) {
     out.okBattery = true;
-    out.batteryPct = batteryPctFromV(out.batteryV);
-  } else {
-    out.batteryV = NAN;
-    out.batteryPct = -1;
+    out.batteryV = b.mv / 1000.0f;
+    out.batteryPct = b.pct;
+    out.charging = b.charging;
   }
-
   return out.okTemp || out.okBattery;
 }

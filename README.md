@@ -85,6 +85,7 @@ curl https://onlyclaws.world/api/events -H "Authorization: Bearer oct_…"
 | `http` | `http.get` / `http.post` to any HTTP(S) endpoint (no device credentials attached) |
 | `emit(name, table)` | Report an event to the control plane for the agent |
 | `ble`, `net` | BLE controller direction, Wi-Fi status |
+| `claude` | RLCD: Claude desktop session state and permission prompts over BLE (`claude.state()`, `claude.allow(id)`) |
 | `arm` | RoArm builds only: `arm.feedback()` joint angles, `arm.move` / `arm.stream` poses in radians, `arm.stop()` |
 
 An arm board runs the same kind of script. This one reads the pose, reports it, then folds the arm upright:
@@ -147,11 +148,13 @@ One source tree, four PlatformIO environments. Rewire any of them by editing [`r
 | Environment | Board | What's compiled in |
 |-------------|-------|--------------------|
 | `esp32-s3-bare` | Any ESP32-S3 module with 16 MB flash and octal PSRAM | Core only: cloud channel, Lua, HTTP, events. Status goes to serial |
-| `esp32-s3-rlcd-42` | Waveshare ESP32-S3-RLCD-4.2 | ST7305 400×300 reflective LCD (~140 ms/frame), ES8311 audio, sensors, BLE `OC-Snake` |
+| `esp32-s3-rlcd-42` | Waveshare ESP32-S3-RLCD-4.2 | ST7305 400×300 reflective LCD (~140 ms/frame), ES8311 audio, sensors, BLE `Claude-OC-XXXX` (D-pad + Claude desktop Hardware Buddy) |
 | `esp32-s3-epaper-397` | Waveshare ESP32-S3-ePaper-3.97 | 800×480 e-paper with partial refresh, ES8311 audio. BLE off to leave heap for TLS |
 | `esp32-roarm-m2` | Waveshare RoArm-M2 driver board (classic ESP32) | Feetech STS servo bus on GPIO18/19, `arm.*` in Lua and invoke. Headless: no panel, audio or BLE, and the factory open Wi-Fi joint API is not compiled in |
 
-On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 900 ms. The same script runs on both panels. Arm product notes: [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md).
+On e-paper, `gfx.slow()` returns true so animations can stretch frames to about 900 ms. The same script runs on both panels. Both panels show a battery badge in the top-right corner by default (RLCD reads the cell through an ADC divider, the e-paper board through its TG28 power chip); `gfx.badge(false)` hides it.
+
+On the RLCD, pair the board with Claude desktop (Developer → Hardware Buddy, enter the passkey shown on the panel). When Claude asks to run a tool, the panel shows the request: press KEY to allow it once or BOOT to deny. Arm product notes: [`doc/structurizr/ROARM-PRODUCT.md`](doc/structurizr/ROARM-PRODUCT.md).
 
 ## Repository
 
