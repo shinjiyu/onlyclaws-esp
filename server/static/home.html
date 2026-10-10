@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OnlyClaws: an agent runtime for ESP32-S3</title>
-  <meta name="description" content="Open-source agent runtime for ESP32-S3. Flash once, then let your AI agent deploy Lua to draw, beep, read sensors and report events." />
+  <title>OnlyClaws: an agent runtime for ESP32</title>
+  <meta name="description" content="Open-source agent runtime for ESP32. Flash once, then let your AI agent deploy Lua to draw, beep, move a robot arm, read sensors and report events." />
   <meta property="og:title" content="OnlyClaws: give your agent a claw in the real world" />
-  <meta property="og:description" content="Open-source ESP32-S3 runtime. Agents deploy Lua over HTTP; the board draws, plays sound and reports back." />
+  <meta property="og:description" content="Open-source ESP32 runtime. Agents deploy Lua over HTTP; the board draws, plays sound, moves a robot arm and reports back." />
   <meta name="theme-color" content="#f3f0e8" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23e5482d' d='M2 3h2v6H2zM7 1h2v8H7zM12 3h2v6h-2zM2 9h12v2H2zM4 11h8v4H4z'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="assets/oc.css" />
@@ -29,6 +29,10 @@
     @keyframes blink { 0%, 92% { opacity: 1; } 96% { opacity: .2; } }
     .screen { background: var(--lcd-bg); border-radius: 4px; padding: 6px; box-shadow: inset 0 2px 8px rgba(0,0,0,.25); }
     #lcd { width: 100%; aspect-ratio: 4 / 3; image-rendering: pixelated; image-rendering: crisp-edges; }
+    #armview { display: none; width: 100%; aspect-ratio: 4 / 3; }
+    .device.physical .screen { background: #ece8dd; box-shadow: inset 0 1px 3px rgba(0,0,0,.12); }
+    .device.physical #lcd { display: none; }
+    .device.physical #armview { display: block; }
     .scenes { display: flex; gap: 6px; margin-top: 12px; }
     .scenes button { flex: 1; font: inherit; font-size: .78rem; color: #b9b4a7; background: #34332e; border: 1px solid #45433c; border-radius: 6px; padding: 6px 0; cursor: pointer; }
     .scenes button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -63,14 +67,15 @@
     .wire { display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 10px; font-family: var(--mono); font-size: .7rem; color: var(--muted); text-align: center; }
     .wire .line { width: 54px; height: 2px; background: repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 10px); margin: 6px 0; }
 
-    .caps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 28px; }
-    @media (max-width: 900px) { .caps { grid-template-columns: repeat(2, 1fr); } }
+    .caps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 28px; }
+    @media (max-width: 1000px) { .caps { grid-template-columns: repeat(2, 1fr); } }
     .cap { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
     .cap code { background: none; border: 0; padding: 0; font-weight: 700; color: var(--accent-ink); font-size: .86rem; }
     .cap p { margin: 4px 0 0; font-size: .84rem; color: var(--ink-2); }
 
-    .hw { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-    @media (max-width: 900px) { .hw { grid-template-columns: 1fr; } }
+    .hw { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    @media (max-width: 1060px) { .hw { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 640px) { .hw { grid-template-columns: 1fr; } }
     .hw .card { display: flex; flex-direction: column; }
     .hw .env { font-family: var(--mono); font-size: .8rem; color: var(--accent-ink); }
     .hw h3 { font-size: 1.05rem; margin: 6px 0 6px; }
@@ -78,6 +83,7 @@
     .hw .lic { margin-top: 12px; font-size: .78rem; color: var(--muted); }
 
     .code-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .code-grid + .code-grid { margin-top: 28px; }
     @media (max-width: 900px) { .code-grid { grid-template-columns: 1fr; } }
     .code-title { font-family: var(--mono); font-size: .76rem; color: var(--muted); margin: 0 0 8px; }
 
@@ -94,7 +100,7 @@
     <div class="wrap">
       <a class="brand" href="./">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="#e5482d" d="M2 3h2v6H2zM7 1h2v8H7zM12 3h2v6h-2zM2 9h12v2H2zM4 11h8v4H4z"/></svg>
-        OnlyClaws <small>ESP32-S3</small>
+        OnlyClaws <small>ESP32</small>
       </a>
       <nav class="nav-links">
         <a href="#how" data-i18n="nav.how">工作方式</a>
@@ -129,12 +135,13 @@
 
         <div>
           <div class="device" aria-label="Simulated OnlyClaws board">
-            <div class="device-top"><span><i class="led"></i>ESP32-S3 · RLCD 400×300</span><span id="fps">agent-runtime-0.13</span></div>
-            <div class="screen"><canvas id="lcd" width="200" height="150"></canvas></div>
+            <div class="device-top"><span><i class="led"></i><span id="devlabel">ESP32-S3 · RLCD 400×300</span></span><span id="fps">agent-runtime-0.16</span></div>
+            <div class="screen"><canvas id="lcd" width="200" height="150"></canvas><canvas id="armview" width="400" height="300" aria-label="RoArm-M2 moving a cup"></canvas></div>
             <div class="scenes" role="tablist">
               <button type="button" data-scene="0" class="on" data-i18n="scene.snake">贪食蛇</button>
               <button type="button" data-scene="1" data-i18n="scene.ticker">股票看板</button>
               <button type="button" data-scene="2" data-i18n="scene.frog">旅行青蛙</button>
+              <button type="button" data-scene="3" data-i18n="scene.arm">机械臂</button>
             </div>
             <div class="term" id="term"></div>
           </div>
@@ -200,6 +207,8 @@
           <div class="cap"><code>emit()</code><p data-i18n="cap.emit"></p></div>
           <div class="cap"><code>gfx.image</code><p data-i18n="cap.image"></p></div>
           <div class="cap"><code>ble / pad</code><p data-i18n="cap.pad"></p></div>
+          <div class="cap"><code>arm.*</code><p data-i18n="cap.arm"></p></div>
+          <div class="cap"><code>capabilities[]</code><p data-i18n="cap.caps"></p></div>
         </div>
       </div>
     </section>
@@ -239,6 +248,16 @@
               <li data-i18n="hw.epd.3">同一份 Lua，gfx.slow() 自动放慢</li>
             </ul>
             <div class="lic" data-i18n="hw.epd.lic">链接 GxEPD2，此环境的固件按 GPL-3.0 分发</div>
+          </div>
+          <div class="card">
+            <div class="env">esp32-roarm-m2</div>
+            <h3>Waveshare RoArm-M2</h3>
+            <ul>
+              <li data-i18n="hw.arm.1">经典 ESP32 + 飞特 STS 舵机总线</li>
+              <li data-i18n-html="hw.arm.2">Lua 和 invoke 都能用 arm.*</li>
+              <li data-i18n="hw.arm.3">无屏无音频；出厂开放的 Wi-Fi 关节接口不编进去</li>
+            </ul>
+            <div class="lic">MIT</div>
           </div>
         </div>
       </div>
@@ -286,6 +305,35 @@ curl $BASE/api/events \
   -H <span class="s">"Authorization: Bearer oct_…"</span></pre>
           </div>
         </div>
+        <div class="code-grid">
+          <div>
+            <p class="code-title">arm.lua</p>
+<pre class="codeblock"><span class="k">function</span> <span class="n">on_start</span>()
+  <span class="c">-- {base, shoulder, elbow, hand, q={...}} in radians</span>
+  <span class="k">local</span> p = arm.feedback()
+  emit(<span class="s">"pose"</span>, { q = p.q })
+
+  <span class="c">-- fold the arm upright</span>
+  arm.move({ base = <span class="n">0</span>, shoulder = <span class="n">0</span>,
+             elbow = <span class="n">3.05</span>, hand = <span class="n">3.14</span>, spd = <span class="n">200</span> })
+<span class="k">end</span></pre>
+          </div>
+          <div>
+            <p class="code-title" data-i18n="code.invoke">agent → arm, no script</p>
+<pre class="codeblock">curl -X POST $BASE/api/invoke \
+  -H <span class="s">"Authorization: Bearer oct_…"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{
+    "device_id": "YOUR_ARM_ID",
+    "tools": [
+      {"tool": "arm.feedback"},
+      {"tool": "arm.move", "q": [0, 0.9, 1.1, 3.14]}
+    ]
+  }'</span>
+
+<span class="c"># gfx.* on an arm board → 400, not in capabilities</span></pre>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -321,19 +369,19 @@ curl $BASE/api/events \
   <script>
     OC.addStrings({
       zh: {
-        "home.doc_title": "OnlyClaws：给 Agent 的 ESP32-S3 运行时",
+        "home.doc_title": "OnlyClaws：给 Agent 的 ESP32 运行时",
         "nav.how": "工作方式", "nav.hardware": "硬件", "nav.code": "代码", "nav.docs": "Agent 文档", "nav.console": "控制台", "nav.apply": "申请",
-        "hero.eyebrow": "开源 ESP32-S3 Agent 运行时",
+        "hero.eyebrow": "开源 ESP32 Agent 运行时",
         "hero.title": "给 Agent 一只<em>爪子</em>，<br />伸进真实世界。",
-        "hero.lede": "OnlyClaws 把一块 ESP32-S3 变成 Agent 的外设。固件只烧一次，之后 Agent 通过 HTTP 下发 Lua 脚本，板子负责画屏、发声、读传感器、回报事件。模型留在云端，板子只管执行。",
+        "hero.lede": "OnlyClaws 把一块 ESP32 变成 Agent 的外设。固件只烧一次，之后 Agent 通过 HTTP 下发 Lua 脚本，板子负责画屏、发声、动机械臂、读传感器、回报事件。模型留在云端，板子只管执行。",
         "hero.apply": "申请托管控制台", "hero.github": "查看源码",
         "hero.m1": "固件只烧一次", "hero.m2": "应用即 Lua 脚本", "hero.m3": "控制面可自建",
-        "scene.snake": "贪食蛇", "scene.ticker": "股票看板", "scene.frog": "旅行青蛙",
+        "scene.snake": "贪食蛇", "scene.ticker": "股票看板", "scene.frog": "旅行青蛙", "scene.arm": "机械臂",
         "how.kicker": "工作方式",
         "how.title": "三步，把一块板子变成 Agent 的外设",
         "how.lede": "你只需要做一次硬件上的事。之后换应用、改界面、加逻辑，都是 Agent 发一段脚本。",
         "how.s1.t": "烧录固件",
-        "how.s1.b": "选一个 PlatformIO 环境（裸片、RLCD 或墨水屏），按需开启屏幕和音频插件。引脚不同就改 <code>board_pins.h</code> 再编译。",
+        "how.s1.b": "选一个 PlatformIO 环境（裸片、RLCD、墨水屏或 RoArm 机械臂），按需开启屏幕和音频插件。引脚不同就改 <code>board_pins.h</code> 再编译。",
         "how.s2.t": "绑定设备",
         "how.s2.b": "在控制台登记设备 ID，拿到只显示一次的 <code>device_token</code>，写进固件或 NVS。板子开始长轮询云端。",
         "how.s3.t": "交给 Agent",
@@ -343,7 +391,7 @@ curl $BASE/api/events \
         "arch.lede": "板子上没有大模型，也不需要。Agent 决定做什么，控制面负责鉴权和排队，板子按脚本执行并把结果报回来。",
         "arch.agent.t": "你的 AI Agent", "arch.agent.1": "读 skill.md 学会调用", "arch.agent.2": "持有 oct_ 令牌，不碰密码", "arch.agent.3": "写 Lua、部署、读事件",
         "arch.cp.t": "控制面（FastAPI）", "arch.cp.1": "设备、脚本、事件、位图", "arch.cp.2": "每台设备独立 token", "arch.cp.3": "MIT 开源，可自建",
-        "arch.dev.t": "ESP32-S3 板子", "arch.dev.1": "Lua 运行时 + 编译期插件", "arch.dev.2": "屏幕 / 音频 / 传感器 / 按键", "arch.dev.3": "emit() 回报事件",
+        "arch.dev.t": "ESP32 板子", "arch.dev.1": "Lua 运行时 + 编译期插件", "arch.dev.2": "屏幕 / 音频 / 机械臂 / 传感器 / 按键", "arch.dev.3": "emit() 回报事件",
         "cap.gfx": "1-bit 绘图：点线面、文字、二维码、整帧位图",
         "cap.audio": "蜂鸣与 PCM 播放，走 ES8311",
         "cap.sensors": "温度、湿度、电池",
@@ -352,9 +400,11 @@ curl $BASE/api/events \
         "cap.emit": "把事件回报给控制面，Agent 来读",
         "cap.image": "大图先上传成命名位图，Lua 里一行画出",
         "cap.pad": "手机浏览器 D-pad，或 BLE 手柄",
+        "cap.arm": "读关节角度、按弧度下发姿态、一键急停",
+        "cap.caps": "板子上报自己有什么，控制面拒绝它没有的指令",
         "hw.kicker": "硬件",
-        "hw.title": "一棵代码树，三种构建环境",
-        "hw.lede": "屏幕和音频是编译期插件。同一份 Lua 在三种环境上都能跑，没有对应硬件时相关调用会安全空转。换引脚只需要改 <code>rlcd/include/board_pins.h</code>。",
+        "hw.title": "一棵代码树，四种构建环境",
+        "hw.lede": "屏幕、音频和机械臂都是编译期插件。屏幕板和裸模组上同一份 Lua 都能跑，没有对应硬件时相关调用安全空转；机械臂固件只开放 <code>arm.*</code>。换引脚只需要改 <code>rlcd/include/board_pins.h</code>。",
         "hw.bare.t": "任意 ESP32-S3 模组",
         "hw.bare.1": "16MB flash + 八线 PSRAM",
         "hw.bare.2": "只有核心：云通道、Lua、HTTP、事件",
@@ -366,29 +416,33 @@ curl $BASE/api/events \
         "hw.epd.2": "ES8311 音频",
         "hw.epd.3": "同一份 Lua，gfx.slow() 让动画自动放慢",
         "hw.epd.lic": "链接 GxEPD2，此环境构建的固件按 GPL-3.0 分发",
+        "hw.arm.1": "经典 ESP32 + 飞特 STS 舵机总线",
+        "hw.arm.2": "Lua 和 invoke 都能用 <code>arm.*</code>，低延迟控制不经过脚本",
+        "hw.arm.3": "无屏无音频；出厂那套开放的 Wi-Fi 关节接口不编进去",
         "code.kicker": "代码",
         "code.title": "应用就是一段 Lua",
         "code.lede": "on_start 跑一次，on_loop 的返回值决定下次多久后再调用。Agent 把源码 POST 上去，板子几秒内就换上新应用。",
         "code.deploy": "Agent 部署",
+        "code.invoke": "Agent 直接控制机械臂，不经过脚本",
         "cta.title": "托管控制台目前邀请制",
         "cta.body": "为了控制成本和滥用，onlyclaws.world 上的托管控制台需要先申请，人工审核后邮件通知。固件和控制面都是 MIT 开源，不想等也可以直接自建。",
         "cta.apply": "提交申请", "cta.self": "自建控制面",
         "foot.license": "源码 MIT；esp32-s3-epaper-397 环境链接 GxEPD2（GPL-3.0）",
       },
       en: {
-        "home.doc_title": "OnlyClaws: an agent runtime for ESP32-S3",
+        "home.doc_title": "OnlyClaws: an agent runtime for ESP32",
         "nav.how": "How it works", "nav.hardware": "Hardware", "nav.code": "Code", "nav.docs": "Agent docs", "nav.console": "Console", "nav.apply": "Apply",
-        "hero.eyebrow": "Open-source agent runtime for ESP32-S3",
+        "hero.eyebrow": "Open-source agent runtime for ESP32",
         "hero.title": "Give your agent<br />a <em>claw</em> in the real world.",
-        "hero.lede": "OnlyClaws turns an ESP32-S3 into a peripheral for your agent. Flash the firmware once. After that the agent sends Lua over HTTP, and the board draws, plays sound, reads sensors and reports events. The model stays in the cloud; the board just runs the script.",
+        "hero.lede": "OnlyClaws turns an ESP32 into a peripheral for your agent. Flash the firmware once. After that the agent sends Lua over HTTP, and the board draws, plays sound, moves a robot arm, reads sensors and reports events. The model stays in the cloud; the board just runs the script.",
         "hero.apply": "Request console access", "hero.github": "View source",
         "hero.m1": "Flash once", "hero.m2": "Apps are Lua scripts", "hero.m3": "Self-hostable control plane",
-        "scene.snake": "Snake", "scene.ticker": "Ticker", "scene.frog": "Travel frog",
+        "scene.snake": "Snake", "scene.ticker": "Ticker", "scene.frog": "Travel frog", "scene.arm": "Robot arm",
         "how.kicker": "How it works",
         "how.title": "Three steps from a bare board to an agent peripheral",
         "how.lede": "You touch the hardware once. After that, new apps, new screens and new logic are a script your agent sends.",
         "how.s1.t": "Flash the firmware",
-        "how.s1.b": "Pick a PlatformIO environment (bare, RLCD or e-paper) and turn on the panel and audio plugins you need. Different wiring? Edit <code>board_pins.h</code> and rebuild.",
+        "how.s1.b": "Pick a PlatformIO environment (bare, RLCD, e-paper or the RoArm robot arm) and turn on the panel and audio plugins you need. Different wiring? Edit <code>board_pins.h</code> and rebuild.",
         "how.s2.t": "Bind the device",
         "how.s2.b": "Register the device ID in the console and copy the one-time <code>device_token</code> into firmware or NVS. The board starts long-polling the cloud.",
         "how.s3.t": "Hand it to your agent",
@@ -398,7 +452,7 @@ curl $BASE/api/events \
         "arch.lede": "There is no LLM on the board, and it doesn't need one. The agent decides what to do, the control plane authenticates and queues, and the board runs the script and reports back.",
         "arch.agent.t": "Your AI agent", "arch.agent.1": "Learns the API from skill.md", "arch.agent.2": "Holds an oct_ token, never a password", "arch.agent.3": "Writes Lua, deploys, reads events",
         "arch.cp.t": "Control plane (FastAPI)", "arch.cp.1": "Devices, scripts, events, bitmaps", "arch.cp.2": "A separate token per device", "arch.cp.3": "MIT, self-hostable",
-        "arch.dev.t": "ESP32-S3 board", "arch.dev.1": "Lua runtime + compile-time plugins", "arch.dev.2": "Panel / audio / sensors / keys", "arch.dev.3": "Reports events with emit()",
+        "arch.dev.t": "ESP32 board", "arch.dev.1": "Lua runtime + compile-time plugins", "arch.dev.2": "Panel / audio / arm / sensors / keys", "arch.dev.3": "Reports events with emit()",
         "cap.gfx": "1-bit drawing: shapes, text, QR codes, full-frame bitmaps",
         "cap.audio": "Beeps and PCM playback through the ES8311",
         "cap.sensors": "Temperature, humidity, battery",
@@ -407,9 +461,11 @@ curl $BASE/api/events \
         "cap.emit": "Report events to the control plane for the agent",
         "cap.image": "Upload large art once as a named bitmap, draw it in one line",
         "cap.pad": "Phone-browser D-pad or a BLE controller",
+        "cap.arm": "Read joint angles, send poses in radians, stop instantly",
+        "cap.caps": "Each board reports what it has; the control plane rejects tools it lacks",
         "hw.kicker": "Hardware",
-        "hw.title": "One source tree, three build environments",
-        "hw.lede": "Panel and audio are compile-time plugins. The same Lua runs on all three; without the hardware, those calls no-op safely. Rewire by editing <code>rlcd/include/board_pins.h</code>.",
+        "hw.title": "One source tree, four build environments",
+        "hw.lede": "Panel, audio and the arm are compile-time plugins. The same Lua runs on the panel boards and the bare module; without the hardware, those calls no-op safely. Arm firmware exposes only <code>arm.*</code>. Rewire by editing <code>rlcd/include/board_pins.h</code>.",
         "hw.bare.t": "Any ESP32-S3 module",
         "hw.bare.1": "16MB flash + octal PSRAM",
         "hw.bare.2": "Core only: cloud channel, Lua, HTTP, events",
@@ -421,10 +477,14 @@ curl $BASE/api/events \
         "hw.epd.2": "ES8311 audio",
         "hw.epd.3": "Same Lua; gfx.slow() stretches animation frames",
         "hw.epd.lic": "Links GxEPD2; firmware built with this env is GPL-3.0",
+        "hw.arm.1": "Classic ESP32 + Feetech STS servo bus",
+        "hw.arm.2": "<code>arm.*</code> from Lua or invoke; low-latency control skips the script",
+        "hw.arm.3": "No panel or audio; the factory open Wi-Fi joint API is not compiled in",
         "code.kicker": "Code",
         "code.title": "An app is a Lua script",
         "code.lede": "on_start runs once. on_loop returns how many milliseconds until it runs again. The agent POSTs the source and the board swaps apps within seconds.",
         "code.deploy": "agent → deploy",
+        "code.invoke": "agent → arm, no script",
         "cta.title": "The hosted console is invite-only for now",
         "cta.body": "To keep costs and abuse in check, the hosted console at onlyclaws.world needs an application. We review by hand and email you the result. The firmware and control plane are MIT, so you can also self-host today.",
         "cta.apply": "Apply", "cta.self": "Self-host",
@@ -545,6 +605,91 @@ curl $BASE/api/events \
         text("RAIN. BOUGHT A CHARM", 10, 122, 9, true);
       }
 
+      // RoArm-M2 side view. Pose is [base, shoulder, elbow, hand] in radians, same as arm.move.
+      // shoulder 0 = upper arm vertical; elbow pi/2 = forearm level; hand 3.14 = gripper closed.
+      const ARM_KEYS = [
+        { q: [0, 0.00, 3.05, 3.14], hold: 10 },
+        { q: [0, 0.75, 1.00, 2.55], hold: 4 },
+        { q: [0, 1.06, 1.20, 2.55], hold: 4 },
+        { q: [0, 1.06, 1.20, 3.14], hold: 6, grab: true },
+        { q: [0, 0.35, 1.75, 3.14], hold: 8, carry: true },
+        { q: [0, 1.06, 1.20, 3.14], hold: 4, carry: true },
+        { q: [0, 1.06, 1.20, 2.55], hold: 4 },
+        { q: [0, 0.00, 3.05, 3.14], hold: 6 },
+      ];
+      const ARM_MOVE = 14, SX = 64, SY = 92, L1 = 36, L2 = 32, CUP_OFF = 11;
+      let armT = 0, armQ = ARM_KEYS[0].q.slice(), armCarry = false;
+      function armFk(q) {
+        const t1 = q[1], t2 = q[1] + (Math.PI - q[2]);
+        const ex = SX + L1 * Math.sin(t1), ey = SY - L1 * Math.cos(t1);
+        return { ex, ey, tx: ex + L2 * Math.sin(t2), ty: ey - L2 * Math.cos(t2), t2, dx: Math.sin(t2), dy: -Math.cos(t2) };
+      }
+      const CUP = armFk(ARM_KEYS[2].q);
+      function armStep() {
+        armT++;
+        let t = armT, i = 0;
+        const span = (k) => ARM_KEYS[k].hold + ARM_MOVE;
+        const total = ARM_KEYS.reduce((a, _, k) => a + span(k), 0);
+        t %= total;
+        while (t >= span(i)) { t -= span(i); i++; }
+        const a = ARM_KEYS[i], b = ARM_KEYS[(i + 1) % ARM_KEYS.length];
+        const u = t < a.hold ? 0 : (t - a.hold) / ARM_MOVE;
+        const e = u * u * (3 - 2 * u);
+        armQ = a.q.map((v, j) => v + (b.q[j] - v) * e);
+        armCarry = !!(a.carry || (a.grab && u > 0));
+      }
+      // The arm has no screen: this scene shows the physical arm, not a panel.
+      const av = document.getElementById("armview");
+      const ac = av.getContext("2d");
+      function drawArm() {
+        const ARM_INK = "#2f2e29", JOINT = "#e5482d";
+        ac.setTransform(2, 0, 0, 2, 0, 0);
+        ac.fillStyle = "#ece8dd"; ac.fillRect(0, 0, W, H);
+        ac.fillStyle = "#d8d0bd"; ac.fillRect(0, 124, W, H - 124);
+        ac.fillStyle = "#bfb59f"; ac.fillRect(0, 124, W, 1.5);
+
+        const cupAt = (x, y) => {
+          ac.fillStyle = JOINT; ac.beginPath(); ac.roundRect(x - 6, y - 7, 12, 14, 2); ac.fill();
+          ac.fillStyle = "#fff"; ac.fillRect(x - 6, y - 7, 12, 2.5);
+          ac.strokeStyle = JOINT; ac.lineWidth = 1.6; ac.beginPath(); ac.arc(x + 7, y, 3, -Math.PI / 2, Math.PI / 2); ac.stroke();
+        };
+        const k = armFk(armQ);
+        if (!armCarry) cupAt(CUP.tx + CUP.dx * CUP_OFF, CUP.ty + CUP.dy * CUP_OFF);
+
+        ac.fillStyle = ARM_INK;
+        ac.beginPath(); ac.roundRect(SX - 18, 114, 36, 10, 3); ac.fill();
+        ac.fillStyle = "#4a4842"; ac.beginPath(); ac.ellipse(SX, 114, 15, 3, 0, 0, Math.PI * 2); ac.fill();
+        ac.fillStyle = ARM_INK; ac.fillRect(SX - 5, SY, 10, 114 - SY);
+
+        ac.lineCap = "round"; ac.strokeStyle = ARM_INK;
+        ac.lineWidth = 8; ac.beginPath(); ac.moveTo(SX, SY); ac.lineTo(k.ex, k.ey); ac.stroke();
+        ac.lineWidth = 6.5; ac.beginPath(); ac.moveTo(k.ex, k.ey); ac.lineTo(k.tx, k.ty); ac.stroke();
+
+        const open = Math.max(0, 3.14 - armQ[3]) * 9 + 2;
+        const nx = Math.cos(k.t2), ny = Math.sin(k.t2);
+        ac.lineWidth = 2.4; ac.lineCap = "butt";
+        [-1, 1].forEach((sgn) => {
+          const bx = k.tx + nx * open * sgn, by = k.ty + ny * open * sgn;
+          ac.beginPath(); ac.moveTo(k.tx, k.ty); ac.lineTo(bx, by); ac.lineTo(bx + k.dx * 9, by + k.dy * 9); ac.stroke();
+        });
+        if (armCarry) cupAt(k.tx + k.dx * CUP_OFF, k.ty + k.dy * CUP_OFF);
+
+        [[SX, SY], [k.ex, k.ey]].forEach(([x, y]) => {
+          ac.fillStyle = JOINT; ac.beginPath(); ac.arc(x, y, 4, 0, Math.PI * 2); ac.fill();
+          ac.fillStyle = "#fff"; ac.beginPath(); ac.arc(x, y, 1.6, 0, Math.PI * 2); ac.fill();
+        });
+
+        const f = (v) => v.toFixed(2);
+        ac.font = "7px ui-monospace, Menlo, monospace"; ac.textBaseline = "top";
+        ac.fillStyle = "#6b675d";
+        ac.fillText("arm.feedback  q = [" + armQ.map(f).join(", ") + "]", 8, 134);
+        const state = armCarry ? "holding" : (armQ[3] < 3.0 ? "open" : "closed");
+        ac.font = "bold 7px ui-monospace, Menlo, monospace";
+        const pw = ac.measureText(state).width + 10;
+        ac.fillStyle = JOINT; ac.beginPath(); ac.roundRect(W - 8 - pw, 6, pw, 11, 5.5); ac.fill();
+        ac.fillStyle = "#fff"; ac.fillText(state, W - 3 - pw, 8.5);
+      }
+
       const scenes = [
         { reset: snakeReset, step: snakeStep, draw: drawSnake, every: 120,
           cmd: 'POST /api/scripts {"name":"snake","mode":"loop","every_ms":140}', ack: "deployed → a4cb…8440  · script_state=running" },
@@ -552,7 +697,14 @@ curl $BASE/api/events \
           cmd: 'POST /api/scripts {"name":"nvda-ticker","mode":"loop","every_ms":5000}', ack: "deployed → a4cb…8440  · http.get(quote) 200" },
         { reset: () => { frogT = 0; }, step: () => { frogT++; }, draw: drawFrog, every: 90,
           cmd: 'POST /api/bitmaps {"name":"kyoto"}  +  POST /api/scripts {"name":"postcard"}', ack: "deployed → a4cb…8440  · emit(\"postcard_shown\")" },
+        { reset: () => { armT = 0; armStep(); }, step: armStep, draw: drawArm, every: 50,
+          label: "RoArm-M2 · no screen", physical: true,
+          cmd: 'POST /api/invoke {"tools":[{"tool":"arm.move","q":[0,1.06,1.20,3.14]}]}', ack: "invoked → e08c…fc04  · emit(\"arm.feedback\")" },
       ];
+      const devLabel = document.getElementById("devlabel");
+      const device = document.querySelector(".device");
+      const show = (sc) => { sc.draw(); if (!sc.physical) present(); };
+      const defaultLabel = devLabel.textContent;
 
       const term = document.getElementById("term");
       let typeTimer = null;
@@ -577,7 +729,9 @@ curl $BASE/api/events \
         cur = i; sceneStart = performance.now();
         if (manual) auto = false;
         buttons.forEach((b, j) => b.classList.toggle("on", j === i));
-        scenes[i].reset(); scenes[i].draw(); present();
+        devLabel.textContent = scenes[i].label || defaultLabel;
+        device.classList.toggle("physical", !!scenes[i].physical);
+        scenes[i].reset(); show(scenes[i]);
         typeCommand(scenes[i]);
       }
       buttons.forEach((b) => b.addEventListener("click", () => go(+b.dataset.scene, true)));
@@ -585,7 +739,7 @@ curl $BASE/api/events \
       function frame(now) {
         const sc = scenes[cur];
         if (!reduce && now - last >= sc.every) {
-          last = now; sc.step(); sc.draw(); present();
+          last = now; sc.step(); show(sc);
         }
         if (auto && now - sceneStart > 8000) go((cur + 1) % scenes.length, false);
         requestAnimationFrame(frame);
