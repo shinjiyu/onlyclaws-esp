@@ -9,17 +9,33 @@ and the board draws, plays sound, moves a robot arm, reads sensors and reports b
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-1c1d17)](LICENSE)
 ![ESP32-S3](https://img.shields.io/badge/chip-ESP32--S3-e2432a)
-![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.16-1c1d17)
+![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.18-1c1d17)
 ![Lua](https://img.shields.io/badge/apps-Lua-2c2d72)
+[![Stars](https://img.shields.io/github/stars/shinjiyu/onlyclaws-esp?style=social)](https://github.com/shinjiyu/onlyclaws-esp/stargazers)
+![PlatformIO](https://img.shields.io/badge/build-PlatformIO-f5822a)
+![MCP](https://img.shields.io/badge/MCP-stdio-1c1d17)
 [![Agent skill](https://img.shields.io/badge/agent-skill.md-1c1d17)](https://onlyclaws.world/api/agent/skill.md)
 
 [Website](https://onlyclaws.world/) · [Console](https://onlyclaws.world/console/) · [Agent API](https://onlyclaws.world/api/agent/docs) · [中文](README.zh-CN.md)
+
+<!-- TODO: demo gif — 15–30s clip: agent prompt → Lua deployed → board reacts (panel / arm). Save as docs/assets/demo.gif -->
+<!-- <img src="docs/assets/demo.gif" alt="Agent deploying a Lua app to an ESP32-S3 board" width="100%"> -->
 
 <img src="docs/assets/hero.png" alt="Three apps the agent deployed to the same board: Snake, a stock ticker, and a travel-frog postcard" width="100%">
 
 <sub>Three apps, one firmware. Each one is a Lua script the agent deployed. (Rendered from the website simulator; board photos coming.)</sub>
 
 </div>
+
+## 5-minute quickstart
+
+1. **Get access** — [apply](https://onlyclaws.world/apply/) for the hosted console (manual review), or [self-host](#3-self-host-the-control-plane).
+2. **Flash** — `cd rlcd && pio run -e esp32-s3-rlcd-42 -t upload` (pick your env from [Hardware](#hardware)). <!-- TODO: how to find/register the device ID after first boot; Wi-Fi provisioning steps (BLE / AP) -->
+3. **Mint a token** — in the [console](https://onlyclaws.world/console/), create an `oct_…` agent token.
+4. **Hand it to your agent** — give it [skill.md](https://onlyclaws.world/api/agent/skill.md) and the token.
+5. **Watch it run** — the agent posts a script to `/api/scripts`; read events from `/api/events`.
+
+Detailed steps for each path are in [Get started](#get-started).
 
 ## Why
 
@@ -102,6 +118,19 @@ For low-latency control the agent can skip Lua and send one-shot `arm.move` / `a
 
 Full contract: [skill.md](https://onlyclaws.world/api/agent/skill.md). More apps: [`demos/`](demos/).
 
+## Agent & MCP integration
+
+- **Any agent, over HTTP.** The control plane is a plain REST API with a Bearer `oct_…` token. Give the agent [skill.md](https://onlyclaws.world/api/agent/skill.md) (function-call spec: [Agent API](https://onlyclaws.world/api/agent/docs)); no SDK needed.
+- **MCP server (stdio) for the arm.** [`jev_servo/`](jev_servo/) ships an MCP server for presence-driven arm control, used from Cursor:
+
+  ```bash
+  bash jev_servo/run_mcp.sh        # = python3 -m jev_servo mcp, console at JEV_CONSOLE_URL (default http://127.0.0.1:8765)
+  ```
+
+  Tools: `arm_ensure_console`, `arm_status`, `arm_ops`, `arm_start` (find_any / find_id / follow), `arm_stop`, `arm_snap`, `arm_faces`.
+  <!-- TODO: example mcp.json snippet for Cursor / Claude Desktop, and required hardware (tip camera) -->
+- **Claude desktop Hardware Buddy.** On the RLCD board, pair over BLE to approve or deny Claude tool calls with physical keys (see [Hardware](#hardware)).
+
 ## Get started
 
 Pick the path that fits.
@@ -125,7 +154,7 @@ pio run -e esp32-s3-rlcd-42 -t upload --upload-port /dev/cu.usbmodem*
 pio device monitor -b 115200
 ```
 
-To reflash without wiping the Wi-Fi credentials and token already on the board, use `bash scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem101`. Build notes and a China mirror helper are in [`rlcd/DEV.md`](rlcd/DEV.md).
+To reflash without wiping the Wi-Fi credentials and token already on the board, from the repo root run `bash rlcd/scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem101`. Build notes and a China mirror helper are in [`rlcd/DEV.md`](rlcd/DEV.md).
 
 ### 3. Self-host the control plane
 
@@ -168,7 +197,7 @@ The ESP32-S3 builds also run small neural networks that an agent uploads at runt
 | [`demos/`](demos/) | Lua apps to deploy: Snake (key, phone D-pad or HTTP controller), a live RL-training dashboard, a Wi-Fi quality monitor, RoArm pose hold, and yes/no keyword spotting |
 | [`ml/`](ml/) | Models ready to upload to `/api/ml/models` (`.tflite` + meta) |
 | [`jev_servo/`](jev_servo/) | Host-side arm control: forward kinematics, USB and cloud arm channels, MCP server, web console |
-| [`vision/`](vision/) | Host-side camera pipeline (YuNet, SFace, YOLOv8n) the agent can bridge into arm moves. Models: `bash vision/scripts/fetch_models.sh` |
+| [`vision/`](vision/) | Host-side camera pipeline (YuNet, SFace, YOLOv8n) the agent can bridge into arm moves. Models: `bash vision/scripts/fetch_models.sh` (YOLOv8n), `bash vision/scripts/fetch_sface.sh` (SFace) |
 | [`doc/structurizr/`](doc/structurizr/) | Architecture model and product notes (`python scripts/adl_check.py`) |
 | [`scripts/`](scripts/) | Host setup helpers |
 
@@ -182,6 +211,14 @@ The ESP32-S3 builds also run small neural networks that an agent uploads at runt
 ## Status
 
 Firmware line `agent-runtime-0.18.x`: panel and audio plugins since `0.13.6`, RoArm-M2 arm plugin since `0.16.0`, Claude Hardware Buddy since `0.17.0`, on-device models since `0.18.0`. The hosted console is invite-only while we keep costs and abuse in check. Issues and pull requests are welcome, especially new panel plugins and demo apps.
+
+## Contributing
+
+Issues and pull requests are welcome, especially new panel plugins and demo apps. Architecture decisions live in [`doc/structurizr/`](doc/structurizr/); run `python scripts/adl_check.py` before changing modules. <!-- TODO: test commands to run before a PR (server/tests, jev_servo/tests, rlcd/tests), code style, CONTRIBUTING.md? -->
+
+## Links
+
+[Website](https://onlyclaws.world/) · [Console](https://onlyclaws.world/console/) · [Agent API](https://onlyclaws.world/api/agent/docs) · [skill.md](https://onlyclaws.world/api/agent/skill.md) · [中文 README](README.zh-CN.md) <!-- TODO: community link (Discussions / Discord / WeChat group)? -->
 
 ## License
 
