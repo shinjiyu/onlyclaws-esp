@@ -18,8 +18,9 @@ ESP32 只烧一次固件。之后 AI Agent 通过 HTTP 下发 Lua，<br>
 
 [主页](https://onlyclaws.world/) · [控制台](https://onlyclaws.world/console/) · [Agent API](https://onlyclaws.world/api/agent/docs) · [English](README.md)
 
-<!-- TODO: demo gif — 15–30 秒：Agent 下指令 → 部署 Lua → 板子屏幕/机械臂响应。保存为 docs/assets/demo.gif -->
-<!-- <img src="docs/assets/demo.gif" alt="Agent 向 ESP32-S3 部署 Lua 应用" width="100%"> -->
+<img src="docs/assets/demo.gif" alt="OnlyClaws 在 ESP32-S3 板上的演示" width="100%">
+
+<sub>▶ 完整演示视频：<a href="https://www.bilibili.com/video/BV179p76zEQN/">bilibili.com/video/BV179p76zEQN</a></sub>
 
 <img src="docs/assets/hero.png" alt="Agent 部署到同一块板上的三个应用：贪食蛇、股票看板、旅行青蛙明信片" width="100%">
 
