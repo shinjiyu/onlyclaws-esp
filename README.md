@@ -18,8 +18,9 @@ and the board draws, plays sound, moves a robot arm, reads sensors and reports b
 
 [Website](https://onlyclaws.world/) · [Console](https://onlyclaws.world/console/) · [Agent API](https://onlyclaws.world/api/agent/docs) · [中文](README.zh-CN.md)
 
-<!-- TODO: demo gif — 15–30s clip: agent prompt → Lua deployed → board reacts (panel / arm). Save as docs/assets/demo.gif -->
-<!-- <img src="docs/assets/demo.gif" alt="Agent deploying a Lua app to an ESP32-S3 board" width="100%"> -->
+<img src="docs/assets/demo.gif" alt="OnlyClaws demo on an ESP32-S3 board" width="100%">
+
+<sub>▶ Full demo video: <a href="https://www.bilibili.com/video/BV179p76zEQN/">bilibili.com/video/BV179p76zEQN</a></sub>
 
 <img src="docs/assets/hero.png" alt="Three apps the agent deployed to the same board: Snake, a stock ticker, and a travel-frog postcard" width="100%">
 
