@@ -9,17 +9,34 @@ ESP32 只烧一次固件。之后 AI Agent 通过 HTTP 下发 Lua，<br>
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-1c1d17)](LICENSE)
 ![ESP32-S3](https://img.shields.io/badge/chip-ESP32--S3-e2432a)
-![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.16-1c1d17)
+![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.18-1c1d17)
 ![Lua](https://img.shields.io/badge/apps-Lua-2c2d72)
+[![Stars](https://img.shields.io/github/stars/shinjiyu/onlyclaws-esp?style=social)](https://github.com/shinjiyu/onlyclaws-esp/stargazers)
+![PlatformIO](https://img.shields.io/badge/build-PlatformIO-f5822a)
+![MCP](https://img.shields.io/badge/MCP-stdio-1c1d17)
 [![Agent skill](https://img.shields.io/badge/agent-skill.md-1c1d17)](https://onlyclaws.world/api/agent/skill.md)
 
 [主页](https://onlyclaws.world/) · [控制台](https://onlyclaws.world/console/) · [Agent API](https://onlyclaws.world/api/agent/docs) · [English](README.md)
+
+<img src="docs/assets/demo.gif" alt="OnlyClaws 在 ESP32-S3 板上的演示" width="100%">
+
+<sub>▶ 完整演示视频：<a href="https://www.bilibili.com/video/BV179p76zEQN/">bilibili.com/video/BV179p76zEQN</a></sub>
 
 <img src="docs/assets/hero.png" alt="Agent 部署到同一块板上的三个应用：贪食蛇、股票看板、旅行青蛙明信片" width="100%">
 
 <sub>同一份固件，三个应用，每个都是 Agent 下发的一段 Lua。（图为主页模拟器渲染，实物照片稍后补上。）</sub>
 
 </div>
+
+## 五分钟上手
+
+1. **拿权限** — [申请](https://onlyclaws.world/apply/)托管控制台（人工审核），或[自建控制面](#3-自建控制面)。
+2. **烧录** — `cd rlcd && pio run -e esp32-s3-rlcd-42 -t upload`（环境名见[硬件](#硬件)）。<!-- TODO: 首次开机如何拿到并登记 device ID；Wi-Fi 配网步骤（BLE / AP） -->
+3. **签发令牌** — 在[控制台](https://onlyclaws.world/console/)创建 `oct_…` Agent 令牌。
+4. **交给 Agent** — 把 [skill.md](https://onlyclaws.world/api/agent/skill.md) 和令牌给它。
+5. **看它跑** — Agent 向 `/api/scripts` 发脚本；从 `/api/events` 读事件。
+
+更细的步骤见下方[开始使用](#开始使用)。
 
 ## 为什么
 
@@ -102,6 +119,19 @@ end
 
 完整约定见 [skill.md](https://onlyclaws.world/api/agent/skill.md)，更多应用见 [`demos/`](demos/)。
 
+## Agent 与 MCP 接入
+
+- **任意 Agent，走 HTTP。** 控制面是带 Bearer `oct_…` 的 REST API。把 [skill.md](https://onlyclaws.world/api/agent/skill.md)（函数调用约定见 [Agent API](https://onlyclaws.world/api/agent/docs)）交给 Agent 即可，不必装 SDK。
+- **机械臂用的 MCP（stdio）。** [`jev_servo/`](jev_servo/) 自带面向 Cursor 的 MCP server：
+
+  ```bash
+  bash jev_servo/run_mcp.sh        # 等价于 python3 -m jev_servo mcp；控制台默认 JEV_CONSOLE_URL=http://127.0.0.1:8765
+  ```
+
+  工具：`arm_ensure_console`、`arm_status`、`arm_ops`、`arm_start`（find_any / find_id / follow）、`arm_stop`、`arm_snap`、`arm_faces`。
+  <!-- TODO: Cursor / Claude Desktop 的 mcp.json 示例；是否必须接末端摄像头 -->
+- **Claude 桌面版 Hardware Buddy。** RLCD 板上可经 BLE 配对，用物理按键批准或拒绝 Claude 的工具调用（见[硬件](#硬件)）。
+
 ## 开始使用
 
 按需选一条路。
@@ -125,7 +155,7 @@ pio run -e esp32-s3-rlcd-42 -t upload --upload-port /dev/cu.usbmodem*
 pio device monitor -b 115200
 ```
 
-想保留板上已有的 Wi-Fi 和令牌再刷，用 `bash scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem101`。编译说明和国内镜像脚本见 [`rlcd/DEV.md`](rlcd/DEV.md)。
+想保留板上已有的 Wi-Fi 和令牌再刷，在仓库根目录执行 `bash rlcd/scripts/safe_upload_keep_nvs.sh /dev/cu.usbmodem101`。编译说明和国内镜像脚本见 [`rlcd/DEV.md`](rlcd/DEV.md)。
 
 ### 3. 自建控制面
 
@@ -168,7 +198,7 @@ ESP32-S3 构建还能跑 Agent 运行时下发的小模型，不用重新烧录�
 | [`demos/`](demos/) | 可部署的 Lua 应用：贪食蛇（按键、手机方向键或 HTTP 控制）、实时 RL 训练看板、Wi-Fi 质量监控、机械臂姿态保持、yes/no 语音关键词识别 |
 | [`ml/`](ml/) | 可直接上传到 `/api/ml/models` 的模型（`.tflite` + 元数据） |
 | [`jev_servo/`](jev_servo/) | 主机侧机械臂控制：正运动学、USB 和云端两种通道、MCP 服务、网页控制台 |
-| [`vision/`](vision/) | 主机侧摄像头管线（YuNet、SFace、YOLOv8n），Agent 可以把识别结果转成机械臂动作。模型用 `bash vision/scripts/fetch_models.sh` 下载 |
+| [`vision/`](vision/) | 主机侧摄像头管线（YuNet、SFace、YOLOv8n），Agent 可以把识别结果转成机械臂动作。模型：`bash vision/scripts/fetch_models.sh`（YOLOv8n）、`bash vision/scripts/fetch_sface.sh`（SFace） |
 | [`doc/structurizr/`](doc/structurizr/) | 架构模型和产品说明（`python scripts/adl_check.py`） |
 | [`scripts/`](scripts/) | 主机环境辅助脚本 |
 
@@ -182,6 +212,14 @@ ESP32-S3 构建还能跑 Agent 运行时下发的小模型，不用重新烧录�
 ## 状态
 
 固件版本线 `agent-runtime-0.18.x`：屏和音频插件从 `0.13.6` 开始，RoArm-M2 机械臂插件从 `0.16.0` 开始，Claude Hardware Buddy 从 `0.17.0` 开始，端侧模型从 `0.18.0` 开始。为控制成本和滥用，托管控制台目前邀请制。欢迎提 Issue 和 PR，尤其是新的屏幕插件和示例应用。
+
+## 贡献
+
+欢迎提 Issue 和 Pull Request，尤其是新的屏插件和 demo 应用。架构决策在 [`doc/structurizr/`](doc/structurizr/)；改模块前请跑 `python scripts/adl_check.py`。<!-- TODO: PR 前要跑的测试命令（server/tests、jev_servo/tests、rlcd/tests）、代码风格、是否单独建 CONTRIBUTING.md -->
+
+## 链接
+
+[主页](https://onlyclaws.world/) · [控制台](https://onlyclaws.world/console/) · [Agent API](https://onlyclaws.world/api/agent/docs) · [skill.md](https://onlyclaws.world/api/agent/skill.md) · [English README](README.md) <!-- TODO: Discussions / Discord / 微信群？ -->
 
 ## 许可
 
