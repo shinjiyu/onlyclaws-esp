@@ -130,6 +130,7 @@ end
 
   工具：`arm_ensure_console`、`arm_status`、`arm_ops`、`arm_start`（find_any / find_id / follow）、`arm_stop`、`arm_snap`、`arm_faces`。
   <!-- TODO: Cursor / Claude Desktop 的 mcp.json 示例；是否必须接末端摄像头 -->
+- **小智语音助手。** [`examples/xiaozhi-mcp/`](examples/xiaozhi-mcp/) 把 OnlyClaws 的工具（显示文字、蜂鸣、读传感器和事件、查看/停止脚本、可选的 Lua 部署）接到 [小智](https://github.com/78/xiaozhi-esp32) 的 MCP 接入点，用语音就能控制板子。
 - **Claude 桌面版 Hardware Buddy。** RLCD 板上可经 BLE 配对，用物理按键批准或拒绝 Claude 的工具调用（见[硬件](#硬件)）。
 
 ## 开始使用
