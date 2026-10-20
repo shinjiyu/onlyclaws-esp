@@ -130,6 +130,7 @@ Full contract: [skill.md](https://onlyclaws.world/api/agent/skill.md). More apps
 
   Tools: `arm_ensure_console`, `arm_status`, `arm_ops`, `arm_start` (find_any / find_id / follow), `arm_stop`, `arm_snap`, `arm_faces`.
   <!-- TODO: example mcp.json snippet for Cursor / Claude Desktop, and required hardware (tip camera) -->
+- **Xiaozhi voice assistant.** [`examples/xiaozhi-mcp/`](examples/xiaozhi-mcp/) connects OnlyClaws tools (show text, beep, read sensors/events, script status/stop, opt-in Lua deploy) to a [Xiaozhi](https://github.com/78/xiaozhi-esp32) MCP endpoint, so you can control the board by voice.
 - **Claude desktop Hardware Buddy.** On the RLCD board, pair over BLE to approve or deny Claude tool calls with physical keys (see [Hardware](#hardware)).
 
 ## Get started
