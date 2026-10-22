@@ -13,6 +13,8 @@ def tool_allowed_for_caps(tool: str, caps: list[str]) -> bool:
         return "sensors" in caps
     if name in ("beep", "play_pcm"):
         return "audio" in caps
+    if name == "say":
+        return "tts" in caps
     if name in ("display", "gfx.clear", "gfx.flush"):
         return "panel" in caps
     if name == "arm" or name.startswith("arm."):

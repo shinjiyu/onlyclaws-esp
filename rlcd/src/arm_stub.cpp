@@ -26,6 +26,8 @@ class ArmStub final : public ArmDriver {
     return true;
   }
   bool stop() override { return true; }
+  bool setTorque(bool /*on*/) override { return true; }
+  bool hold() override { return true; }
   const char *name() const override { return "arm-stub"; }
 
  private:

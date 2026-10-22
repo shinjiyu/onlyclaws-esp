@@ -242,6 +242,11 @@ void audioSetPa(bool on) {
   digitalWrite(PIN_AUDIO_PA, on ? HIGH : LOW);
 }
 
+void audioSetDacVolume(uint8_t vol) {
+  if (!ready) return;
+  esWrite(0x32, vol);
+}
+
 bool audioBegin(uint32_t sr) {
   if (ready) return true;
   sampleRate = sr ? sr : 16000;

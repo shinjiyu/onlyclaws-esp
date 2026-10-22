@@ -17,6 +17,9 @@ struct ArmDriver {
   // Stream a target; spd is servo steps/s (0 = firmware default / max).
   virtual bool stream(const ArmPose &target, int spd) = 0;
   virtual bool stop() = 0;
+  // Teach / free-drive: torque off to pose by hand; hold locks at current q.
+  virtual bool setTorque(bool on) = 0;
+  virtual bool hold() = 0;
   virtual const char *name() const = 0;
 };
 

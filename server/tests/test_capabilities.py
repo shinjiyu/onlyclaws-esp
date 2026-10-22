@@ -19,6 +19,8 @@ def test_panel_tools():
     caps = ["core", "panel", "audio"]
     assert tool_allowed_for_caps("gfx.flush", caps)
     assert tool_allowed_for_caps("beep", caps)
+    assert not tool_allowed_for_caps("say", caps)
+    assert tool_allowed_for_caps("say", caps + ["tts"])
     assert not tool_allowed_for_caps("arm.stream", caps)
 
 

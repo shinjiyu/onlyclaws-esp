@@ -57,7 +57,7 @@ Do not embed an 800×480 frame in Lua. Script source max is 24000 bytes; one ful
 
 ### Audio (panel with codec)
 
-`audio.beep(freq, ms)` · `audio.play_pcm(b64)` (int16 LE mono @ `sample_rate()`) · `audio.pa(on)` · `audio.ready()`
+`audio.beep(freq, ms)` · `audio.play_pcm(b64)` (int16 LE mono @ `sample_rate()`) · `audio.pa(on)` · `audio.ready()` · `audio.say(text [, voice])` where voice is `girl`/`童女` or `boy`/`童男` (flat pitch of one voice; needs capability `tts`)
 
 ### Arm (RoArm product, `capabilities` includes `arm`)
 

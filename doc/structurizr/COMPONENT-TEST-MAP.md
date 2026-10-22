@@ -5,7 +5,7 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 
 | Requirement | Component | test_kind | Evidence / procedure |
 |-------------|-----------|-----------|----------------------|
-| REQ-CLOUD-WIRE | device_runtime | manual | Serial log `status ok`; pending delivers invoke |
+| REQ-CLOUD-WIRE | device_runtime | contract | `server/tests/test_device_session.py` (one socket, one in-flight message, requeue on replace). Board: session welcome, then invoke; `/pending` only if the socket is down |
 | REQ-AGENT-INVOKE | control_plane | manual | `POST /api/invoke` with oct_; device executes |
 | REQ-LUA-DEPLOY | script_engine | manual | Deploy snake / mimo-rl; stop; events |
 | REQ-DEVICE-REGISTER | control_plane | manual | UI register + token rotate |
@@ -13,6 +13,7 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 | REQ-PANEL-SURFACE | panel | manual | Both pio envs upload + flush |
 | REQ-LUA-GFX | panel | manual | Lua draw + `gfx.W/H` layout |
 | REQ-AUDIO | audio | manual | beep on RLCD |
+| REQ-TTS-CHILD | audio | unit | `rlcd/tests/test_host_logic.py` (girl/boy name + pitch); hear 我是童女 then 我是童男 on RLCD |
 | REQ-BLE-PAD | ble_pad | manual | Pad URL + BLE dir |
 | REQ-SENSORS | sensors | manual | `sensors.read` / Lua sensors() |
 | REQ-BATTERY-BADGE | panel | unit | `rlcd/tests/test_host_logic.py` (label + pct curve); badge visible on RLCD |

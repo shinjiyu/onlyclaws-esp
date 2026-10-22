@@ -19,7 +19,9 @@ constexpr uint8_t ID_ELBOW = 14;
 constexpr uint8_t ID_HAND = 15;
 constexpr int MIDDLE = 2047;
 constexpr int POS_RANGE = 4096;
-constexpr uint8_t DEFAULT_ACC = 20;
+// STS ACC unit ≈ 100 steps/s². High ACC + short moves → abrupt brake → forearm hunt.
+// Keep default gentle; host may override via JSON "acc" once wired through.
+constexpr uint8_t DEFAULT_ACC = 8;
 
 int posFromRad(double rad) {
   return (int)lround((rad / (2.0 * M_PI)) * POS_RANGE);
@@ -95,9 +97,35 @@ class ArmRoArm final : public ArmDriver {
     return streamUnlocked(p, 200);
   }
 
+  bool setTorque(bool on) override {
+    ArmCtlGuard g;
+    if (!g.ok || !ready_) return false;
+    return setTorqueUnlocked(on);
+  }
+
+  bool hold() override {
+    ArmCtlGuard g;
+    if (!g.ok || !ready_) return false;
+    ArmPose p{};
+    if (!feedbackUnlocked(p)) return false;
+    if (!setTorqueUnlocked(true)) return false;
+    // Soft-lock at the pose the human left it in (no jump).
+    return streamUnlocked(p, 40);
+  }
+
   const char *name() const override { return "roarm-m2-sts"; }
 
  private:
+  bool setTorqueUnlocked(bool on) {
+    bool ok = true;
+    ok &= sts::enableTorque(ID_BASE, on);
+    ok &= sts::enableTorque(ID_SHOULDER_DRIVE, on);
+    ok &= sts::enableTorque(ID_SHOULDER_DRIVEN, on);
+    ok &= sts::enableTorque(ID_ELBOW, on);
+    ok &= sts::enableTorque(ID_HAND, on);
+    return ok;
+  }
+
   bool feedbackUnlocked(ArmPose &out) {
     int16_t b = 0, s = 0, e = 0, h = 0;
     if (!sts::readPos(ID_BASE, b)) return false;
@@ -114,7 +142,15 @@ class ArmRoArm final : public ArmDriver {
 
   bool streamUnlocked(const ArmPose &target, int spd) {
     uint16_t speed = spd > 0 ? (uint16_t)constrain(spd, 1, 4000) : 600;
+    // Gentler ACC at filming cruise (≈80): old ACC=20 made trapezoid ~bang-bang,
+    // elbow/hand hunted at goal → tip-cam forearm shake.
     uint8_t acc = DEFAULT_ACC;
+    if (spd > 0) {
+      int scaled = spd / 25;
+      if (scaled < 4) scaled = 4;
+      if (scaled > 40) scaled = 40;
+      acc = (uint8_t)scaled;
+    }
 
     // Match Waveshare RoArmM2_*JointCtrlRad encodings.
     double base = -constrain((double)target.q[0], -M_PI, M_PI);

@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# OnlyClaws presence MCP (stdio) for Cursor.
+# OnlyClaws RoArm + tip-cam primitive MCP (stdio) for Cursor.
+# Tools: arm_connect/feedback/stream/stop/torque/hold + cam_info/cam_grab
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export JEV_CONSOLE_URL="${JEV_CONSOLE_URL:-http://127.0.0.1:8765}"
+export MCP_GUARD_ROOT="${MCP_GUARD_ROOT:-$HOME/Documents/mcp_guard}"
+export ARM_FRAME_DIR="${ARM_FRAME_DIR:-$MCP_GUARD_ROOT/tmp/arm_frame}"
+export ARM_USB_PORT="${ARM_USB_PORT:-/dev/cu.usbserial-110}"
 cd "$ROOT"
 exec /usr/bin/python3 -m jev_servo mcp

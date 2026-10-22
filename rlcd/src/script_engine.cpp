@@ -17,6 +17,7 @@
 #include "arm_ctl.h"
 #include "pad_ctrl.h"
 #include "panel_display.h"
+#include "tts_esp.h"
 
 #if OC_HAS_PANEL
 #include <qrcode.h>
@@ -198,6 +199,13 @@ int l_sample_rate(lua_State *L) {
 int l_pa(lua_State *L) {
   if (gHost.setPa) gHost.setPa(lua_toboolean(L, 1));
   return 0;
+}
+
+int l_say(lua_State *L) {
+  const char *text = luaL_checkstring(L, 1);
+  const char *voice = luaL_optstring(L, 2, "girl");
+  lua_pushboolean(L, ttsSpeak(text, voice) ? 1 : 0);
+  return 1;
 }
 
 int l_play_pcm_b64(lua_State *L) {
@@ -882,6 +890,7 @@ bool bindApis() {
     ok &= gLua->registerFunction("sample_rate", l_sample_rate);
     ok &= gLua->registerFunction("pa", l_pa);
     ok &= gLua->registerFunction("play_pcm", l_play_pcm_b64);
+    ok &= gLua->registerFunction("say", l_say);
   }
   if (ocCapBle() || portable) {
     ok &= gLua->registerFunction("ble_dir", l_ble_dir);
@@ -958,7 +967,7 @@ end
 audio = audio or {}
 oc.beep = beep; oc.play_pcm = play_pcm
 audio.beep = beep; audio.ready = audio_ready; audio.sample_rate = sample_rate
-audio.pa = pa; audio.play_pcm = play_pcm
+audio.pa = pa; audio.play_pcm = play_pcm; audio.say = say
 )LUA";
   }
   if (ocCapBle() || portable) {
@@ -1204,6 +1213,17 @@ bool scriptEngineInvokeJson(const char *json) {
       String data = "{}";
       if (!step["data"].isNull()) serializeJson(step["data"], data);
       return gHost.emitEvent(step["name"] | "event", data.c_str());
+    }
+    if (!strcmp(tool, "say")) {
+      TtsVoiceId id = TTS_VOICE_GIRL;
+      ttsParseVoice(step["voice"] | "girl", &id);
+      TtsTune tune = ttsTuneDefaults(id);
+      if (!step["speed"].isNull()) tune.speed = step["speed"].as<int>();
+      if (!step["pitch"].isNull()) tune.pitch = step["pitch"].as<float>();
+      if (!step["stretch"].isNull()) tune.stretch = step["stretch"].as<int>();
+      if (!step["volume"].isNull()) tune.volumeDb = step["volume"].as<int>();
+      tune = ttsClampTune(tune.speed, tune.pitch, tune.stretch, tune.volumeDb);
+      return ttsSpeakTuned(step["text"] | "", tune);
     }
     if (!strcmp(tool, "play_pcm") && step["b64"]) {
       // Reuse lua binding path

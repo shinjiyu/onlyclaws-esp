@@ -2,6 +2,7 @@
 // battery badge helpers and the ml model manifest. Built and run by
 // test_host_logic.py; argv[1] is a manifest the server code produced.
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -10,6 +11,7 @@
 #include "claude_proto.h"
 #include "ml_manifest.h"
 #include "oc_battery.h"
+#include "tts_voice.h"
 
 static int gFailures = 0;
 
@@ -315,8 +317,64 @@ static void testServerManifest(const char *path) {
   CHECK(m.labels.size() == 4 && m.sha256.size() == 64);
 }
 
+static void testTtsVoice() {
+  TtsVoiceId id = TTS_VOICE_BOY;
+  CHECK(ttsParseVoice(nullptr, &id) && id == TTS_VOICE_GIRL);
+  CHECK(ttsParseVoice("", &id) && id == TTS_VOICE_GIRL);
+  CHECK(ttsParseVoice("girl", &id) && id == TTS_VOICE_GIRL);
+  CHECK(ttsParseVoice("GIRL", &id) && id == TTS_VOICE_GIRL);
+  CHECK(ttsParseVoice("童女", &id) && id == TTS_VOICE_GIRL);
+  CHECK(ttsParseVoice("tongnv", &id) && id == TTS_VOICE_GIRL);
+  CHECK(ttsParseVoice("boy", &id) && id == TTS_VOICE_BOY);
+  CHECK(ttsParseVoice("童男", &id) && id == TTS_VOICE_BOY);
+  CHECK(ttsParseVoice("tongnan", &id) && id == TTS_VOICE_BOY);
+  CHECK(!ttsParseVoice("xiaole", &id));
+  CHECK(ttsPitchRatio(TTS_VOICE_GIRL) > 1.f);
+  CHECK(ttsPitchRatio(TTS_VOICE_BOY) < 1.f);
+  const int16_t in[5] = {0, 1000, 2000, 3000, 4000};
+  int16_t out[8] = {};
+  const size_t n = ttsPitchShift(in, 5, 2.f, out, 8);
+  CHECK(n == 3);
+  CHECK(out[0] == 0 && out[1] == 2000 && out[2] == 4000);
+  CHECK(ttsPitchOutCount(1000, ttsPitchRatio(TTS_VOICE_GIRL)) < 1000);
+  CHECK(ttsPitchOutCount(1000, ttsPitchRatio(TTS_VOICE_BOY)) > 1000);
+  const TtsTune girl = ttsTuneDefaults(TTS_VOICE_GIRL);
+  CHECK(girl.speed == 2 && girl.stretch == 1 && girl.volumeDb == -10);
+  CHECK(girl.pitch > 1.18f && girl.pitch < 1.20f);
+  const TtsTune boy = ttsTuneDefaults(TTS_VOICE_BOY);
+  CHECK(boy.speed == 4 && boy.stretch == 2 && boy.volumeDb == -12);
+  const TtsTune clamped = ttsClampTune(9, 3.f, 1, -100);
+  CHECK(clamped.speed == 5 && clamped.stretch == 1 && clamped.volumeDb == -36);
+  CHECK(clamped.pitch > 1.39f && clamped.pitch < 1.41f);
+  CHECK(ttsDacFromDb(-12) == 0xA7);
+  CHECK(ttsDacFromDb(0) == 0xBF);
+
+  // 200 Hz at 16 kHz. Stretch must last about twice as long and keep the period.
+  constexpr size_t kIn = 3200;
+  int16_t sine[kIn];
+  for (size_t i = 0; i < kIn; ++i) {
+    sine[i] = (int16_t)(sinf(2.0 * 3.1415926535 * 200.0 * (double)i / 16000.0) * 16000.0);
+  }
+  int16_t stretched[kIn * 2 + 512];
+  const size_t sn = ttsTimeStretch2x(sine, kIn, stretched, sizeof(stretched) / sizeof(stretched[0]));
+  CHECK(sn > kIn * 17 / 10 && sn < kIn * 23 / 10);
+  size_t crossings = 0;
+  const size_t a = sn / 4;
+  const size_t b = sn - sn / 4;
+  for (size_t i = a + 1; i < b; ++i) {
+    if ((stretched[i - 1] < 0 && stretched[i] >= 0) ||
+        (stretched[i - 1] >= 0 && stretched[i] < 0)) {
+      ++crossings;
+    }
+  }
+  const double samples = (double)(b - a);
+  const double period = crossings ? samples / ((double)crossings / 2.0) : 0;
+  CHECK(period > 60.0 && period < 100.0);
+}
+
 int main(int argc, char **argv) {
   testHeartbeatAndPrompt();
+  testTtsVoice();
   testCommands();
   testTimeTurnAndJunk();
   testBattery();

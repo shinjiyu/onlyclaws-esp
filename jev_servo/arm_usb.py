@@ -7,6 +7,12 @@ Wire protocol (one JSON line each way), handled by rlcd arm_usb_serial.cpp:
 
   → {"tool":"arm.stream","q":[b,s,e,h],"spd":200}
   ← {"ok":true}
+
+  → {"tool":"arm.torque","on":false}
+  ← {"ok":true}
+
+  → {"tool":"arm.hold"}
+  ← {"ok":true,"q":[b,s,e,h]}
 """
 
 from __future__ import annotations
@@ -120,3 +126,18 @@ class ArmUsb:
         if not data.get("ok"):
             raise ArmUsbError(f"stop failed: {data}")
         return "usb_ok"
+
+    def torque(self, on: bool) -> str:
+        data = self._ask({"tool": "arm.torque", "on": bool(on)}, timeout_s=2.0)
+        if not data.get("ok"):
+            raise ArmUsbError(f"torque failed: {data}")
+        return "usb_ok"
+
+    def hold(self) -> list[float]:
+        data = self._ask({"tool": "arm.hold"}, timeout_s=3.0)
+        if not data.get("ok"):
+            raise ArmUsbError(f"hold failed: {data}")
+        q = data.get("q")
+        if isinstance(q, list) and len(q) >= 4:
+            return [float(x) for x in q[:4]]
+        return self.feedback()

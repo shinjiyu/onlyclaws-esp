@@ -13,6 +13,7 @@ void capabilityFillJson(JsonArray out) {
   if (ocCapSensors()) out.add("sensors");
   if (ocCapArm()) out.add("arm");
   if (ocCapMl()) out.add("ml");
+  if (ocCapTts()) out.add("tts");
 }
 
 bool capabilityAllowsTool(const char *tool) {
@@ -27,6 +28,7 @@ bool capabilityAllowsTool(const char *tool) {
   if (!strcmp(tool, "beep") || !strcmp(tool, "play_pcm")) {
     return ocCapAudio();
   }
+  if (!strcmp(tool, "say")) return ocCapTts();
   if (!strcmp(tool, "display") || !strcmp(tool, "gfx.flush") ||
       !strcmp(tool, "gfx.clear")) {
     return ocCapPanel();

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <WebSocketsClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <esp_netif.h>
@@ -25,11 +26,12 @@
 #include "panel_plugin.h"
 #include "script_engine.h"
 #include "sensors.h"
+#include "tts_esp.h"
 #include "wifi_ap_prov.h"
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.18.0";
+constexpr const char *FW_VERSION = "agent-runtime-0.19.1";
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr uint32_t BATTERY_INTERVAL_MS = 30UL * 1000UL;
 
@@ -294,11 +296,16 @@ void hostWifiSsid(char *out, size_t n) {
 }
 void hostOnSensors(const SensorReading &r) { lastSensors = r; }
 
-void postStatus() {
+void queueSessionFrame(String &slot, const String &frame);
+extern String sessionAck;
+extern String sessionStatus;
+extern volatile bool sessionReady;
+extern WebSocketsClient session;
+
+void fillStatus(DynamicJsonDocument &doc) {
   SensorReading r;
   if (sensorsRead(r)) lastSensors = r;
   lastSensorMs = millis();
-  DynamicJsonDocument doc(1024);
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
   doc["fw"] = FW_VERSION;
@@ -332,13 +339,42 @@ void postStatus() {
   if (ocCapArm() && armDriver()) meta["arm"] = armDriver()->name();
   JsonArray caps = meta.createNestedArray("capabilities");
   capabilityFillJson(caps);
+}
+
+void postStatus() {
+  DynamicJsonDocument doc(1024);
+  fillStatus(doc);
+  if (sessionReady) {
+    doc["type"] = "status";
+    String body;
+    serializeJson(doc, body);
+    queueSessionFrame(sessionStatus, body);
+    Serial.println("status session");
+    return;
+  }
   String body;
   serializeJson(doc, body);
   String out;
   if (httpJson("POST", apiUrl("/status"), body, out, 15000)) Serial.println("status ok");
 }
 
+void sendHello() {
+  DynamicJsonDocument doc(1280);
+  fillStatus(doc);
+  doc["type"] = "hello";
+  doc["token"] = apiDeviceToken();
+  String body;
+  serializeJson(doc, body);
+  session.sendTXT(body);
+}
+
 void ackMessage(const String &messageId, bool ok, uint32_t ms) {
+  if (sessionReady) {
+    String body = String("{\"type\":\"ack\",\"message_id\":\"") + messageId +
+                  "\",\"ok\":" + (ok ? "true" : "false") + ",\"ms\":" + String(ms) + "}";
+    queueSessionFrame(sessionAck, body);
+    return;
+  }
   String body = String("{\"message_id\":\"") + messageId +
                 "\",\"ok\":" + (ok ? "true" : "false") + ",\"ms\":" + String(ms) + "}";
   String out;
@@ -380,10 +416,16 @@ bool loadLuaFromEnvelope(const String &scriptIdIn, const String &bodyIn) {
 bool handlePayload(const String &json) {
   DynamicJsonDocument doc(16384);
   if (deserializeJson(doc, json)) return false;
-  if (!doc["success"].as<bool>() || doc["message"].isNull()) return false;
+  const bool sessionFrame = doc["type"] == "message";
+  if (!sessionFrame && (!doc["success"].as<bool>() || doc["message"].isNull())) return false;
+  if (sessionFrame && doc["message"].isNull()) return false;
   JsonObject msg = doc["message"].as<JsonObject>();
   String id = msg["id"] | "";
-  if (!id.length() || lastShownId == id) return true;
+  if (!id.length()) return false;
+  if (lastShownId == id) {
+    ackMessage(id, true, 0);
+    return true;
+  }
 
   const char *type = msg["type"] | "bitmap";
   Serial.printf("new message id=%s type=%s\n", id.c_str(), type);
@@ -465,27 +507,138 @@ void IRAM_ATTR onKeyIsr() {
 char netJsonBuf[16384];
 volatile bool netJsonReady = false;
 
+WebSocketsClient session;
+String sessionHeaders;
+SemaphoreHandle_t sessionMu = nullptr;
+String sessionAck;
+String sessionStatus;
+volatile bool sessionConnected = false;
+volatile bool sessionReady = false;
+volatile bool sessionNeedHello = false;
+uint32_t sessionHelloAt = 0;
+
+void queueSessionFrame(String &slot, const String &frame) {
+  if (!sessionMu) sessionMu = xSemaphoreCreateMutex();
+  if (xSemaphoreTake(sessionMu, pdMS_TO_TICKS(50)) != pdTRUE) return;
+  slot = frame;
+  xSemaphoreGive(sessionMu);
+}
+
+bool frameStartsWith(const uint8_t *payload, size_t length, const char *lit) {
+  const size_t n = strlen(lit);
+  return payload && length >= n && memcmp(payload, lit, n) == 0;
+}
+
+void onSession(WStype_t type, uint8_t *payload, size_t length) {
+  if (type == WStype_DISCONNECTED) {
+    sessionConnected = false;
+    sessionReady = false;
+    sessionHelloAt = 0;
+    return;
+  }
+  if (type == WStype_CONNECTED) {
+    sessionConnected = true;
+    sessionReady = false;
+    sessionNeedHello = true;
+    return;
+  }
+  if (type != WStype_TEXT || !payload || !length || length >= sizeof(netJsonBuf)) return;
+  if (frameStartsWith(payload, length, "{\"type\":\"welcome\"")) {
+    sessionReady = true;
+    return;
+  }
+  if (frameStartsWith(payload, length, "{\"type\":\"message\"")) {
+    if (netJsonReady) return;
+    memcpy(netJsonBuf, payload, length);
+    netJsonBuf[length] = 0;
+    netJsonReady = true;
+  }
+}
+
 void netTask(void *) {
+  bool started = false;
+  uint32_t startedAt = 0;
   uint32_t lastStatus = 0;
+  uint32_t lastPoll = 0;
   for (;;) {
     if (WiFi.status() != WL_CONNECTED) {
+      if (started) {
+        session.disconnect();
+        started = false;
+        sessionConnected = false;
+        sessionReady = false;
+      }
       vTaskDelay(pdMS_TO_TICKS(200));
       continue;
     }
-    if (!netJsonReady) {
-      String out;
-      if (httpJson("GET", apiUrl("/pending"), "", out, 6000)) {
-        if (out.length() && out.length() < sizeof(netJsonBuf) - 1) {
-          memcpy(netJsonBuf, out.c_str(), out.length() + 1);
-          netJsonReady = true;
-        }
-      }
+    if (!started) {
+      const ApiConfig &cfg = apiConfigGet();
+      String path = cfg.pathPrefix + "/api/v1/device/" + cfg.deviceId + "/session";
+      // The library appends its own CRLF. A trailing CRLF here ends the
+      // HTTP headers early and the rest of the handshake is read as a frame.
+      sessionHeaders = String("Authorization: Bearer ") + apiDeviceToken();
+      session.setExtraHeaders(sessionHeaders.c_str());
+      session.beginSSL(cfg.host.c_str(), 443, path.c_str(), "", "");
+      session.onEvent(onSession);
+      session.setReconnectInterval(5000);
+      started = true;
+      startedAt = millis();
     }
-    if (millis() - lastStatus > STATUS_INTERVAL_MS) {
+    String ack;
+    String status;
+    if (sessionMu && xSemaphoreTake(sessionMu, pdMS_TO_TICKS(20)) == pdTRUE) {
+      ack = sessionAck;
+      status = sessionStatus;
+      sessionAck = "";
+      sessionStatus = "";
+      xSemaphoreGive(sessionMu);
+    }
+    if (sessionConnected && sessionNeedHello) {
+      sendHello();
+      sessionNeedHello = false;
+      sessionHelloAt = millis();
+    }
+    // A second TLS client (poll / status) aborts the session socket.
+    if (sessionConnected && !sessionReady && sessionHelloAt &&
+        millis() - sessionHelloAt > 8000) {
+      session.disconnect();
+      sessionConnected = false;
+      sessionReady = false;
+    }
+    if (sessionConnected && ack.length()) session.sendTXT(ack);
+    if (sessionConnected && status.length()) session.sendTXT(status);
+    session.loop();
+    // HTTP TLS while the socket is opening aborts the handshake before nginx
+    // ever sees it. Hold HTTP for the attempt, and for as long as it stays up.
+    const bool holdHttp =
+        sessionConnected || (started && millis() - startedAt < 12000);
+    if (!holdHttp) {
+      if (started) {
+        session.disconnect();
+        started = false;
+        sessionConnected = false;
+        sessionReady = false;
+        sessionHelloAt = 0;
+      }
+      if (!netJsonReady && millis() - lastPoll > 2500) {
+        String out;
+        if (httpJson("GET", apiUrl("/pending"), "", out, 6000)) {
+          if (out.length() && out.length() < sizeof(netJsonBuf) - 1) {
+            memcpy(netJsonBuf, out.c_str(), out.length() + 1);
+            netJsonReady = true;
+          }
+        }
+        lastPoll = millis();
+      }
+      if (millis() - lastStatus > STATUS_INTERVAL_MS) {
+        postStatus();
+        lastStatus = millis();
+      }
+    } else if (sessionReady && millis() - lastStatus > STATUS_INTERVAL_MS) {
       postStatus();
       lastStatus = millis();
     }
-    vTaskDelay(pdMS_TO_TICKS(2500));
+    vTaskDelay(pdMS_TO_TICKS(sessionReady ? 20 : 50));
   }
 }
 
@@ -529,7 +682,7 @@ void setupImpl() {
     }
   }
 
-  if (audioPluginBegin(16000)) audioPluginBeep(880, 80);
+  if (audioPluginBegin(16000)) audioPluginBeep(880, 40);
   MlHooks mlHooks;
   if (audioPluginMicReady()) mlHooks.micRead = audioPluginMicRead;
   mlBegin(mlHooks);
@@ -568,7 +721,7 @@ void setupImpl() {
 
   Serial.printf("ready. pad http://%s/ panel=%s audio=%s\n",
                 WiFi.localIP().toString().c_str(), panelPluginName(), audioPluginName());
-  xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(netTask, "net", 12288, nullptr, 1, nullptr, 0);
 }
 
 void loopImpl() {
@@ -611,6 +764,7 @@ void loopImpl() {
   }
 
   armUsbSerialPoll();
+  ttsSerialPoll();
   // A Claude card owns the panel; the script resumes when it closes.
   if (!claudeBuddyOwnsScreen()) scriptEngineTick();
 

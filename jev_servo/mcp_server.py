@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""Presence / tip-cam arm MCP for Cursor (stdio JSON-RPC, no third-party deps).
+"""RoArm + tip-cam primitive MCP for Cursor (stdio JSON-RPC).
 
-Talks to the local jev_servo console HTTP API (default http://127.0.0.1:8765).
-If the console is down, tools that need it will try to start it once.
+Exposes low-level USB tools only — not presence loops, named poses, or recording.
+
+  arm.connect / disconnect / feedback / stream / stop / torque / hold
+  cam.info / grab
 
 Env:
-  JEV_CONSOLE_URL   default http://127.0.0.1:8765
-  JEV_MCP_NO_SPAWN  if set, never auto-start the console
+  ARM_USB_PORT      default /dev/cu.usbserial-110 (else auto)
+  ARM_FRAME_DIR     default ~/Documents/mcp_guard/tmp/arm_frame  (QuietArmUsb)
+  MCP_GUARD_ROOT    default ~/Documents/mcp_guard               (tip-cam LiveCam)
+  ARM_MCP_NO_LIMIT  if set, skip joint absolute/step clamps (dangerous)
 """
 
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
@@ -27,9 +27,26 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "onlyclaws-presence", "version": "0.1.0"}
-BASE_URL = os.environ.get("JEV_CONSOLE_URL", "http://127.0.0.1:8765").rstrip("/")
-_NO_SPAWN = bool(os.environ.get("JEV_MCP_NO_SPAWN"))
+SERVER_INFO = {"name": "onlyclaws-presence", "version": "0.3.0"}
+
+_DEFAULT_GUARD = Path.home() / "Documents" / "mcp_guard"
+MCP_GUARD_ROOT = Path(
+    os.environ.get("MCP_GUARD_ROOT") or _DEFAULT_GUARD
+).expanduser().resolve()
+ARM_FRAME_DIR = Path(
+    os.environ.get("ARM_FRAME_DIR") or (MCP_GUARD_ROOT / "tmp" / "arm_frame")
+).expanduser().resolve()
+DEFAULT_PORT = os.environ.get("ARM_USB_PORT", "/dev/cu.usbserial-110")
+_NO_LIMIT = bool(os.environ.get("ARM_MCP_NO_LIMIT"))
+
+# Absolute joint limits (radians). Same spirit as roarm_ident.hw.ABS_LIMIT + shoot J0_MAX.
+ABS_LO = [-1.50, -1.35, -0.85, -1.60]
+ABS_HI = [1.65, 1.35, 2.60, 1.60]
+# Max |Δq| per stream call (radians).
+STEP_MAX = [0.45, 0.22, 0.28, 0.60]
+
+_arm: Any = None  # QuietArmUsb | ArmUsb
+_arm_port: str | None = None
 
 
 def eprint(*args: Any) -> None:
@@ -43,216 +60,328 @@ def tool_result(text: str, is_error: bool = False) -> dict[str, Any]:
     }
 
 
-def _http(method: str, path: str, body: dict[str, Any] | None = None, timeout: float = 8.0) -> Any:
-    url = BASE_URL + path
-    data = None
-    headers = {"Accept": "application/json", "User-Agent": "onlyclaws-presence-mcp/0.1"}
-    if body is not None:
-        data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", "replace")
-            status = resp.status
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", "replace")
-        status = e.code
-    except urllib.error.URLError as e:
-        raise ConnectionError(f"console unreachable at {BASE_URL}: {e}") from e
-    try:
-        parsed: Any = json.loads(raw) if raw else {}
-    except json.JSONDecodeError:
-        parsed = {"raw": raw[:2000]}
-    if isinstance(parsed, dict):
-        parsed.setdefault("http_status", status)
-    return parsed
+def _ok(obj: Any) -> dict[str, Any]:
+    return tool_result(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
-def console_up() -> bool:
-    try:
-        _http("GET", "/api/status?after=0", timeout=1.5)
-        return True
-    except Exception:
-        return False
+def _err(msg: str) -> dict[str, Any]:
+    return tool_result(msg, is_error=True)
 
 
-def ensure_console() -> dict[str, Any]:
-    if console_up():
-        return {"ok": True, "running": True, "spawned": False, "url": BASE_URL}
-    if _NO_SPAWN:
-        raise RuntimeError(
-            f"console not running at {BASE_URL}; start: "
-            f"python3 -m jev_servo console --host 127.0.0.1 --http-port 8765"
-        )
-    eprint(f"spawning console at {BASE_URL} …")
-    host = "127.0.0.1"
-    port = 8765
-    try:
-        u = urllib.parse.urlparse(BASE_URL)
-        if u.hostname:
-            host = u.hostname
-        if u.port:
-            port = u.port
-    except Exception:
-        pass
-    log_path = _ROOT / "jev_servo" / "runs" / "mcp-console.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_f = open(log_path, "a", encoding="utf-8")  # noqa: SIM115 — kept for child lifetime
-    subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "jev_servo",
-            "console",
-            "--host",
-            host,
-            "--http-port",
-            str(port),
-        ],
-        cwd=str(_ROOT),
-        stdout=log_f,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    for _ in range(40):
-        time.sleep(0.25)
-        if console_up():
+def _ensure_paths() -> None:
+    for p in (str(MCP_GUARD_ROOT), str(ARM_FRAME_DIR)):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+
+def _round_q(q: list[float]) -> list[float]:
+    return [round(float(x), 4) for x in q[:4]]
+
+
+def _clamp_target(cur: list[float], target: list[float]) -> tuple[list[float], list[str]]:
+    """Return (clamped_q, warnings)."""
+    if _NO_LIMIT:
+        return [float(x) for x in target[:4]], []
+    out: list[float] = []
+    warns: list[str] = []
+    for i in range(4):
+        t = float(target[i])
+        c = float(cur[i])
+        lo, hi = ABS_LO[i], ABS_HI[i]
+        if t < lo:
+            warns.append(f"q[{i}] {t:.3f} < {lo}; clamped")
+            t = lo
+        elif t > hi:
+            warns.append(f"q[{i}] {t:.3f} > {hi}; clamped")
+            t = hi
+        step = STEP_MAX[i]
+        if abs(t - c) > step + 1e-6:
+            t2 = c + step if t > c else c - step
+            warns.append(f"q[{i}] step {t - c:+.3f} > ±{step}; limited to {t2:.3f}")
+            t = t2
+        out.append(t)
+    return out, warns
+
+
+def _get_arm():
+    global _arm
+    if _arm is None:
+        raise RuntimeError("arm not connected; call arm_connect first")
+    return _arm
+
+
+def arm_connect(port: str | None = None) -> dict[str, Any]:
+    global _arm, _arm_port
+    if _arm is not None:
+        try:
+            q = _arm.feedback()
             return {
                 "ok": True,
-                "running": True,
-                "spawned": True,
-                "url": BASE_URL,
-                "log": str(log_path),
+                "already": True,
+                "port": _arm_port,
+                "q": _round_q(q),
             }
-    raise RuntimeError(f"console failed to start; see {log_path}")
+        except Exception:
+            try:
+                _arm.close()
+            except Exception:
+                pass
+            _arm = None
+            _arm_port = None
+
+    _ensure_paths()
+    port = port or DEFAULT_PORT
+    try:
+        from arm_quiet import QuietArmUsb  # type: ignore
+
+        arm = QuietArmUsb(port=port)
+    except Exception as exc:
+        # Fallback: plain ArmUsb auto-port
+        from jev_servo.arm_usb import ArmUsb, find_port
+
+        use = port if Path(port).exists() else find_port()
+        eprint(f"QuietArmUsb failed ({exc}); falling back to ArmUsb on {use}")
+        arm = ArmUsb(port=use)
+        port = use
+
+    q = arm.feedback()
+    _arm = arm
+    _arm_port = port
+    return {"ok": True, "already": False, "port": port, "q": _round_q(q)}
 
 
-def _slim_status(st: dict[str, Any], *, log_limit: int = 12) -> dict[str, Any]:
-    logs = st.get("logs") or []
-    slim_logs = []
-    for e in logs[-log_limit:]:
-        if not isinstance(e, dict):
-            continue
-        slim_logs.append(
-            {
-                "seq": e.get("seq"),
-                "kind": e.get("kind"),
-                "line": (e.get("line") or "")[:240],
-            }
+def arm_disconnect() -> dict[str, Any]:
+    global _arm, _arm_port
+    if _arm is None:
+        return {"ok": True, "was_open": False}
+    try:
+        _arm.close()
+    finally:
+        _arm = None
+        _arm_port = None
+    return {"ok": True, "was_open": True}
+
+
+def _cam_module():
+    _ensure_paths()
+    from roarm_ident.hw import LiveCam, resolve_usb_cam  # type: ignore
+
+    return LiveCam, resolve_usb_cam
+
+
+def cam_info() -> dict[str, Any]:
+    import subprocess
+
+    prefer = None
+    try:
+        _, resolve_usb_cam = _cam_module()
+        prefer = resolve_usb_cam()
+    except Exception as exc:
+        prefer = f"(resolve failed: {exc})"
+
+    cams: list[dict[str, str]] = []
+    try:
+        raw = subprocess.check_output(
+            ["system_profiler", "SPCameraDataType", "-json"], text=True
         )
-    lt = st.get("last_tick") or {}
+        data = json.loads(raw)
+        for cam in data.get("SPCameraDataType") or []:
+            uid = str(cam.get("spcamera_unique-id") or "")
+            name = str(cam.get("_name") or "")
+            if uid:
+                cams.append({"name": name, "unique_id": uid})
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "prefer": prefer}
+
+    tip = [c for c in cams if "0bda3035" in c["unique_id"].lower()]
     return {
-        "running": st.get("running"),
-        "tick_count": st.get("tick_count"),
-        "config": st.get("config"),
-        "scene": st.get("scene"),
-        "last_error": st.get("last_error"),
-        "last_tick": {
-            "mission": (lt.get("search") or {}).get("mission") if isinstance(lt, dict) else None,
-            "choices": lt.get("choices") if isinstance(lt, dict) else None,
-            "q": lt.get("q") if isinstance(lt, dict) else None,
-            "stream_status": lt.get("stream_status") if isinstance(lt, dict) else None,
-        }
-        if lt
-        else None,
-        "logs": slim_logs,
-        "url": BASE_URL,
+        "ok": True,
+        "prefer_tip": prefer,
+        "tip_candidates": tip,
+        "all": cams,
     }
+
+
+def cam_grab(
+    *,
+    out: str | None = None,
+    width: int = 960,
+    identify: bool = False,
+) -> dict[str, Any]:
+    import cv2
+
+    LiveCam, resolve_usb_cam = _cam_module()
+    uid = resolve_usb_cam()
+    t0 = time.perf_counter()
+    with LiveCam(uid) as cam:
+        for _ in range(4):
+            cam.bgr()
+        bgr, _gen = cam.bgr()
+    h, w = bgr.shape[:2]
+    if width and w > width:
+        bgr = cv2.resize(bgr, (width, int(h * width / w)))
+        h, w = bgr.shape[:2]
+
+    if out:
+        path = Path(out).expanduser()
+    else:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = ARM_FRAME_DIR / "rec" / "mcp_grabs" / f"tip_{stamp}.jpg"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(path), bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "unique_id": uid,
+        "path": str(path),
+        "size": [w, h],
+        "ms": int((time.perf_counter() - t0) * 1000),
+    }
+
+    if identify:
+        # Optional: scene string via pathway-B. Still a single grab, not a loop.
+        from jev_servo.presence import presence_from_scene
+        from jev_servo.vision_snap import snap_scene
+
+        snap = snap_scene(
+            image=path, perceive="person", identify=True, enroll_unknown=True
+        )
+        scene = snap.get("scene") or ""
+        result["scene"] = scene
+        result["presence"] = presence_from_scene(scene).as_dict()
+
+    return result
 
 
 TOOLS: list[dict[str, Any]] = [
     {
-        "name": "arm_ensure_console",
+        "name": "arm_help",
         "description": (
-            "Ensure the local presence console is up (http://127.0.0.1:8765). "
-            "Starts it in the background if needed."
+            "Primitive RoArm+tip-cam MCP help. Tools are USB-level only "
+            "(connect/feedback/stream/stop/torque/hold + cam grab). "
+            "No find_any / goto / record wrappers."
         ),
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
-        "name": "arm_status",
+        "name": "arm_connect",
         "description": (
-            "Status of the tip-cam presence loop: running, ticks, config, scene, "
-            "last choices, recent log lines."
+            "Open USB serial to the RoArm ESP32 (QuietArmUsb: DTR/RTS low). "
+            "Call once before stream/feedback. Returns current q radians."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "log_limit": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 50,
-                    "default": 12,
-                    "description": "How many recent log lines to include",
+                "port": {
+                    "type": "string",
+                    "description": "Serial device, default /dev/cu.usbserial-110",
                 }
             },
             "additionalProperties": False,
         },
     },
     {
-        "name": "arm_ops",
-        "description": "List finite presence ops (find_any / find_id / follow) and help text.",
+        "name": "arm_disconnect",
+        "description": "Close the USB serial session.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
-        "name": "arm_start",
+        "name": "arm_feedback",
         "description": (
-            "Start a presence op on the physical arm (MOVES THE ARM). "
-            "Ops: find_any (stow→sweep→follow any face), find_id (need face_id), "
-            "follow (no global sweep). Requires console; will spawn it if down."
+            "Read current joint radians q=[base,shoulder,elbow,wrist]. "
+            "Does not move. Requires arm_connect."
+        ),
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "arm_stream",
+        "description": (
+            "MOVES THE ARM. Send arm.stream target q (4 radians) and spd "
+            "(servo steps/s, ~50-800). Absolute and per-call step clamps apply "
+            "unless ARM_MCP_NO_LIMIT=1. Requires arm_connect. "
+            "Prefer small steps; read feedback between moves."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "op": {
-                    "type": "string",
-                    "enum": ["find_any", "find_id", "follow"],
-                    "default": "find_any",
+                "q": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "description": "Target [base, shoulder, elbow, wrist] radians",
                 },
-                "face_id": {
+                "spd": {
                     "type": "integer",
-                    "minimum": 1,
-                    "description": "Required for find_id; optional filter for follow",
+                    "minimum": 20,
+                    "maximum": 800,
+                    "default": 120,
                 },
-                "dry_run": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "If true, do not stream to the arm",
-                },
-                "spd": {"type": "integer", "minimum": 50, "maximum": 800, "default": 200},
-                "transport": {"type": "string", "enum": ["usb", "cloud"], "default": "usb"},
             },
+            "required": ["q"],
             "additionalProperties": False,
         },
     },
     {
         "name": "arm_stop",
-        "description": "Stop the running presence loop (finishes current tick).",
+        "description": "Send arm.stop on the USB protocol (halt motion). Requires arm_connect.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
-        "name": "arm_snap",
+        "name": "arm_torque",
         "description": (
-            "Grab one tip-cam frame and run YuNet(+optional SFace). Does not move the arm. "
-            "Returns scene string and presence fields."
+            "Enable/disable servo torque (arm.torque). on=false lets you drag the arm; "
+            "call arm_hold or arm_torque on=true before leaving. Requires arm_connect."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "identify": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Match / enroll SFace gallery ids",
-                }
+                "on": {"type": "boolean", "description": "true=engage, false=free drag"}
             },
+            "required": ["on"],
             "additionalProperties": False,
         },
     },
     {
-        "name": "arm_faces",
-        "description": "List enrolled tip-cam face gallery ids/names (SFace).",
+        "name": "arm_hold",
+        "description": (
+            "Re-engage hold at the current pose (arm.hold). Use after torque off / drag. "
+            "Returns q. Requires arm_connect."
+        ),
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "cam_info",
+        "description": "List Mac cameras and the preferred tip-cam Unique ID (Realtek 0bda3035).",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "cam_grab",
+        "description": (
+            "Grab one tip-cam JPEG to disk. Does not move the arm. "
+            "Optional identify=true runs YuNet+SFace once on that frame."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "out": {
+                    "type": "string",
+                    "description": "JPEG path; default ARM_FRAME_DIR/rec/mcp_grabs/tip_*.jpg",
+                },
+                "width": {
+                    "type": "integer",
+                    "minimum": 160,
+                    "maximum": 1920,
+                    "default": 960,
+                },
+                "identify": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "If true, also return scene/presence from one-shot vision",
+                },
+            },
+            "additionalProperties": False,
+        },
     },
 ]
 
@@ -260,71 +389,120 @@ TOOLS: list[dict[str, Any]] = [
 def call_tool(name: str, arguments: Optional[dict[str, Any]]) -> dict[str, Any]:
     args = arguments or {}
     try:
-        if name == "arm_ensure_console":
-            return tool_result(json.dumps(ensure_console(), ensure_ascii=False, indent=2))
-
-        if name == "arm_ops":
-            ensure_console()
-            body = _http("GET", "/api/ops")
-            return tool_result(json.dumps(body, ensure_ascii=False, indent=2))
-
-        if name == "arm_status":
-            ensure_console()
-            st = _http("GET", "/api/status?after=0")
-            lim = int(args.get("log_limit") or 12)
-            return tool_result(
-                json.dumps(_slim_status(st, log_limit=lim), ensure_ascii=False, indent=2)
+        if name == "arm_help":
+            return _ok(
+                {
+                    "server": SERVER_INFO,
+                    "port_default": DEFAULT_PORT,
+                    "arm_frame_dir": str(ARM_FRAME_DIR),
+                    "mcp_guard_root": str(MCP_GUARD_ROOT),
+                    "protocol": {
+                        "feedback": '→ {"tool":"arm.feedback"} ← {"ok":true,"q":[b,s,e,h]}',
+                        "stream": '→ {"tool":"arm.stream","q":[...],"spd":N} ← {"ok":true}',
+                        "stop": '→ {"tool":"arm.stop"}',
+                        "torque": '→ {"tool":"arm.torque","on":bool}',
+                        "hold": '→ {"tool":"arm.hold"} ← {"ok":true,"q":[...]}',
+                    },
+                    "limits": {
+                        "abs_lo": ABS_LO,
+                        "abs_hi": ABS_HI,
+                        "step_max": STEP_MAX,
+                        "disabled": _NO_LIMIT,
+                    },
+                    "workflow": [
+                        "arm_connect",
+                        "arm_feedback",
+                        "cam_grab (optional)",
+                        "arm_stream small deltas + arm_feedback",
+                        "arm_stop if needed",
+                        "arm_disconnect when done",
+                    ],
+                    "safety": [
+                        "Ask user before arm_stream / arm_torque(false).",
+                        "q is radians [base,shoulder,elbow,wrist]; base abs max 1.65.",
+                        "Do not hold the serial port open across long idle periods.",
+                        "If board enters download mode, disconnect and tell the user to reset.",
+                    ],
+                }
             )
 
-        if name == "arm_start":
-            ensure_console()
-            op = str(args.get("op") or "find_any")
-            payload: dict[str, Any] = {
-                "op": op,
-                "dry_run": bool(args.get("dry_run", False)),
-                "spd": int(args.get("spd") or 200),
-                "transport": str(args.get("transport") or "usb"),
-            }
-            if args.get("face_id") is not None:
-                payload["face_id"] = int(args["face_id"])
-            body = _http("POST", "/api/start", payload)
-            return tool_result(json.dumps(body, ensure_ascii=False, indent=2), is_error=not body.get("ok", True))
+        if name == "arm_connect":
+            port = args.get("port")
+            return _ok(arm_connect(str(port) if port else None))
+
+        if name == "arm_disconnect":
+            return _ok(arm_disconnect())
+
+        if name == "arm_feedback":
+            arm = _get_arm()
+            q = arm.feedback()
+            return _ok({"ok": True, "port": _arm_port, "q": _round_q(q)})
+
+        if name == "arm_stream":
+            arm = _get_arm()
+            q_in = args.get("q")
+            if not isinstance(q_in, list) or len(q_in) < 4:
+                return _err("q must be an array of 4 numbers (radians)")
+            spd = int(args.get("spd") or 120)
+            cur = arm.feedback()
+            target, warns = _clamp_target(cur, [float(x) for x in q_in[:4]])
+            status = arm.stream(target, spd)
+            after = arm.feedback()
+            return _ok(
+                {
+                    "ok": True,
+                    "status": status,
+                    "spd": spd,
+                    "requested": _round_q([float(x) for x in q_in[:4]]),
+                    "commanded": _round_q(target),
+                    "before": _round_q(cur),
+                    "after": _round_q(after),
+                    "warnings": warns,
+                }
+            )
 
         if name == "arm_stop":
-            ensure_console()
-            body = _http("POST", "/api/stop", {})
-            return tool_result(json.dumps(body, ensure_ascii=False, indent=2))
+            arm = _get_arm()
+            status = arm.stop()
+            q = arm.feedback()
+            return _ok({"ok": True, "status": status, "q": _round_q(q)})
 
-        if name == "arm_snap":
-            from jev_servo.presence import presence_from_scene
-            from jev_servo.vision_snap import snap_scene
+        if name == "arm_torque":
+            if "on" not in args:
+                return _err("on (boolean) required")
+            arm = _get_arm()
+            on = bool(args["on"])
+            status = arm.torque(on)
+            q = None
+            try:
+                q = _round_q(arm.feedback())
+            except Exception:
+                pass
+            return _ok({"ok": True, "status": status, "on": on, "q": q})
 
-            identify = bool(args.get("identify", True))
-            snap = snap_scene(perceive="person", identify=identify, enroll_unknown=True)
-            scene = snap.get("scene") or ""
-            pres = presence_from_scene(scene)
-            out = {
-                "source": snap.get("source"),
-                "ms": snap.get("ms"),
-                "scene": scene,
-                "presence": pres.as_dict(),
-            }
-            return tool_result(json.dumps(out, ensure_ascii=False, indent=2))
+        if name == "arm_hold":
+            arm = _get_arm()
+            q = arm.hold()
+            return _ok({"ok": True, "q": _round_q(q)})
 
-        if name == "arm_faces":
-            from vision.identity import FaceGallery, sface_available
+        if name == "cam_info":
+            return _ok(cam_info())
 
-            gal = FaceGallery()
-            out = {
-                "path": str(gal.json_path),
-                "sface": sface_available(),
-                "faces": gal.list_faces(),
-            }
-            return tool_result(json.dumps(out, ensure_ascii=False, indent=2))
+        if name == "cam_grab":
+            out = args.get("out")
+            width = int(args.get("width") or 960)
+            identify = bool(args.get("identify", False))
+            return _ok(
+                cam_grab(
+                    out=str(out) if out else None,
+                    width=width,
+                    identify=identify,
+                )
+            )
 
-        return tool_result(f"unknown tool: {name}", is_error=True)
+        return _err(f"unknown tool: {name}")
     except Exception as e:
-        return tool_result(f"{type(e).__name__}: {e}", is_error=True)
+        return _err(f"{type(e).__name__}: {e}")
 
 
 def handle(msg: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -360,24 +538,33 @@ def handle(msg: dict[str, Any]) -> Optional[dict[str, Any]]:
 
 
 def main() -> None:
-    eprint(f"onlyclaws-presence MCP starting console={BASE_URL}")
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
+    eprint(
+        f"onlyclaws-presence MCP primitives v{SERVER_INFO['version']} "
+        f"port={DEFAULT_PORT} guard={MCP_GUARD_ROOT}"
+    )
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                eprint("bad json line")
+                continue
+            if isinstance(msg, list):
+                out = [r for m in msg if (r := handle(m)) is not None]
+                if out:
+                    print(json.dumps(out), flush=True)
+                continue
+            resp = handle(msg)
+            if resp is not None:
+                print(json.dumps(resp), flush=True)
+    finally:
         try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            eprint("bad json line")
-            continue
-        if isinstance(msg, list):
-            out = [r for m in msg if (r := handle(m)) is not None]
-            if out:
-                print(json.dumps(out), flush=True)
-            continue
-        resp = handle(msg)
-        if resp is not None:
-            print(json.dumps(resp), flush=True)
+            arm_disconnect()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

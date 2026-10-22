@@ -4,12 +4,12 @@
   "requirements": [
     {
       "id": "REQ-CLOUD-WIRE",
-      "title": "Device wire: pending / status / ack with device_token",
+      "title": "Device wire: one session, one in-flight message",
       "component": "device_runtime",
       "ui": false,
-      "test_kind": "manual",
-      "tests": [],
-      "acceptance": "Registered device polls GET /pending, POSTs /status heartbeat and /ack; Authorization Bearer device_token; rejects missing/invalid token"
+      "test_kind": "contract",
+      "tests": ["server/tests/test_device_session.py"],
+      "acceptance": "Device opens wss .../session with device_token, sends hello, receives welcome then one message at a time, and acks on the same socket. A dropped socket requeues the unacked message. GET /pending remains for firmware that has not connected the session."
     },
     {
       "id": "REQ-AGENT-INVOKE",
@@ -325,6 +325,15 @@
       "test_kind": "manual",
       "tests": [],
       "acceptance": "Upload ml/models/micro_speech (frontend + classifier) without reflashing; a Lua script on the RLCD shows and emits 'yes' / 'no' when spoken"
+    },
+    {
+      "id": "REQ-TTS-CHILD",
+      "title": "Chinese child TTS, girl and boy pitch, on codec boards",
+      "component": "audio",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["rlcd/tests/test_host_logic.py"],
+      "acceptance": "audio.say and invoke say speak Chinese; girl/童女 higher and shorter than boy/童男; boot says 我是童女 then 我是童男 on RLCD; boards without the codec omit it"
     }
   ]
 }

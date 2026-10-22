@@ -8,6 +8,7 @@
 //   OC_PLUGIN_BLE     NimBLE D-pad (RLCD only; ePaper leaves it off for heap)
 //   OC_PLUGIN_ARM     Feetech STS arm (RoArm-M2, BOARD_ROARM)
 //   OC_PLUGIN_ML      on-device inference (needs scripts/fetch_tflm.sh)
+//   OC_PLUGIN_TTS     Chinese concatenative speech (needs scripts/fetch_esp_tts.sh)
 //
 // Sensors (SHTC3 + battery ADC) follow the board: present on both panel boards.
 
@@ -40,6 +41,12 @@
 #define OC_HAS_ML 1
 #else
 #define OC_HAS_ML 0
+#endif
+
+#if defined(OC_PLUGIN_TTS)
+#define OC_HAS_TTS 1
+#else
+#define OC_HAS_TTS 0
 #endif
 
 #if defined(BOARD_PANEL_RLCD) || defined(BOARD_PANEL_EPAPER)

@@ -60,6 +60,37 @@ void handleLine(const String &line) {
     return;
   }
 
+  // Teach: {"tool":"arm.torque","on":false} / {"tool":"arm.hold"}
+  if (!strcmp(tool, "arm.torque")) {
+    armCtlHostPreempt();
+    bool on = doc["on"] | false;
+    if (!arm->setTorque(on)) {
+      replyErr("torque_fail");
+      return;
+    }
+    replyOk();
+    return;
+  }
+
+  if (!strcmp(tool, "arm.hold")) {
+    armCtlHostPreempt();
+    if (!arm->hold()) {
+      replyErr("hold_fail");
+      return;
+    }
+    ArmPose p{};
+    if (arm->feedback(p)) {
+      char buf[160];
+      snprintf(buf, sizeof(buf),
+               "{\"ok\":true,\"q\":[%.5f,%.5f,%.5f,%.5f]}", p.q[0], p.q[1],
+               p.q[2], p.q[3]);
+      Serial.println(buf);
+    } else {
+      replyOk();
+    }
+    return;
+  }
+
   if (!strcmp(tool, "arm.stream") || !strcmp(tool, "arm.move")) {
     armCtlHostPreempt();
     ArmPose p{};

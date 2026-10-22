@@ -18,6 +18,8 @@ bool audioIsReady();
 bool audioMicReady();
 
 void audioSetPa(bool on);
+// ES8311 register 0x32. 0x9A ≈ -18 dB, 0xBF = 0 dB.
+void audioSetDacVolume(uint8_t vol);
 
 bool audioLockI2S(uint32_t ms = 1000);
 void audioUnlockI2S();

@@ -107,7 +107,7 @@ q_j \in [lo_j, hi_j] \subseteq [q^{\min}_j, q^{\max}_j]
 [`jev_servo/`](../../jev_servo/) — `python -m jev_servo run --goal '...'`
 
 - **默认 `--transport usb`**：Host ↔ ESP USB 串口 JSON（`arm.feedback` / `arm.stream`），毫秒级
-- `--transport cloud`：oct_ invoke（慢，设备 poll）
+- `--transport cloud`：oct_ invoke（经设备会话推送；旧固件仍走 poll）
 - `--dry-run`：启发式裁判、不动臂
 
 固件需 `agent-runtime-0.16.0+`（`arm_usb_serial`）。

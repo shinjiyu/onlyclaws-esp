@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ESP32 说话</title>
+  <style>
+    :root {
+      --paper: #f3f0e8;
+      --paper-2: #ebe7dc;
+      --card: #fbfaf6;
+      --ink: #141414;
+      --ink-2: #2b2a27;
+      --muted: #6b665c;
+      --line: #d9d3c5;
+      --line-2: #c7bfad;
+      --accent: #e5482d;
+      --green: #2f7d4f;
+      --radius: 8px;
+      --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    main { max-width: 560px; margin: 0 auto; padding: 28px 20px 48px; }
+    h1 { font-size: 1.45rem; margin: 0 0 4px; letter-spacing: -.01em; }
+    .sub { color: var(--muted); margin: 0 0 18px; font-size: .9rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .card + .card { margin-top: 12px; }
+    label { display: block; font-size: .84rem; color: var(--ink-2); margin-bottom: 6px; }
+    textarea {
+      width: 100%;
+      min-height: 88px;
+      resize: vertical;
+      font: inherit;
+      padding: 10px 12px;
+      border: 1px solid var(--line-2);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+    }
+    .row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .val { font-family: var(--mono); font-size: .84rem; color: var(--ink); }
+    input[type="range"] { width: 100%; accent-color: var(--ink); }
+    .field { margin-top: 16px; }
+    .hint { margin: 4px 0 0; color: var(--muted); font-size: .78rem; }
+    .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+    button {
+      font: inherit;
+      cursor: pointer;
+      border-radius: 6px;
+      border: 1px solid var(--line-2);
+      background: #fff;
+      color: var(--ink);
+      padding: 6px 12px;
+    }
+    button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    button.send {
+      width: 100%;
+      margin-top: 16px;
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      font-size: 1rem;
+      padding: 10px 14px;
+    }
+    button.send:disabled { opacity: .55; cursor: wait; }
+    .status { min-height: 1.4em; margin: 10px 0 0; font-size: .9rem; }
+    .status.ok { color: var(--green); }
+    .status.bad { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ESP32 说话</h1>
+    <p class="sub">aki-esp · 调完点发送，板子用这一组参数念出来</p>
+
+    <div class="card">
+      <label for="text">说这句</label>
+      <textarea id="text">阿良良木历是个变态</textarea>
+      <div class="presets" style="margin-top:12px">
+        <button type="button" id="p-now" class="on">现在这样</button>
+        <button type="button" id="p-clear">最清楚</button>
+        <button type="button" id="p-boy">童男</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="field" style="margin-top:0">
+        <div class="row"><label for="speed">语速</label><span class="val" id="speed-val">2</span></div>
+        <input id="speed" type="range" min="0" max="5" step="1" value="2" />
+        <p class="hint">0 最慢，音节边界还在。5 最快。</p>
+      </div>
+      <div class="field">
+        <div class="row"><label for="pitch">音高</label><span class="val" id="pitch-val">1.19</span></div>
+        <input id="pitch" type="range" min="0.70" max="1.40" step="0.01" value="1.19" />
+        <p class="hint">1.00 是音库原声。离开 1 会把声母抹糊。</p>
+      </div>
+      <div class="field">
+        <label>拉长</label>
+        <div class="presets">
+          <button type="button" id="st1" class="on">原长</button>
+          <button type="button" id="st2">两倍</button>
+        </div>
+        <p class="hint">两倍更慢，拼接点会被抹开。</p>
+      </div>
+      <div class="field">
+        <div class="row"><label for="volume">音量</label><span class="val" id="volume-val">−10 dB</span></div>
+        <input id="volume" type="range" min="-24" max="0" step="1" value="-10" />
+        <p class="hint">0 dB 喇叭会破。−18 dB 声母容易被房间盖住。</p>
+      </div>
+      <button class="send" id="send" type="button">发送</button>
+      <p class="status" id="status"></p>
+    </div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let stretch = 1;
+    const presets = {
+      now: { speed: 2, pitch: 1.19, stretch: 1, volume: -10 },
+      clear: { speed: 0, pitch: 1.00, stretch: 1, volume: -12 },
+      boy: { speed: 4, pitch: 0.78, stretch: 2, volume: -12 },
+    };
+
+    function show() {
+      $("speed-val").textContent = $("speed").value;
+      $("pitch-val").textContent = Number($("pitch").value).toFixed(2);
+      const v = Number($("volume").value);
+      $("volume-val").textContent = (v === 0 ? "0" : "−" + Math.abs(v)) + " dB";
+      $("st1").classList.toggle("on", stretch === 1);
+      $("st2").classList.toggle("on", stretch === 2);
+    }
+
+    function apply(p, which) {
+      $("speed").value = p.speed;
+      $("pitch").value = p.pitch.toFixed(2);
+      $("volume").value = p.volume;
+      stretch = p.stretch;
+      for (const id of ["p-now", "p-clear", "p-boy"]) $(id).classList.remove("on");
+      if (which) $(which).classList.add("on");
+      show();
+    }
+
+    function markCustom() {
+      for (const id of ["p-now", "p-clear", "p-boy"]) $(id).classList.remove("on");
+      show();
+    }
+
+    $("speed").addEventListener("input", markCustom);
+    $("pitch").addEventListener("input", markCustom);
+    $("volume").addEventListener("input", markCustom);
+    $("st1").addEventListener("click", () => { stretch = 1; markCustom(); });
+    $("st2").addEventListener("click", () => { stretch = 2; markCustom(); });
+    $("p-now").addEventListener("click", () => apply(presets.now, "p-now"));
+    $("p-clear").addEventListener("click", () => apply(presets.clear, "p-clear"));
+    $("p-boy").addEventListener("click", () => apply(presets.boy, "p-boy"));
+
+    function setStatus(text, kind) {
+      const el = $("status");
+      el.textContent = text;
+      el.className = "status" + (kind ? " " + kind : "");
+    }
+
+    $("send").addEventListener("click", async () => {
+      const text = $("text").value.trim();
+      if (!text) {
+        setStatus("先写一句要说的话", "bad");
+        return;
+      }
+      const body = {
+        text,
+        speed: Number($("speed").value),
+        pitch: Number($("pitch").value),
+        stretch,
+        volume: Number($("volume").value),
+      };
+      $("send").disabled = true;
+      setStatus("正在发给板子…");
+      try {
+        const res = await fetch("/say", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || data.status === "failed") {
+          setStatus(data.detail || data.status || "没发出去", "bad");
+        } else if (data.status === "acked") {
+          setStatus("板子已确认，正在说", "ok");
+        } else {
+          setStatus("已排队，板子还没接走（" + (data.status || "pending") + "）", "bad");
+        }
+      } catch (err) {
+        setStatus("页面和本机服务断开了", "bad");
+      } finally {
+        $("send").disabled = false;
+      }
+    });
+
+    show();
+  </script>
+</body>
+</html>

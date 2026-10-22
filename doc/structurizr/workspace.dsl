@@ -46,7 +46,7 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                     }
                 }
 
-                deviceRuntime = container "Device runtime" "Wi-Fi, poll pending, wire invoke/script, product wiring" "C++ rlcd/src/main.cpp" {
+                deviceRuntime = container "Device runtime" "Wi-Fi, device session, wire invoke/script, product wiring" "C++ rlcd/src/main.cpp" {
                     tags "Compose"
                     properties {
                         "path" "rlcd/src/main.cpp"

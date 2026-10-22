@@ -29,6 +29,8 @@ from fastapi import (
     Request,
     Response,
     UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
 )
 from fastapi.responses import (
     FileResponse,
@@ -42,6 +44,7 @@ from pydantic import BaseModel, Field
 
 import access
 import accounts
+import device_session
 import ml_registry
 import render as epd_render
 import snake_ctrl
@@ -238,6 +241,8 @@ class Waiters:
 
 
 waiters = Waiters()
+sessions = device_session.SessionHub()
+_session_push_locks: dict[str, asyncio.Lock] = {}
 
 
 @asynccontextmanager
@@ -419,6 +424,10 @@ def enqueue_control_message(
             ),
         )
     waiters.notify(device_id)
+    try:
+        asyncio.get_running_loop().create_task(push_session(device_id))
+    except RuntimeError:
+        pass
     return {
         "id": msg_id,
         "device_id": device_id,
@@ -1739,6 +1748,210 @@ def mark_delivered(msg_id: str) -> None:
         )
 
 
+def apply_device_report(device_id: str, body: StatusIn) -> None:
+    meta = json.dumps(body.meta or {})
+    with db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO devices (id, name) VALUES (?, ?)",
+            (device_id, device_id),
+        )
+        conn.execute(
+            """
+            UPDATE devices
+            SET last_seen=?, ip=COALESCE(?, ip), rssi=COALESCE(?, rssi),
+                fw=COALESCE(?, fw), meta=?
+            WHERE id=?
+            """,
+            (utc_now(), body.ip, body.rssi, body.fw, meta, device_id),
+        )
+        script_state = (body.meta or {}).get("script_state")
+        script_id = (body.meta or {}).get("script_id")
+        if script_state:
+            conn.execute(
+                """
+                UPDATE device_scripts
+                SET status=?, script_id=COALESCE(?, script_id), updated_at=?
+                WHERE device_id=?
+                """,
+                (str(script_state), str(script_id) if script_id else None, utc_now(), device_id),
+            )
+
+
+def touch_device(device_id: str) -> None:
+    with db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO devices (id, name) VALUES (?, ?)",
+            (device_id, device_id),
+        )
+        conn.execute(
+            "UPDATE devices SET last_seen=? WHERE id=?",
+            (utc_now(), device_id),
+        )
+
+
+def requeue_message(message_id: str, device_id: str) -> None:
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE messages
+            SET status='pending', delivered_at=NULL
+            WHERE id=? AND device_id=? AND status='delivered' AND acked_at IS NULL
+            """,
+            (message_id, device_id),
+        )
+
+
+def record_device_event(device_id: str, name: str, data: Any, script_id: Optional[str]) -> None:
+    if data is not None and not isinstance(data, str):
+        data = json.dumps(data, ensure_ascii=False)
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO device_events (id, device_id, script_id, name, data, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (uuid.uuid4().hex, device_id, script_id, name.strip(), data, utc_now()),
+        )
+
+
+async def push_session(device_id: str) -> None:
+    lock = _session_push_locks.setdefault(device_id, asyncio.Lock())
+    async with lock:
+        ws = sessions.socket(device_id)
+        if ws is None or sessions.inflight(device_id):
+            return
+        msg = pending_message(device_id)
+        if not msg:
+            return
+        if not sessions.claim(device_id, msg["id"]):
+            return
+        mark_delivered(msg["id"])
+        payload = json.dumps(
+            {"type": "message", "message": message_payload(msg)},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            sessions.release(device_id, msg["id"])
+            requeue_message(msg["id"], device_id)
+
+
+def _bearer_header(ws: WebSocket) -> str:
+    auth = ws.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ws.headers.get("x-device-token", "").strip()
+
+
+async def _session_frame(device_id: str, frame: dict[str, Any]) -> None:
+    kind = frame.get("type")
+    if kind == "ack":
+        message_id = str(frame.get("message_id") or "").strip()
+        if not message_id:
+            return
+        ok = bool(frame.get("ok", True))
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE messages
+                SET status=?, acked_at=?
+                WHERE id=? AND device_id=?
+                """,
+                ("acked" if ok else "failed", utc_now(), message_id, device_id),
+            )
+        sessions.release(device_id, message_id)
+        await push_session(device_id)
+        return
+    if kind == "status":
+        apply_device_report(
+            device_id,
+            StatusIn(
+                ip=frame.get("ip"),
+                rssi=frame.get("rssi"),
+                fw=frame.get("fw"),
+                meta=frame.get("meta") if isinstance(frame.get("meta"), dict) else {},
+            ),
+        )
+        return
+    if kind == "heartbeat":
+        touch_device(device_id)
+        return
+    if kind == "event":
+        name = str(frame.get("name") or "").strip()
+        if not name:
+            return
+        record_device_event(device_id, name, frame.get("data"), frame.get("script_id"))
+
+
+@app.websocket("/api/v1/device/{device_id}/session")
+async def device_wire(websocket: WebSocket, device_id: str) -> None:
+    """Persistent device wire. Replaces long-poll for firmware that speaks it."""
+    device_id = (device_id or "").strip().lower()
+    await websocket.accept()
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=8)
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        await websocket.close(code=4408)
+        return
+    frame = device_session_parse(raw)
+    header_token = _bearer_header(websocket)
+    token = header_token or str((frame or {}).get("token") or "")
+    if frame is None or frame.get("type") != "hello" or not token:
+        await websocket.close(code=4400)
+        return
+    try:
+        with db() as conn:
+            tenancy.verify_device_token(conn, device_id, token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+    replaced = sessions.attach(device_id, websocket)
+    if replaced:
+        requeue_message(replaced, device_id)
+    apply_device_report(
+        device_id,
+        StatusIn(
+            ip=frame.get("ip"),
+            rssi=frame.get("rssi"),
+            fw=frame.get("fw"),
+            meta=frame.get("meta") if isinstance(frame.get("meta"), dict) else {},
+        ),
+    )
+    try:
+        await websocket.send_text(
+            json.dumps(
+                {"type": "welcome", "device_id": device_id, "protocol": "session"},
+                separators=(",", ":"),
+            )
+        )
+        await push_session(device_id)
+        while True:
+            try:
+                incoming = await asyncio.wait_for(websocket.receive_text(), timeout=90)
+            except asyncio.TimeoutError:
+                break
+            nxt = device_session_parse(incoming)
+            if nxt is None or nxt.get("type") == "hello":
+                continue
+            await _session_frame(device_id, nxt)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        left = sessions.detach(device_id, websocket)
+        if left:
+            requeue_message(left, device_id)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+def device_session_parse(raw: str):
+    return device_session.parse_frame(raw)
+
+
 @app.get("/api/v1/device/{device_id}/poll")
 async def device_poll(
     device_id: str,
@@ -1851,33 +2064,7 @@ async def device_ack(
 async def device_status(
     device_id: str, body: StatusIn, _: str = Depends(require_known_device)
 ) -> dict[str, Any]:
-    meta = json.dumps(body.meta or {})
-    with db() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO devices (id, name) VALUES (?, ?)",
-            (device_id, device_id),
-        )
-        conn.execute(
-            """
-            UPDATE devices
-            SET last_seen=?, ip=COALESCE(?, ip), rssi=COALESCE(?, rssi),
-                fw=COALESCE(?, fw), meta=?
-            WHERE id=?
-            """,
-            (utc_now(), body.ip, body.rssi, body.fw, meta, device_id),
-        )
-        # Mirror script state into device_scripts when device reports it.
-        script_state = (body.meta or {}).get("script_state")
-        script_id = (body.meta or {}).get("script_id")
-        if script_state:
-            conn.execute(
-                """
-                UPDATE device_scripts
-                SET status=?, script_id=COALESCE(?, script_id), updated_at=?
-                WHERE device_id=?
-                """,
-                (str(script_state), str(script_id) if script_id else None, utc_now(), device_id),
-            )
+    apply_device_report(device_id, body)
     return {"success": True}
 
 
@@ -2174,6 +2361,7 @@ async def agent_capabilities(
             "audio": [
                 "audio.beep",
                 "audio.play_pcm",
+                "audio.say",
                 "audio.pa",
                 "audio.ready",
                 "audio.sample_rate",
@@ -2201,6 +2389,7 @@ async def agent_capabilities(
             "gfx.clear",
             "gfx.flush",
             "play_pcm",
+            "say",
             "arm.feedback",
             "arm.stream",
             "arm.move",
@@ -2209,13 +2398,14 @@ async def agent_capabilities(
         "capability_tools": {
             "panel": ["display", "gfx.clear", "gfx.flush"],
             "audio": ["beep", "play_pcm"],
+            "tts": ["say"],
             "sensors": ["sensors.read", "sensors"],
             "arm": ["arm.feedback", "arm.stream", "arm.move", "arm.stop"],
             "core": ["emit"],
         },
         "products": {
-            "rlcd-42": {"caps": ["core", "panel", "audio", "ble_pad", "sensors", "claude_buddy", "ml"]},
-            "epaper-397": {"caps": ["core", "panel", "audio", "sensors", "ml"]},
+            "rlcd-42": {"caps": ["core", "panel", "audio", "tts", "ble_pad", "sensors", "claude_buddy", "ml"]},
+            "epaper-397": {"caps": ["core", "panel", "audio", "tts", "sensors", "ml"]},
             "roarm-m2": {"caps": ["core", "arm"], "env": "esp32-roarm-m2"},
         },
         "removed": [
@@ -2228,6 +2418,7 @@ async def agent_capabilities(
             "KEY short = beep (panel boards)",
             "KEY hold 1.5s = SoftAP Wi-Fi provision",
             "ES8311 beep + PCM playback (RLCD)",
+            "audio.say girl/boy: one Chinese voice, two pitches (RLCD and ePaper)",
             "ST7305 / ePaper framebuffer via Lua gfx.*",
             "RoArm-M2: Feetech STS bus; invoke/Lua arm.* only (no anonymous /js)",
             "edge Lua loop when deployed",

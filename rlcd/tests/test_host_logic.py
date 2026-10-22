@@ -65,6 +65,7 @@ def test_host_logic() -> None:
                 str(RLCD / "tests" / "host_logic_test.cpp"),
                 str(RLCD / "src" / "claude_proto.cpp"),
                 str(RLCD / "src" / "ml_manifest.cpp"),
+                str(RLCD / "src" / "tts_voice.cpp"),
                 "-o",
                 str(exe),
             ],

@@ -1,6 +1,8 @@
 -- Snake: phone D-pad via board LAN page (any browser) or BLE.
--- Game Over shows Wi-Fi SSID + QR to http://<ip>/
+-- Game Over shows a QR to http://<ip>/ (and the Wi-Fi SSID when SHOW_SSID).
 
+-- SSIDs often carry a company or home name; keep them off screen by default.
+local SHOW_SSID = false
 local CELL = 10
 local COLS = math.floor(gfx.W / CELL)
 local ROWS = math.floor(gfx.H / CELL)
@@ -53,7 +55,10 @@ local function draw_game_over()
   gfx.clear(0)
   -- Compact header; large centered QR for WeChat / camera scanners.
   gfx.text(4, 16, "GAME OVER sc " .. tostring(score), 1)
-  local wifiLine = "WiFi:" .. (ssidShown ~= "" and ssidShown or "?")
+  local wifiLine = "Scan to play"
+  if SHOW_SSID then
+    wifiLine = "WiFi:" .. (ssidShown ~= "" and ssidShown or "?")
+  end
   gfx.text(4, 34, wifiLine, 1)
   if ctrlUrl ~= "" then
     gfx.text(4, 52, ctrlUrl, 1)
@@ -90,7 +95,7 @@ local function draw()
   end
   local link = (ble.connected and ble.connected()) and "PAD" or ".."
   gfx.text(4, 14, "sc " .. tostring(score) .. " " .. link, 1)
-  if ssidShown ~= "" then gfx.text(4, 30, ssidShown, 1) end
+  if SHOW_SSID and ssidShown ~= "" then gfx.text(4, 30, ssidShown, 1) end
   if ipShown ~= "" then gfx.text(4, 46, ipShown, 1) end
   gfx.flush()
 end
@@ -141,7 +146,7 @@ end
 function on_start()
   math.randomseed(millis())
   ipShown = (net.ip and net.ip()) or ""
-  ssidShown = (net.ssid and net.ssid()) or ""
+  ssidShown = (SHOW_SSID and net.ssid and net.ssid()) or ""
   if ipShown ~= "" then
     -- No trailing slash — slightly shorter payload, same page.
     ctrlUrl = "http://" .. ipShown

@@ -81,7 +81,7 @@ Known device IDs:
 }
 ```
 
-Invoke tools (capability-filtered): `sensors.read`, `beep`, `display`, `emit`, `gfx.clear`, `gfx.flush`, `play_pcm` (`b64`), **`arm.feedback` / `arm.stream` / `arm.move` / `arm.stop`** (RoArm only).
+Invoke tools (capability-filtered): `sensors.read`, `beep`, `display`, `emit`, `gfx.clear`, `gfx.flush`, `play_pcm` (`b64`), `say` (`text`, `voice` = `girl`|`boy`, capability `tts`), **`arm.feedback` / `arm.stream` / `arm.move` / `arm.stop`** (RoArm only).
 
 Arm example:
 
@@ -196,6 +196,7 @@ The device downloads the bytes with its own token and caches a few images. Call 
 | `audio.pa(on)` | speaker amp |
 | `audio.beep(freq, ms)` | square wave (≤5s) |
 | `audio.play_pcm(b64)` | int16 LE mono PCM, base64; max ~2s @ 16 kHz |
+| `audio.say(text [, voice])` | Chinese TTS. `girl`/`童女`/`tongnv` or `boy`/`童男`/`tongnan`. Flat, one voice pitched two ways. USB: `say girl 文本` |
 
 #### Input / net
 
@@ -261,15 +262,26 @@ Cues without new bitmap.
 
 ## 6. Device wire protocol
 
+The device holds one WebSocket:
+
 ```
-Authorization: Bearer <EPD_DEVICE_TOKEN>
+wss://<host><prefix>/api/v1/device/<device_id>/session
+Authorization: Bearer <device_token>
 ```
 
-- `GET .../pending` — next message (`bitmap`|`action`|`script`|`invoke`|`script_stop`)
-- `GET .../asset/{name}.bin` — framebuffer
-- `POST .../ack`
-- `POST .../status` — heartbeat; `meta` includes `script_id` / `script_state`
-- `POST .../events` — script `emit` sink
+First frame is `hello` (token, fw, ip, rssi, meta). The server answers `welcome`, then pushes one message. The device acks on the same socket. The next message is pushed after that ack. If the socket drops, the unacked message goes back to the queue.
+
+```json
+{"type":"hello","token":"<device_token>","fw":"agent-runtime","ip":"192.168.1.2","rssi":-40,"meta":{}}
+{"type":"welcome","device_id":"a4cb8fdf8440","protocol":"session"}
+{"type":"message","message":{"id":"…","type":"invoke","body":"…"}}
+{"type":"ack","message_id":"…","ok":true,"ms":12}
+{"type":"status","fw":"…","ip":"…","rssi":-40,"meta":{}}
+```
+
+`message.type` is `bitmap`, `action`, `script`, `invoke`, or `script_stop`. Asset bytes stay on `GET .../asset/{name}.bin`. `emit` stays on `POST .../events`.
+
+`GET .../pending`, `POST .../ack`, and `POST .../status` remain for a board whose session is not up.
 
 Firmware defaults: host `onlyclaws.world`, path `/epaper` (`rlcd/include/cloud_config.h`).  
 NVS namespace `cloud` can override `host` / `prefix` / `device_id`.
@@ -305,7 +317,7 @@ Error shape: `{ "success": false, "message": "..." }` — HTTP 401/403/400.
 
 ## 9. Ops notes
 
-- RLCD poll ~2.5s when online
+- A connected board receives invoke on its session. `/pending` is the fallback when that socket is down
 - Prefer `invoke` for one-shots; deploy `loop` scripts only when edge autonomy is needed
 - Chinese text for cards is **server-rendered**; script `dialog` is ASCII/short title only
 - Public OpenAPI UI disabled; use `/api/agent/skill.md` + `/api/agent/capabilities`
