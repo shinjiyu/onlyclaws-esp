@@ -31,7 +31,7 @@ The control plane still accepts `POST /api/scripts` with Lua `source`. On deploy
 
 The 64-byte Ed25519 signature covers those bytes and is sent separately (`sig`, standard base64). The device rebuilds the prefix, checks the hash and the signature, and only then writes flash. A bad signature is dropped and is not stored.
 
-The public key in the firmware is `OC_SCRIPT_PUBKEY_HEX` (`rlcd/include/cloud_config.h`). Generate a matching pair with `bash scripts/gen_script_signing_key.sh`. Deploy returns 503 when the PEM is missing. Older firmware ignores the extra JSON fields and still runs `source` from RAM.
+The public key in the firmware is `OC_SCRIPT_PUBKEY_HEX` (`rlcd/include/cloud_config.h`). It is empty in a stock build, so the device refuses scripts until that hex matches the server PEM. Generate a pair with `bash scripts/gen_script_signing_key.sh`, paste the printed hex, and rebuild. Deploy returns 503 when the PEM is missing. Older firmware ignores the extra JSON fields and still runs `source` from RAM.
 
 ## On the device
 

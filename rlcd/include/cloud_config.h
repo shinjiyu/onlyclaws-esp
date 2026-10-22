@@ -34,10 +34,10 @@
 #endif
 
 // Ed25519 public key (32 raw bytes, hex) for Lua script envelopes.
-// The control plane signs with EPD_SCRIPT_SIGNING_KEY. Replace both together:
-//   openssl genpkey -algorithm ED25519 -out script_signing_key.pem
-//   openssl pkey -in script_signing_key.pem -pubout -outform DER | tail -c 32 | xxd -p -c 64
-// An empty string refuses every script.
+// Empty by default: a stock image refuses scripts until this matches the
+// control plane PEM (EPD_SCRIPT_SIGNING_KEY). Generate both together:
+//   bash scripts/gen_script_signing_key.sh
+// and paste the printed hex here, then rebuild the firmware.
 #ifndef OC_SCRIPT_PUBKEY_HEX
-#define OC_SCRIPT_PUBKEY_HEX "7176a8d0ab405b8fc61346165a70e90537abd4460dfaa57a42a5567c7045d0e7"
+#define OC_SCRIPT_PUBKEY_HEX ""
 #endif
