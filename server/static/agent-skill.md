@@ -34,7 +34,7 @@ On `401`, ask the human to mint/rotate a token at https://onlyclaws.world/consol
 | Push text / bitmap | `POST /api/push` |
 | **Named bitmap** | `POST /api/bitmaps` then Lua `gfx.image(name, x, y)` |
 | Beep action | `POST /api/action` |
-| **Deploy Lua** | `POST /api/scripts` (`language=lua`, `source` = Lua string, max 24000 bytes) |
+| **Deploy Lua** | `POST /api/scripts` (`language=lua`, `source` = Lua string, max 24000 bytes). The server signs it; the board stores it and reloads it after reboot |
 | Events from `emit()` | `GET /api/events` |
 
 ## Lua on device

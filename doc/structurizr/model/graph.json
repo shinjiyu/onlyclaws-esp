@@ -6,12 +6,13 @@
     { "id": "contracts", "role": "contracts", "path": "rlcd/include/panel_display.h + capability.h + arm_driver.h + oc_battery.h" },
     { "id": "wifi_nvs", "role": "infra", "path": "rlcd/src/wifi_store.cpp + wifi_ap_prov + api_config" },
     { "id": "cloud_http", "role": "infra", "path": "rlcd/src/cloud_http.cpp (device channel: JSON, bitmaps, model blobs) + main.cpp tlsLua" },
+    { "id": "script_store", "role": "infra", "path": "rlcd/src/script_store.cpp + script_store_flash.cpp; server/script_sign.py", "status": "implemented" },
     { "id": "tenancy", "role": "infra", "path": "server/tenancy.py" },
     { "id": "render", "role": "infra", "path": "server/render.py" },
     { "id": "ml_registry", "role": "infra", "path": "server/ml_registry.py + ml_opset.py (model upload, op-set check, signing, device download)", "status": "implemented" },
     { "id": "device_runtime", "role": "compose", "path": "rlcd/src/main.cpp" },
     { "id": "script_engine", "role": "compose", "path": "rlcd/src/script_engine.cpp" },
-    { "id": "control_plane", "role": "compose", "path": "server/app.py" },
+    { "id": "control_plane", "role": "compose", "path": "server/app.py + script_sign.py" },
     { "id": "panel", "role": "plugin", "path": "rlcd/include/panel_display.h + st7305_rlcd / epd397_panel" },
     { "id": "audio", "role": "plugin", "path": "rlcd/src/audio_es8311.cpp" },
     { "id": "ble_pad", "role": "plugin", "path": "rlcd/src/ble_ctrl.cpp (D-pad + Nordic UART transport) + http_pad.cpp + pad_ctrl.cpp" },
@@ -38,6 +39,8 @@
     { "from": "device_runtime", "to": "wifi_nvs", "kind": "uses" },
     { "from": "device_runtime", "to": "cloud_http", "kind": "uses" },
     { "from": "device_runtime", "to": "script_engine", "kind": "uses" },
+    { "from": "device_runtime", "to": "script_store", "kind": "uses" },
+    { "from": "control_plane", "to": "script_store", "kind": "signs" },
     { "from": "device_runtime", "to": "panel", "kind": "wires" },
     { "from": "device_runtime", "to": "audio", "kind": "wires" },
     { "from": "device_runtime", "to": "ble_pad", "kind": "wires" },
@@ -64,6 +67,7 @@
     "vision_path is host-side pathway B (frame→objects+empties); no edges to ESP plugins — Agent may orchestrate.",
     "jev_servo_path is host-side pathway C (JEV per-joint intervals → one cloud arm.stream); consumes vision state; no plugin edges.",
     "demos/ are cloud-deployed Lua sources, not firmware plugins.",
-    "control_plane filters invoke tools by device capabilities[] reported in /status."
+    "control_plane filters invoke tools by device capabilities[] reported in /status.",
+    "script_store: signed Lua on the littlefs data partition (not the ML spiffs mount). Atomic .tmp rename, 3 versions, rollback, safe mode. OTA app slots must not overlap it. See SCRIPT-PERSIST.md and ADR 0007."
   ]
 }

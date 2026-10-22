@@ -159,6 +159,15 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                     }
                 }
 
+                scriptStore = container "Script store" "Signed Lua on LittleFS; atomic write, rollback, boot load" "C++" {
+                    tags "Infra"
+                    properties {
+                        "path" "rlcd/src/script_store.cpp + script_store_flash.cpp; server/script_sign.py"
+                        "role" "infra"
+                        "adl" "SCRIPT-PERSIST.md; decisions/0007-script-persist.md"
+                    }
+                }
+
                 cloudHttp = container "Cloud HTTP" "tlsCloud pending/status/ack, bitmaps, model blobs; tlsLua for scripts" "C++" {
                     tags "Infra"
                     properties {
@@ -204,6 +213,8 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
         armPlugin -> waveshareArm "servo bus"
         # Vision / JEV servo do NOT depend on armPlugin in-firmware; Host bridges via cloud.
         deviceRuntime -> scriptEngine "run / stop scripts"
+        deviceRuntime -> scriptStore "persist signed Lua; boot load"
+        controlPlane -> scriptStore "Ed25519 signature on deploy"
         scriptEngine -> contracts "register modules"
         panelPlugin -> contracts "implements"
         audioPlugin -> contracts "implements"

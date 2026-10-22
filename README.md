@@ -9,7 +9,7 @@ and the board draws, plays sound, moves a robot arm, reads sensors and reports b
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-1c1d17)](LICENSE)
 ![ESP32-S3](https://img.shields.io/badge/chip-ESP32--S3-e2432a)
-![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.18-1c1d17)
+![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.20-1c1d17)
 ![Lua](https://img.shields.io/badge/apps-Lua-2c2d72)
 [![Stars](https://img.shields.io/github/stars/shinjiyu/onlyclaws-esp?style=social)](https://github.com/shinjiyu/onlyclaws-esp/stargazers)
 ![PlatformIO](https://img.shields.io/badge/build-PlatformIO-f5822a)
@@ -62,6 +62,8 @@ flowchart LR
 1. **Flash** the firmware for your board and register its device ID.
 2. **Mint** an `oct_…` token in the console and give your agent [skill.md](https://onlyclaws.world/api/agent/skill.md).
 3. The agent **deploys** scripts, the board runs them, and `emit()` events flow back.
+
+The control plane signs each deploy (Ed25519). The board checks that signature, then stores the script on a 128 KB LittleFS partition that sits beside the OTA app slots. After a reboot or a power cut it loads the last good copy from flash, including when Wi-Fi is down. A script that fails to start rolls back to the previous version (three are kept). App updates do not erase that partition. Details: [`doc/structurizr/SCRIPT-PERSIST.md`](doc/structurizr/SCRIPT-PERSIST.md).
 
 ## An app is a Lua script
 
@@ -212,7 +214,7 @@ The ESP32-S3 builds also run small neural networks that an agent uploads at runt
 
 ## Status
 
-Firmware line `agent-runtime-0.18.x`: panel and audio plugins since `0.13.6`, RoArm-M2 arm plugin since `0.16.0`, Claude Hardware Buddy since `0.17.0`, on-device models since `0.18.0`. The hosted console is invite-only while we keep costs and abuse in check. Issues and pull requests are welcome, especially new panel plugins and demo apps.
+Firmware line `agent-runtime-0.20.x`: panel and audio plugins since `0.13.6`, RoArm-M2 arm plugin since `0.16.0`, Claude Hardware Buddy since `0.17.0`, on-device models since `0.18.0`, signed scripts kept across power loss since `0.20.0`. The hosted console is invite-only while we keep costs and abuse in check. Issues and pull requests are welcome, especially new panel plugins and demo apps.
 
 ## Contributing
 

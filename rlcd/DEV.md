@@ -77,7 +77,8 @@ pio device monitor -b 115200
 - ePaper 默认 **不开 BLE**（给 mbedTLS 留内部堆）；RLCD 广播名 `Claude-OC-XXXX`（BT MAC 后两字节）  
 - **电量角标**（`0.17.0+`）：`PanelDisplay::flush()` 前画右上角电量（RLCD 走 GPIO4 分压，ePaper 走 I2C 0x34 的 TG28/AXP2101）；`gfx.badge(false)` 隐藏，下次加载脚本恢复。充电时画闪电：ePaper 读 PMU 状态位；RLCD 的 CHG 灯不接 GPIO，只能估计（`OcChargeTrend`：USB 主机 SOF 计数在走、两次采样跳变 ±40 mV、10 分钟窗口斜率 ±8 mV），接纯充电头时要等电压变化才会亮  
 - **Claude Hardware Buddy**（`0.17.0+`）：Nordic UART + LE Secure 配对（屏上显示 6 位码）。协议逻辑在 `claude_proto.cpp`（主机可测：`python3 tests/test_host_logic.py`），卡片/按键在 `claude_buddy.cpp`。权限卡片显示时 Lua tick 暂停；`claude.takeover(false)` 交给脚本处理  
-- RoArm：**无** factory 匿名 `/js` 关节 API；只用 cloud invoke / Lua `arm.*`  
+- RoArm：**无** factory 匿名 `/js` 关节 API；只用 cloud invoke / Lua `arm.*`
+- **脚本掉电保留**（`0.20.0+`）：`partitions_16MB.csv` / `partitions_4MB.csv` 里的 `littlefs` 与 OTA 应用槽分开。验过 Ed25519 才写入，`.tmp` 读回再 `rename`，启动时加载最后一份好脚本，失败则回滚。签名私钥是 `EPD_SCRIPT_SIGNING_KEY`，公钥是 `OC_SCRIPT_PUBKEY_HEX`。见 [`doc/structurizr/SCRIPT-PERSIST.md`](../doc/structurizr/SCRIPT-PERSIST.md)  
 - 墨水屏以 **局刷** 为主；全刷会闪黑白，仅偶尔清残影  
 
 总览见仓库根目录 [`README.md`](../README.md)；RoArm 产品见 [`doc/structurizr/ROARM-PRODUCT.md`](../doc/structurizr/ROARM-PRODUCT.md)。

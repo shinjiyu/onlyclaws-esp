@@ -8,6 +8,7 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 | REQ-CLOUD-WIRE | device_runtime | contract | `server/tests/test_device_session.py` (one socket, one in-flight message, requeue on replace). Board: session welcome, then invoke; `/pending` only if the socket is down |
 | REQ-AGENT-INVOKE | control_plane | manual | `POST /api/invoke` with oct_; device executes |
 | REQ-LUA-DEPLOY | script_engine | manual | Deploy snake / mimo-rl; stop; events |
+| REQ-SCRIPT-PERSIST | script_store | unit | `rlcd/tests/test_script_store.py`, `server/tests/test_script_sign.py`. Board: flash the new partition table once, deploy, pull power, script resumes; bad signature is not stored |
 | REQ-DEVICE-REGISTER | control_plane | manual | UI register + token rotate |
 | REQ-WIFI-PROV | wifi_nvs | manual | OC-Setup portal; safe_upload keeps NVS |
 | REQ-PANEL-SURFACE | panel | manual | Both pio envs upload + flush |

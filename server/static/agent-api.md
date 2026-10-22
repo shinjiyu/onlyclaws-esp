@@ -119,6 +119,7 @@ Prefer **Lua deploy** for multi-step logic; use invoke `arm.*` for tight host vi
 - `source` must be a **Lua string** (JSON tools DSL is retired)
 - `mode`: `once` | `loop`
 - `every_ms`: default delay between `on_loop` when the function does not return a delay / call `sleep`
+- The control plane adds `version`, `sha256`, and an Ed25519 `sig` before the board sees the script. The board verifies that signature, stores the script on flash, and loads it again after reboot. `503` means the signing key is not configured. `POST /api/script/stop` keeps the file but does not run it on the next boot.
 
 Also: `POST /api/scripts/{id}/deploy`, `POST /api/script/stop`, `GET /api/script/status`, `GET /api/events`
 

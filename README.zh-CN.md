@@ -9,7 +9,7 @@ ESP32 只烧一次固件。之后 AI Agent 通过 HTTP 下发 Lua，<br>
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-1c1d17)](LICENSE)
 ![ESP32-S3](https://img.shields.io/badge/chip-ESP32--S3-e2432a)
-![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.18-1c1d17)
+![Firmware](https://img.shields.io/badge/firmware-agent--runtime--0.20-1c1d17)
 ![Lua](https://img.shields.io/badge/apps-Lua-2c2d72)
 [![Stars](https://img.shields.io/github/stars/shinjiyu/onlyclaws-esp?style=social)](https://github.com/shinjiyu/onlyclaws-esp/stargazers)
 ![PlatformIO](https://img.shields.io/badge/build-PlatformIO-f5822a)
@@ -62,6 +62,8 @@ flowchart LR
 1. **烧录**对应板子的固件，在控制台登记设备 ID。
 2. 在控制台**签发** `oct_…` 令牌，把 [skill.md](https://onlyclaws.world/api/agent/skill.md) 交给 Agent。
 3. Agent **下发**脚本，板子执行，`emit()` 的事件回流给 Agent。
+
+控制面会给每次下发做 Ed25519 签名。板子先验签，再把脚本写进 OTA 应用槽旁边的 128 KB LittleFS 分区。断电或重启后从 Flash 加载最后一份可用脚本，没有 Wi-Fi 也会跑。新脚本如果启动失败，会退回上一版（保留最近 3 版）。固件升级不会擦掉这个分区。说明见 [`doc/structurizr/SCRIPT-PERSIST.md`](doc/structurizr/SCRIPT-PERSIST.md)。
 
 ## 一个应用就是一段 Lua
 
@@ -212,7 +214,7 @@ ESP32-S3 构建还能跑 Agent 运行时下发的小模型，不用重新烧录�
 
 ## 状态
 
-固件版本线 `agent-runtime-0.18.x`：屏和音频插件从 `0.13.6` 开始，RoArm-M2 机械臂插件从 `0.16.0` 开始，Claude Hardware Buddy 从 `0.17.0` 开始，端侧模型从 `0.18.0` 开始。为控制成本和滥用，托管控制台目前邀请制。欢迎提 Issue 和 PR，尤其是新的屏幕插件和示例应用。
+固件版本线 `agent-runtime-0.20.x`：屏和音频插件从 `0.13.6` 开始，RoArm-M2 机械臂插件从 `0.16.0` 开始，Claude Hardware Buddy 从 `0.17.0` 开始，端侧模型从 `0.18.0` 开始，签名脚本掉电保留从 `0.20.0` 开始。为控制成本和滥用，托管控制台目前邀请制。欢迎提 Issue 和 PR，尤其是新的屏幕插件和示例应用。
 
 ## 贡献
 

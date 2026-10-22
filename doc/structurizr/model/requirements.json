@@ -30,6 +30,15 @@
       "acceptance": "POST /api/scripts deploys source; device runs on_start/on_loop; /api/script/stop ends loop; emit() reaches GET /api/events"
     },
     {
+      "id": "REQ-SCRIPT-PERSIST",
+      "title": "Signed Lua survives reboot on a LittleFS partition",
+      "component": "script_store",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["rlcd/tests/test_script_store.py", "server/tests/test_script_sign.py"],
+      "acceptance": "partitions_16MB.csv adds a 128KB littlefs data partition beside dual OTA slots without moving the spiffs ML cache; partitions_4MB.csv does the same beside the 3MB app slot; deploy signs an LCLW envelope with Ed25519; the device verifies the signature before writing, uses a .tmp read-back and rename, keeps 3 versions, reloads the newest valid script at boot, rolls back when a version fails, and enters safe mode when none remain; OTA app slots do not overlap littlefs; stop clears the run flag; missing signing key is 503"
+    },
+    {
       "id": "REQ-DEVICE-REGISTER",
       "title": "Multi-tenant device register and rotate token",
       "component": "control_plane",
