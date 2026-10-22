@@ -1,0 +1,14 @@
+# ESP32-S3 16MB. Dual OTA slots plus a LittleFS script partition.
+# app0 stays the stock 0x640000. app1 is 128KB smaller so `littlefs` fits
+# between the apps and the unchanged `spiffs` partition (ML model cache).
+# OTA writes an app slot only. Do not erase `littlefs` (no erase_flash,
+# no esp_partition_erase on this label). A full flash is required once so
+# this table replaces default_16MB.csv; later app uploads keep script files.
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x640000,
+app1,     app,  ota_1,   0x650000,0x620000,
+littlefs, data, spiffs,  0xC70000,0x20000,
+spiffs,   data, spiffs,  0xc90000,0x360000,
+coredump, data, coredump,0xFF0000,0x10000,
