@@ -1105,6 +1105,8 @@ bool scriptEngineLoadLua(const char *scriptId, const char *luaSource, const char
   return true;
 }
 
+void scriptEngineFail(const char *err) { setError(err && err[0] ? err : "error"); }
+
 void scriptEngineStop(const char *reason) {
   gState = "stopped";
   if (reason && reason[0]) gError = reason;

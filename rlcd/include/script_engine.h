@@ -51,6 +51,7 @@ bool scriptEngineLoadLua(const char *scriptId, const char *luaSource, const char
                          uint32_t everyMs);
 
 void scriptEngineStop(const char *reason = "stopped");
+void scriptEngineFail(const char *err);
 void scriptEngineTick();
 bool scriptEngineIsRunning();
 const char *scriptEngineScriptId();

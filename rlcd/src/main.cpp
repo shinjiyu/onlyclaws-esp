@@ -25,13 +25,15 @@
 #include "oc_features.h"
 #include "panel_plugin.h"
 #include "script_engine.h"
+#include "script_store_flash.h"
 #include "sensors.h"
 #include "tts_esp.h"
 #include "wifi_ap_prov.h"
 #include "wifi_store.h"
 
 namespace {
-constexpr const char *FW_VERSION = "agent-runtime-0.19.1";
+constexpr const char *FW_VERSION = "agent-runtime-0.20.0";
+constexpr size_t kNetJsonCap = 40 * 1024;
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr uint32_t BATTERY_INTERVAL_MS = 30UL * 1000UL;
 
@@ -323,6 +325,12 @@ void fillStatus(DynamicJsonDocument &doc) {
   meta["script_state"] = scriptEngineState();
   meta["script_lang"] = scriptEngineLanguage();
   if (scriptEngineLastError()[0]) meta["script_error"] = scriptEngineLastError();
+  ScriptPersistInfo flash{};
+  if (scriptStoreInfo(&flash)) {
+    meta["script_flash"] = flash.mounted;
+    meta["script_safe"] = flash.safeMode;
+    if (flash.version) meta["script_version"] = flash.version;
+  }
   meta["api_host"] = apiConfigGet().host;
   meta["panel"] = panelPluginName();
   meta["audio"] = audioPluginName();
@@ -342,7 +350,7 @@ void fillStatus(DynamicJsonDocument &doc) {
 }
 
 void postStatus() {
-  DynamicJsonDocument doc(1024);
+  DynamicJsonDocument doc(1400);
   fillStatus(doc);
   if (sessionReady) {
     doc["type"] = "status";
@@ -359,7 +367,7 @@ void postStatus() {
 }
 
 void sendHello() {
-  DynamicJsonDocument doc(1280);
+  DynamicJsonDocument doc(1536);
   fillStatus(doc);
   doc["type"] = "hello";
   doc["token"] = apiDeviceToken();
@@ -382,39 +390,40 @@ void ackMessage(const String &messageId, bool ok, uint32_t ms) {
 }
 
 bool loadLuaFromEnvelope(const String &scriptIdIn, const String &bodyIn) {
-  String scriptId = scriptIdIn;
-  String mode = "loop";
-  uint32_t everyMs = 1000;
-  String lua;
-
-  DynamicJsonDocument wrap(16384);
-  if (!deserializeJson(wrap, bodyIn)) {
-    if (wrap["script_id"]) scriptId = wrap["script_id"].as<String>();
-    if (wrap["mode"]) mode = wrap["mode"].as<String>();
-    if (!wrap["every_ms"].isNull()) everyMs = wrap["every_ms"].as<uint32_t>();
-    const char *lang = wrap["language"] | "lua";
-    if (strcmp(lang, "lua") != 0) {
-      Serial.printf("[script] unsupported language=%s\n", lang);
-      return false;
-    }
-    if (wrap["source"].is<const char *>()) {
-      lua = wrap["source"].as<const char *>();
-    } else if (wrap["source"].is<String>()) {
-      lua = wrap["source"].as<String>();
-    } else if (!wrap["source"].isNull()) {
-      // Reject JSON-tools objects; framework is Lua-only now.
-      return false;
-    }
-  } else {
-    // Raw Lua source in body
-    lua = bodyIn;
+  DynamicJsonDocument wrap(kNetJsonCap);
+  if (deserializeJson(wrap, bodyIn)) {
+    Serial.println("[script] unsigned body dropped");
+    scriptEngineFail("unsigned script");
+    return false;
   }
-  if (!lua.length()) return false;
-  return scriptEngineLoadLua(scriptId.c_str(), lua.c_str(), mode.c_str(), everyMs);
+  String scriptId = scriptIdIn;
+  if (wrap["script_id"].is<const char *>()) scriptId = wrap["script_id"].as<const char *>();
+  const char *lang = wrap["language"] | "lua";
+  if (strcmp(lang, "lua") != 0) {
+    Serial.printf("[script] unsupported language=%s\n", lang);
+    scriptEngineFail("unsupported language");
+    return false;
+  }
+  if (!wrap["source"].is<const char *>()) {
+    scriptEngineFail("unsigned script");
+    return false;
+  }
+  const char *mode = wrap["mode"] | "loop";
+  const uint32_t everyMs = wrap["every_ms"] | 1000;
+  const char *source = wrap["source"] | "";
+  const char *sig = wrap["sig"] | "";
+  const char *sha = wrap["sha256"] | "";
+  const uint32_t version = wrap["version"] | 0;
+  if (!source[0] || !sig[0] || !sha[0] || !version) {
+    Serial.println("[script] unsigned script dropped");
+    scriptEngineFail("unsigned script");
+    return false;
+  }
+  return scriptStoreAcceptAndRun(scriptId.c_str(), source, mode, everyMs, version, sha, sig);
 }
 
 bool handlePayload(const String &json) {
-  DynamicJsonDocument doc(16384);
+  DynamicJsonDocument doc(kNetJsonCap);
   if (deserializeJson(doc, json)) return false;
   const bool sessionFrame = doc["type"] == "message";
   if (!sessionFrame && (!doc["success"].as<bool>() || doc["message"].isNull())) return false;
@@ -434,6 +443,7 @@ bool handlePayload(const String &json) {
 
   if (!strcmp(type, "script_stop")) {
     scriptEngineStop("remote stop");
+    scriptStoreOnStop();
     resetFrameworkUi();
     statusLine1 = "OnlyClaws";
     statusLine2 = "script stopped";
@@ -504,7 +514,7 @@ void IRAM_ATTR onKeyIsr() {
   }
 }
 
-char netJsonBuf[16384];
+char netJsonBuf[kNetJsonCap];
 volatile bool netJsonReady = false;
 
 WebSocketsClient session;
@@ -686,13 +696,23 @@ void setupImpl() {
   MlHooks mlHooks;
   if (audioPluginMicReady()) mlHooks.micRead = audioPluginMicRead;
   mlBegin(mlHooks);
+  scriptStoreBegin();
+  scriptStoreBoot();
 
   Serial.printf("fw=%s panel=%s audio=%s device=%s cloud=%s%s heap=%u\n", FW_VERSION,
                 panelPluginName(), audioPluginName(), apiConfigGet().deviceId.c_str(),
                 apiConfigGet().host.c_str(), apiConfigGet().pathPrefix.c_str(),
                 ESP.getFreeHeap());
 
-  while (!ensureWifiConnected()) delay(1000);
+  if (!scriptStoreRunsOffline()) {
+    while (!ensureWifiConnected()) delay(1000);
+  } else {
+    WifiCreds creds;
+    if (wifiStoreLoad(creds)) connectWifiWith(creds, 8000);
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("[script] wifi down; persisted script runs offline");
+    }
+  }
 
   // ESP32 requires WiFi modem sleep when BLE is also on (else abort).
   WiFi.setSleep(true);
@@ -769,16 +789,27 @@ void loopImpl() {
   if (!claudeBuddyOwnsScreen()) scriptEngineTick();
 
   if (WiFi.status() != WL_CONNECTED) {
-    WifiCreds creds;
-    if (wifiStoreLoad(creds) && connectWifiWith(creds, 15000)) {
-      drawRuntimeHud(true);
-      postStatus();
+    if (scriptStoreRunsOffline() && scriptEngineIsRunning()) {
+      // A script from flash keeps ticking while STA is down. Long-press KEY
+      // still opens the setup portal. Retry the saved network occasionally.
+      static uint32_t nextWifiTry = 0;
+      if ((int32_t)(millis() - nextWifiTry) >= 0) {
+        WifiCreds creds;
+        if (wifiStoreLoad(creds)) connectWifiWith(creds, 3000);
+        nextWifiTry = millis() + 30000;
+      }
     } else {
-      drawPortalHint();
-      wifiApProvision(0);
+      WifiCreds creds;
+      if (wifiStoreLoad(creds) && connectWifiWith(creds, 15000)) {
+        drawRuntimeHud(true);
+        postStatus();
+      } else {
+        drawPortalHint();
+        wifiApProvision(0);
+      }
+      delay(500);
+      return;
     }
-    delay(500);
-    return;
   }
 
   delay(15);

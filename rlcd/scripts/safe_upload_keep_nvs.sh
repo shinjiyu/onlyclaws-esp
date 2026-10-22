@@ -42,7 +42,7 @@ python3 "$ESPTOOL" --chip "$CHIP" -p "$PORT" -b 460800 \
 cp "$NVS_BIN" "${BACKUP_DIR}/nvs-${MAC_HEX}-$(date +%Y%m%d-%H%M%S).bin"
 ls -lh "$NVS_BIN"
 
-echo "Uploading app only (no erase_flash)..."
+echo "Uploading app only (no erase_flash; LittleFS script partition is left intact)..."
 cd "$ROOT"
 pio run -e "$ENV_NAME" -t upload --upload-port "$PORT"
 echo "DONE device=${MAC_HEX} env=${ENV_NAME}"

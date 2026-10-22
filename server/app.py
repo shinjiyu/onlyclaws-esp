@@ -47,6 +47,7 @@ import accounts
 import device_session
 import ml_registry
 import render as epd_render
+import script_sign
 import snake_ctrl
 import tenancy
 from capability_policy import tool_allowed_for_caps
@@ -54,6 +55,9 @@ from capability_policy import tool_allowed_for_caps
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("EPD_DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / "epaper.db"
+SCRIPT_SIGNING_KEY = Path(
+    os.environ.get("EPD_SCRIPT_SIGNING_KEY", str(DATA_DIR / "script_signing_key.pem"))
+)
 STATIC_DIR = BASE_DIR / "static"
 ASSET_DIR = DATA_DIR / "assets"
 BITMAP_DIR = DATA_DIR / "bitmaps"
@@ -201,6 +205,7 @@ def init_db() -> None:
         )
         VOICE_DIR.mkdir(parents=True, exist_ok=True)
         ensure_column(conn, "scripts", "owner_email", "TEXT")
+        ensure_column(conn, "device_scripts", "script_version", "INTEGER NOT NULL DEFAULT 0")
         for did, (_w, _h, name) in DEVICE_PANELS.items():
             conn.execute(
                 """
@@ -1533,18 +1538,41 @@ async def deploy_script(
     if len(source) > SCRIPT_SOURCE_MAX + 512:
         raise HTTPException(status_code=400, detail="script too large after overrides")
     device_id = resolve_user_device_id(body.device_id, sess)
+    with db() as conn:
+        prev = conn.execute(
+            "SELECT script_version FROM device_scripts WHERE device_id=?",
+            (device_id,),
+        ).fetchone()
+    try:
+        version = script_sign.next_version(prev["script_version"] if prev else 0)
+        signed = script_sign.signed_script_fields(
+            script_id=script_id,
+            source=record["source"],
+            mode=record["mode"],
+            every_ms=int(record["every_ms"]),
+            version=version,
+            key_path=SCRIPT_SIGNING_KEY,
+        )
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503, detail="script signing key not configured on server"
+        ) from None
+    except script_sign.ScriptSignError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     now = utc_now()
     with db() as conn:
         conn.execute(
             """
-            INSERT INTO device_scripts (device_id, script_id, source, mode, status, updated_at)
-            VALUES (?, ?, ?, ?, 'deployed', ?)
+            INSERT INTO device_scripts
+              (device_id, script_id, source, mode, status, updated_at, script_version)
+            VALUES (?, ?, ?, ?, 'deployed', ?, ?)
             ON CONFLICT(device_id) DO UPDATE SET
               script_id=excluded.script_id,
               source=excluded.source,
               mode=excluded.mode,
               status='deployed',
-              updated_at=excluded.updated_at
+              updated_at=excluded.updated_at,
+              script_version=excluded.script_version
             """,
             (
                 device_id,
@@ -1552,6 +1580,7 @@ async def deploy_script(
                 source,
                 record.get("mode") or "loop",
                 now,
+                version,
             ),
         )
     envelope = json.dumps(
@@ -1561,6 +1590,9 @@ async def deploy_script(
             "mode": record["mode"],
             "every_ms": record["every_ms"],
             "source": record["source"],
+            "version": signed["version"],
+            "sha256": signed["sha256"],
+            "sig": signed["sig"],
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -1577,6 +1609,7 @@ async def deploy_script(
         "device_id": device_id,
         "script_id": script_id,
         "language": "lua",
+        "version": version,
         "message": msg,
     }
 
