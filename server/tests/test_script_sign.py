@@ -83,7 +83,11 @@ def test_prefix_layout_and_openssl_roundtrip(tmp_path: Path):
     assert len(raw) == 32
     header = (ROOT / "rlcd" / "include" / "cloud_config.h").read_text()
     assert 'OC_SCRIPT_PUBKEY_HEX "' in header
-    assert len(header.split('OC_SCRIPT_PUBKEY_HEX "')[1].split('"')[0]) == 64
+    hexkey = header.split('OC_SCRIPT_PUBKEY_HEX "')[1].split('"')[0]
+    # Empty until an operator pastes a key. Firmware then refuses every script.
+    assert hexkey == "" or (
+        len(hexkey) == 64 and all(c in "0123456789abcdefABCDEF" for c in hexkey)
+    )
 
 
 def test_next_version_and_rejections(tmp_path: Path):
