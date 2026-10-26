@@ -33,3 +33,10 @@ rlcd/third_party/esp_tts/xiaoxin_small.dat
 rlcd/lib/tflm/
 rlcd/lib/esp-nn/
 ml/tools/build/
+# Android (OCA) — see android/
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+android/*.apk
+android/*.aab

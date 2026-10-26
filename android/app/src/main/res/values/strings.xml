@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OnlyClaws Android</string>
+    <string name="channel">连接</string>
+    <string name="note">正在与 OnlyClaws 保持会话</string>
+    <string name="permit_overlay">允许在其他应用上层显示</string>
+    <string name="wallpaper_name">OnlyClaws 壁纸</string>
+    <string name="wallpaper_desc">由脚本装上的预设，壳自己画</string>
+    <string name="set_wallpaper">设为动态壁纸</string>
+</resources>

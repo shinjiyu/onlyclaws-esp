@@ -198,6 +198,7 @@ ESP32-S3 构建还能跑 Agent 运行时下发的小模型，不用重新烧录�
 |------|------|
 | [`rlcd/`](rlcd/) | 固件，在这里编译烧录 |
 | [`server/`](server/) | 控制面：设备、脚本、事件、位图、控制台 |
+| [`android/`](android/) | OnlyClaws Android（OCA）：手机上的 Rhino JS 容器，走同一套会话 / `js` 下发 |
 | [`demos/`](demos/) | 可部署的 Lua 应用：贪食蛇（按键、手机方向键或 HTTP 控制）、实时 RL 训练看板、Wi-Fi 质量监控、机械臂姿态保持、yes/no 语音关键词识别 |
 | [`ml/`](ml/) | 可直接上传到 `/api/ml/models` 的模型（`.tflite` + 元数据） |
 | [`jev_servo/`](jev_servo/) | 主机侧机械臂控制：正运动学、USB 和云端两种通道、MCP 服务、网页控制台 |
