@@ -37,3 +37,10 @@ ml/tools/build/
 # Web-flash packages (bins only; keep README / manifests if committed without bins)
 server/firmware/**/*.bin
 server/firmware/**/VERSION
+# Android (OCA) — see android/
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+android/*.apk
+android/*.aab
