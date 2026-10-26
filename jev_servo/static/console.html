@@ -182,6 +182,36 @@
       object-fit: contain;
     }
     #camView[hidden] { display: none; }
+    .teach-count {
+      display: none;
+      margin-top: 0.85rem;
+      padding: 0.85rem 1rem;
+      border-radius: 10px;
+      border: 1px solid #9bcbb3;
+      background: var(--run-bg);
+      color: var(--run);
+      font-family: var(--mono);
+      align-items: baseline;
+      gap: 0.75rem;
+    }
+    .teach-count.on { display: flex; }
+    .teach-count.warn {
+      border-color: #c9b27a;
+      background: var(--idle-bg);
+      color: var(--idle);
+    }
+    .teach-count .n {
+      font-size: 2.4rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1;
+      min-width: 3.2rem;
+    }
+    .teach-count .lbl {
+      font-family: var(--sans);
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -210,7 +240,11 @@
         <button class="btn-cam" id="btnTeach" type="button">关力矩</button>
         <button class="btn-stop" id="btnHold" type="button">立即锁定</button>
       </div>
-      <div class="hint">先扶住臂再点关力矩。摆好后松手，静止约 1 秒自动锁定。找人或跟随时串口被占用，这个按钮不起作用。</div>
+      <div class="hint">先扶住臂再点关力矩。会先倒数 3 秒再关力矩；摆好后松手，静止约 0.8 秒自动锁定。倒数期间点「取消」可中止。找人或跟随时串口被占用，这个按钮不起作用。</div>
+      <div id="teachCount" class="teach-count" aria-live="polite">
+        <span class="n" id="teachCountN">—</span>
+        <span class="lbl" id="teachCountLbl"></span>
+      </div>
       <div style="margin-top:0.75rem">
         <label for="poseName">姿态名（可选）</label>
         <input id="poseName" type="text" placeholder="填写后锁定时写入 poses.json，例如 desk" />
@@ -284,6 +318,7 @@
     let follow = true;
     let camOn = false;
     let camPending = false;
+    let teachBusy = false;
 
     function applyCam(cam) {
       const on = !!(cam && cam.on);
@@ -404,13 +439,29 @@
     function applyTeach(teach, presenceOn) {
       if (!teach) return;
       const busy = !!teach.busy;
+      const phase = teach.phase || "";
       $("btnTeach").disabled = busy || presenceOn;
       $("poseName").disabled = busy;
       if (presenceOn || busy) $("btnStart").disabled = true;
+      $("btnHold").textContent = phase === "countdown" ? "取消" : "立即锁定";
       $("teachMsg").textContent = teach.msg || "";
       $("teachQ").textContent = teach.q
         ? "q = " + teach.q.map((x) => Number(x).toFixed(3)).join(", ")
         : "";
+      const box = $("teachCount");
+      const n = teach.countdown_s;
+      if (typeof n === "number" && (phase === "countdown" || phase === "settling")) {
+        box.classList.add("on");
+        box.classList.toggle("warn", phase === "countdown");
+        $("teachCountN").textContent = n.toFixed(1);
+        $("teachCountLbl").textContent =
+          phase === "countdown" ? "秒后关力矩 — 请扶住臂" : "秒后锁定 — 保持静止";
+      } else {
+        box.classList.remove("on", "warn");
+        $("teachCountN").textContent = "—";
+        $("teachCountLbl").textContent = "";
+      }
+      teachBusy = busy;
     }
 
     $("btnTeach").onclick = async () => {
@@ -482,8 +533,12 @@
       follow = true;
     };
 
-    setInterval(refresh, 500);
-    refresh();
+    function scheduleRefresh() {
+      refresh().finally(() => {
+        setTimeout(scheduleRefresh, teachBusy ? 120 : 500);
+      });
+    }
+    scheduleRefresh();
   </script>
 </body>
 </html>
