@@ -145,7 +145,9 @@ Pick the path that fits.
 
 ### 2. Flash the firmware
 
-Requires Python 3 and PlatformIO 6.
+**Browser (recommended when bins are published):** open [onlyclaws.world/flash](https://onlyclaws.world/flash/) in Chrome/Edge, pick your board, connect USB. Operators package builds with `bash rlcd/scripts/package_web_flash.sh <pio-env>`.
+
+**PlatformIO** (Python 3 + PlatformIO 6):
 
 ```bash
 python3 -m pip install -U platformio --user

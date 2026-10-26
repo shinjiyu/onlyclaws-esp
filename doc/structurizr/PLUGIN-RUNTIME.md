@@ -21,6 +21,7 @@ plugins (link-time)
 | `esp32-s3-bare` | core + ml (`ml.run` only, no mic) |
 | `esp32-s3-rlcd-42` | panel + audio + ble_pad + claude_buddy + sensors + ml |
 | `esp32-s3-epaper-397` | panel + audio + sensors + ml (BLE off) |
+| `esp32-s3-amoled-175c` | panel (stub CO5300) + audio + sensors + ml — **web-flash CI SKU**; touch/color Lua still TBD; [AMOLED-175C-PRODUCT.md](./AMOLED-175C-PRODUCT.md) |
 | `esp32-roarm-m2` | arm — **no panel/gfx** |
 
 ## Contracts

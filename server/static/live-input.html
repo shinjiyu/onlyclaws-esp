@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>记一条评论</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #16130f;
+      color: #f4efe6;
+      font: 18px/1.45 "PingFang SC", "Noto Sans SC", sans-serif;
+    }
+    main { max-width: 560px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .hint { margin: 0 0 18px; color: #c8b8a2; font-size: 15px; }
+    label { display: block; margin: 14px 0 6px; font-size: 14px; letter-spacing: 0.08em; color: #c8b8a2; }
+    input, textarea {
+      width: 100%;
+      border: 0;
+      border-radius: 12px;
+      background: #2a241c;
+      color: inherit;
+      font: inherit;
+    }
+    input { padding: 12px 14px; }
+    textarea { min-height: 120px; padding: 14px; resize: vertical; }
+    button {
+      margin-top: 14px;
+      border: 0;
+      border-radius: 999px;
+      background: #e8a54b;
+      color: #1a140e;
+      padding: 12px 26px;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.45; }
+    .status { min-height: 24px; margin: 10px 0 0; color: #e8a54b; font-size: 15px; }
+    h2 { margin: 28px 0 8px; font-size: 14px; letter-spacing: 0.12em; color: #c8b8a2; }
+    ul { margin: 0; padding: 0; list-style: none; }
+    li { margin: 10px 0; font-size: 18px; }
+    li b { color: #e8a54b; font-weight: 650; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>记一条评论</h1>
+    <p class="hint">先写你的名字。这句话会出现在爪子的直播画面上。</p>
+    <form id="note">
+      <label for="name">名字</label>
+      <input id="name" name="name" maxlength="16" autocomplete="nickname" placeholder="怎么称呼你" required />
+      <label for="text">一句话</label>
+      <textarea id="text" maxlength="120" placeholder="想让爪子看到的一句话" required></textarea>
+      <button type="submit">发给直播</button>
+    </form>
+    <p class="status" id="status"></p>
+    <h2>已经记下</h2>
+    <ul id="comments"></ul>
+  </main>
+<script>
+function render(items) {
+  const list = document.getElementById("comments");
+  list.replaceChildren();
+  items.slice(-12).forEach((item) => {
+    const li = document.createElement("li");
+    const name = document.createElement("b");
+    name.textContent = (item.name || "观众") + " ";
+    li.append(name, document.createTextNode(item.text || ""));
+    list.append(li);
+  });
+}
+
+async function pullComments() {
+  const data = await (await fetch("/live/comments?after=0", { cache: "no-store" })).json();
+  render(data.comments || []);
+}
+
+document.getElementById("note").onsubmit = async (event) => {
+  event.preventDefault();
+  const nameInput = document.getElementById("name");
+  const textInput = document.getElementById("text");
+  const status = document.getElementById("status");
+  const name = nameInput.value.trim();
+  const text = textInput.value.trim();
+  if (!name) {
+    status.textContent = "请填写名字";
+    nameInput.focus();
+    return;
+  }
+  if (!text) {
+    status.textContent = "写一句再发";
+    return;
+  }
+  const button = event.submitter;
+  if (button) button.disabled = true;
+  try {
+    const res = await fetch("/live/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, text }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      status.textContent = data.error || "没记上";
+      return;
+    }
+    textInput.value = "";
+    status.textContent = "已发到直播";
+    pullComments().catch(() => {});
+  } catch (err) {
+    status.textContent = String(err && err.message || err);
+  } finally {
+    if (button) button.disabled = false;
+    textInput.focus();
+  }
+};
+
+pullComments().catch(() => {});
+setInterval(() => pullComments().catch(() => {}), 2000);
+</script>
+</body>
+</html>

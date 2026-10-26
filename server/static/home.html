@@ -105,6 +105,7 @@
       <nav class="nav-links">
         <a href="#how" data-i18n="nav.how">工作方式</a>
         <a href="#hardware" data-i18n="nav.hardware">硬件</a>
+        <a href="flash/" data-i18n="nav.flash">烧录</a>
         <a href="#code" data-i18n="nav.code">代码</a>
         <a href="api/agent/skill.md" target="_blank" rel="noopener" data-i18n="nav.docs">Agent 文档</a>
         <a href="https://github.com/shinjiyu/onlyclaws-esp" target="_blank" rel="noopener">GitHub</a>
@@ -370,7 +371,7 @@ curl $BASE/api/events \
     OC.addStrings({
       zh: {
         "home.doc_title": "OnlyClaws：给 Agent 的 ESP32 运行时",
-        "nav.how": "工作方式", "nav.hardware": "硬件", "nav.code": "代码", "nav.docs": "Agent 文档", "nav.console": "控制台", "nav.apply": "申请",
+        "nav.how": "工作方式", "nav.hardware": "硬件", "nav.flash": "烧录", "nav.code": "代码", "nav.docs": "Agent 文档", "nav.console": "控制台", "nav.apply": "申请",
         "hero.eyebrow": "开源 ESP32 Agent 运行时",
         "hero.title": "给 Agent 一只<em>爪子</em>，<br />伸进真实世界。",
         "hero.lede": "OnlyClaws 把一块 ESP32 变成 Agent 的外设。固件只烧一次，之后 Agent 通过 HTTP 下发 Lua 脚本，板子负责画屏、发声、动机械臂、读传感器、回报事件。模型留在云端，板子只管执行。",
@@ -381,7 +382,7 @@ curl $BASE/api/events \
         "how.title": "三步，把一块板子变成 Agent 的外设",
         "how.lede": "你只需要做一次硬件上的事。之后换应用、改界面、加逻辑，都是 Agent 发一段脚本。",
         "how.s1.t": "烧录固件",
-        "how.s1.b": "选一个 PlatformIO 环境（裸片、RLCD、墨水屏或 RoArm 机械臂），按需开启屏幕和音频插件。引脚不同就改 <code>board_pins.h</code> 再编译。",
+        "how.s1.b": "打开 <a href=\"/flash/\">Web 烧录</a>，用浏览器经 USB 安装对应产品；或用 PlatformIO 环境（裸片、RLCD、墨水屏、RoArm）。引脚不同就改 <code>board_pins.h</code>。",
         "how.s2.t": "绑定设备",
         "how.s2.b": "在控制台登记设备 ID，拿到只显示一次的 <code>device_token</code>，写进固件或 NVS。板子连上云端会话，消息从这条连接推下来。",
         "how.s3.t": "交给 Agent",
@@ -431,7 +432,7 @@ curl $BASE/api/events \
       },
       en: {
         "home.doc_title": "OnlyClaws: an agent runtime for ESP32",
-        "nav.how": "How it works", "nav.hardware": "Hardware", "nav.code": "Code", "nav.docs": "Agent docs", "nav.console": "Console", "nav.apply": "Apply",
+        "nav.how": "How it works", "nav.hardware": "Hardware", "nav.flash": "Flash", "nav.code": "Code", "nav.docs": "Agent docs", "nav.console": "Console", "nav.apply": "Apply",
         "hero.eyebrow": "Open-source agent runtime for ESP32",
         "hero.title": "Give your agent<br />a <em>claw</em> in the real world.",
         "hero.lede": "OnlyClaws turns an ESP32 into a peripheral for your agent. Flash the firmware once. After that the agent sends Lua over HTTP, and the board draws, plays sound, moves a robot arm, reads sensors and reports events. The model stays in the cloud; the board just runs the script.",
@@ -442,7 +443,7 @@ curl $BASE/api/events \
         "how.title": "Three steps from a bare board to an agent peripheral",
         "how.lede": "You touch the hardware once. After that, new apps, new screens and new logic are a script your agent sends.",
         "how.s1.t": "Flash the firmware",
-        "how.s1.b": "Pick a PlatformIO environment (bare, RLCD, e-paper or the RoArm robot arm) and turn on the panel and audio plugins you need. Different wiring? Edit <code>board_pins.h</code> and rebuild.",
+        "how.s1.b": "Open <a href=\"/flash/\">Web flash</a> and install over USB in the browser, or build a PlatformIO env (bare, RLCD, e-paper, RoArm). Different wiring? Edit <code>board_pins.h</code>.",
         "how.s2.t": "Bind the device",
         "how.s2.b": "Register the device ID in the console and copy the one-time <code>device_token</code> into firmware or NVS. The board opens a session and receives messages on that socket.",
         "how.s3.t": "Hand it to your agent",

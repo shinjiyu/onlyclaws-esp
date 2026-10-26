@@ -58,12 +58,12 @@
     },
     {
       "id": "REQ-PANEL-SURFACE",
-      "title": "PanelDisplay abstracts RLCD 400x300 and ePaper 800x480",
+      "title": "PanelDisplay abstracts RLCD, ePaper, and planned AMOLED 1.75C",
       "component": "panel",
       "ui": false,
       "test_kind": "manual",
       "tests": [],
-      "acceptance": "pio env selects BOARD_PANEL_*; Lua gfx.W/H match compiled size; flush/showGxBitmap work; slowPanel true on e-ink"
+      "acceptance": "pio env selects BOARD_PANEL_*; Lua gfx.W/H match compiled size; flush/showGxBitmap work on 1bpp panels; slowPanel true on e-ink; AMOLED env (when built) reports 466x466 and slowPanel false"
     },
     {
       "id": "REQ-LUA-GFX",
@@ -72,7 +72,43 @@
       "ui": false,
       "test_kind": "manual",
       "tests": [],
-      "acceptance": "clear/pixel/line/rect/circle/text/blit/flush/qr behave; demos layout via gfx.W/H not hard-coded single size"
+      "acceptance": "clear/pixel/line/rect/circle/text/blit/flush/qr behave; demos layout via gfx.W/H not hard-coded single size; color 0/1 remains valid on all panel products"
+    },
+    {
+      "id": "REQ-LUA-GFX-COLOR",
+      "title": "Color/round Lua gfx extensions for AMOLED badge",
+      "component": "panel",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "On amoled-175c: gfx.color true, gfx.bpp 16, gfx.rgb/palette, gfx.shape round, gfx.safe_r/in_round/polar; 0/1 draws map via palette; full RGB frames only via gfx.image; contract in AMOLED-175C-PRODUCT.md; CO5300 driver may lag the API docs"
+    },
+    {
+      "id": "REQ-LUA-TOUCH",
+      "title": "Lua input.touch and on_touch behind capability touch",
+      "component": "script_engine",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Products with touch report capability touch; input.touch returns nil or {x,y,pressed}; on_touch(x,y,phase) gets down/move/up; absent capability omits APIs; control plane docs list them under touch only"
+    },
+    {
+      "id": "REQ-PANEL-AMOLED-175",
+      "title": "Product env for Waveshare ESP32-S3-Touch-AMOLED-1.75C",
+      "component": "device_runtime",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Env esp32-s3-amoled-175c links panel+audio+sensors+ml (no arm/TTS/BLE); product=amoled-175c; pin map in board_pins; CO5300 stub until QSPI driver; sole public web-flash CI SKU via web-flash-amoled.yml"
+    },
+    {
+      "id": "REQ-WEB-FLASH",
+      "title": "Browser Web Serial flash for product firmwares",
+      "component": "control_plane",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["server/tests/test_firmware_catalog.py"],
+      "acceptance": "GET /flash serves the installer UI; GET /api/firmware lists products with ready flags; each ready product exposes an ESP Web Tools manifest and bin parts under /firmware/<id>/; Chrome/Edge over HTTPS or localhost; packaging script copies PlatformIO artifacts without committing bins"
     },
     {
       "id": "REQ-AUDIO",

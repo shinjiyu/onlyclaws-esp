@@ -1,0 +1,90 @@
+# Build + package the single public web-flash SKU (AMOLED 1.75C).
+# Does not matrix every composable product env — add SKUs deliberately later.
+name: web-flash-amoled
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "rlcd/**"
+      - "scripts/fetch_esp_lua.sh"
+      - "scripts/fetch_tflm.sh"
+      - "server/firmware_catalog.py"
+      - ".github/workflows/web-flash-amoled.yml"
+  pull_request:
+    paths:
+      - "rlcd/**"
+      - "scripts/fetch_esp_lua.sh"
+      - "scripts/fetch_tflm.sh"
+      - "server/firmware_catalog.py"
+      - ".github/workflows/web-flash-amoled.yml"
+
+concurrency:
+  group: web-flash-amoled-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIO_ENV: esp32-s3-amoled-175c
+  PLATFORMIO_CORE_DIR: ~/.platformio
+
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            rlcd/.pio
+          key: pio-amoled-${{ hashFiles('rlcd/platformio.ini', 'scripts/fetch_tflm.sh', 'scripts/fetch_esp_lua.sh') }}
+          restore-keys: |
+            pio-amoled-
+
+      - name: Install PlatformIO
+        run: pip install -U platformio
+
+      - name: Fetch EspLuaEngine
+        run: bash scripts/fetch_esp_lua.sh
+
+      - name: Fetch TFLite Micro + esp-nn
+        run: bash scripts/fetch_tflm.sh
+
+      - name: Build ${{ env.PIO_ENV }}
+        working-directory: rlcd
+        run: pio run -e "$PIO_ENV"
+
+      - name: Package web-flash bins
+        id: pack
+        run: |
+          VER="${{ github.sha }}"
+          VER="${VER:0:7}"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VER="${{ github.ref_name }}"
+          fi
+          bash rlcd/scripts/package_web_flash.sh "$PIO_ENV" "$VER"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          ls -la "server/firmware/$PIO_ENV"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-flash-${{ env.PIO_ENV }}-${{ steps.pack.outputs.version }}
+          path: server/firmware/${{ env.PIO_ENV }}/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Catalog smoke
+        run: |
+          cd server
+          python3 tests/test_firmware_catalog.py

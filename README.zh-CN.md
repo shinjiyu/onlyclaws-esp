@@ -145,7 +145,9 @@ end
 
 ### 2. 烧录固件
 
-需要 Python 3 和 PlatformIO 6。
+**浏览器（有打包固件时推荐）：** 用 Chrome/Edge 打开 [onlyclaws.world/flash](https://onlyclaws.world/flash/)，选板子，插 USB 安装。运维打包：`bash rlcd/scripts/package_web_flash.sh <pio-env>`。
+
+**PlatformIO**（Python 3 + PlatformIO 6）：
 
 ```bash
 python3 -m pip install -U platformio --user

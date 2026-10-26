@@ -171,7 +171,7 @@
             <p class="hint" data-i18n="ob.hint"></p>
             <div class="onboard">
               <div class="item" id="ob1"><span class="n">1</span><div><b data-i18n="ob.1.t"></b><span data-i18n-html="ob.1.b"></span></div><button class="btn sm" type="button" data-goto="devices" data-i18n="ob.1.btn">登记设备</button></div>
-              <div class="item"><span class="n">2</span><div><b data-i18n="ob.2.t"></b><span data-i18n-html="ob.2.b"></span></div><a class="btn sm ghost" href="https://github.com/shinjiyu/onlyclaws-esp#quick-start" target="_blank" rel="noopener" data-i18n="ob.2.btn">烧录说明</a></div>
+              <div class="item"><span class="n">2</span><div><b data-i18n="ob.2.t"></b><span data-i18n-html="ob.2.b"></span></div><a class="btn sm ghost" href="/flash/" data-i18n="ob.2.btn">Web 烧录</a></div>
               <div class="item" id="ob3"><span class="n">3</span><div><b data-i18n="ob.3.t"></b><span data-i18n-html="ob.3.b"></span></div><button class="btn sm ghost" type="button" data-goto="tokens" data-i18n="ob.3.btn">签发令牌</button></div>
             </div>
           </div>
@@ -433,7 +433,7 @@
         "ob.title": "三步接入你的第一块板子",
         "ob.hint": "完成后这里会显示设备状态、正在运行的脚本和最近事件。",
         "ob.1.t": "登记设备", "ob.1.b": "填设备 ID（MAC 后缀，串口启动日志里能看到），拿到一次性 <code>device_token</code>。", "ob.1.btn": "登记设备",
-        "ob.2.t": "烧录固件", "ob.2.b": "把 ID 和令牌写进 <code>device_secrets.h</code> 或 NVS，烧录后板子会自动上线。", "ob.2.btn": "烧录说明",
+        "ob.2.t": "烧录固件", "ob.2.b": "打开 <a href=\"/flash/\">Web 烧录</a>，用 Chrome/Edge 经 USB 安装对应产品固件；也可把 ID/令牌写进 NVS。", "ob.2.btn": "Web 烧录",
         "ob.3.t": "交给 Agent", "ob.3.b": "签发一个 <code>oct_</code> 令牌，把它和 skill.md 一起交给你的 Agent。", "ob.3.btn": "签发令牌",
         "scripts.title": "Lua 脚本", "scripts.sub": "保存的脚本可以随时部署到当前选中的设备。",
         "scripts.editor": "编辑器",
@@ -524,7 +524,7 @@
         "ob.title": "Connect your first board in three steps",
         "ob.hint": "Once done, this page shows device status, the running script and recent events.",
         "ob.1.t": "Register the device", "ob.1.b": "Enter the device ID (MAC suffix, printed in the serial boot log) and get a one-time <code>device_token</code>.", "ob.1.btn": "Register",
-        "ob.2.t": "Flash the firmware", "ob.2.b": "Put the ID and token in <code>device_secrets.h</code> or NVS. After flashing, the board comes online on its own.", "ob.2.btn": "Flash guide",
+        "ob.2.t": "Flash the firmware", "ob.2.b": "Open <a href=\"/flash/\">Web flash</a> and install the matching product over USB in Chrome/Edge; or put the ID/token in NVS.", "ob.2.btn": "Web flash",
         "ob.3.t": "Hand it to your agent", "ob.3.b": "Mint an <code>oct_</code> token and give it to your agent along with skill.md.", "ob.3.btn": "Mint token",
         "scripts.title": "Lua scripts", "scripts.sub": "Saved scripts can be deployed to the selected device at any time.",
         "scripts.editor": "Editor",

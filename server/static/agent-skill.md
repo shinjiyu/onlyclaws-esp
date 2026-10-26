@@ -42,18 +42,26 @@ On `401`, ask the human to mint/rotate a token at https://onlyclaws.world/consol
 Surface depends on device `capabilities[]` from `/status` (also in `GET /api/devices`).  
 Panel boards and the bare ESP32-S3 expose gfx/audio/sensors (no-ops where the hardware is missing); **RoArm-M2** exposes **arm.*** only (no gfx).
 
-### Graphics (panel products, 1bpp)
+### Graphics (panel products)
 
 `gfx.clear` / `pixel` / `line` / `rect` / `fill_rect` / `circle` / `fill_circle` / `text` / `flush`  
-`gfx.W` / `gfx.H` come from the panel (RLCD 400×300, ePaper 800×480). Color `0`/`1`. Call `gfx.flush()` after draw ops.
+`gfx.W` / `gfx.H` come from the panel (RLCD 400×300, ePaper 800×480, AMOLED 1.75C 466×466). Call `gfx.flush()` after draw ops.
+
+**1bpp panels** (RLCD / ePaper): color `0`/`1`. `gfx.bpp` is `1`, `gfx.color` is false, `gfx.shape` is `"rect"`.
+
+**Color round badge** (planned `amoled-175c`, capability still `panel` plus `touch`): `gfx.bpp` is `16`, `gfx.color` is true, `gfx.shape` is `"round"`. Extra APIs: `gfx.rgb(r,g,b)`, `gfx.palette`, `gfx.safe_r`, `gfx.in_round(x,y)`, `gfx.polar(angle_deg, radius [, cx, cy])`. Passing `0`/`1` still works (palette bg/fg). Keep content inside the circle. Full contract: repo `doc/structurizr/AMOLED-175C-PRODUCT.md`.
 
 Bitmaps (Gx MONO_HLSB: 1=white, 0=black, MSB left, width multiple of 8):
 
-- `gfx.blit(b64)` — full frame, exact `W*H/8` bytes, flushes
+- `gfx.blit(b64)` — full frame, exact `W*H/8` bytes, flushes (1bpp; on color panels drawn via palette)
 - `gfx.blit(x, y, w, h, b64)` — sprite, raw ≤ 16KB, does not flush
-- `gfx.image(name [, x [, y]])` — named asset from `POST /api/bitmaps`, does not flush
+- `gfx.image(name [, x [, y]])` — named asset from `POST /api/bitmaps`, does not flush (preferred for full-color art)
 
-Do not embed an 800×480 frame in Lua. Script source max is 24000 bytes; one full ePaper frame is 48000 raw bytes. Upload it with `POST /api/bitmaps` (`encoding` `png` or `gx`) and draw it with `gfx.image`.
+Do not embed an 800×480 (or 466×466 RGB) frame in Lua. Script source max is 24000 bytes; one full ePaper frame is 48000 raw bytes. Upload it with `POST /api/bitmaps` (`encoding` `png` or `gx`) and draw it with `gfx.image`.
+
+### Touch (capability `touch`, AMOLED badge)
+
+`input.touch()` → `nil` or `{x, y, pressed=true}` · optional `function on_touch(x, y, phase)` with `phase` `"down"` / `"move"` / `"up"`. Primary contact only.
 
 ### Audio (panel with codec)
 

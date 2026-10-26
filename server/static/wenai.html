@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a1220" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>文爱 · OnlyClaws</title>
+  <style>
+    :root {
+      --bg: #120d14;
+      --panel: #1e1522;
+      --line: #3a2d42;
+      --text: #f3e8f0;
+      --muted: #a894a8;
+      --accent: #e8a4c8;
+      --user: #2a3d52;
+      --bot: #261c2e;
+      --safe-b: env(safe-area-inset-bottom, 0px);
+      --safe-t: env(safe-area-inset-top, 0px);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+      -webkit-text-size-adjust: 100%;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100dvh;
+      padding-top: var(--safe-t);
+    }
+    .hidden { display: none !important; }
+
+    /* Login */
+    #loginView {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 400px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 22px 18px;
+    }
+    h1 { margin: 0 0 6px; font-size: 1.35rem; }
+    .sub { color: var(--muted); font-size: .88rem; margin: 0 0 18px; line-height: 1.45; }
+    label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 5px; }
+    input, textarea {
+      width: 100%;
+      background: #0f0a12;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--text);
+      padding: 12px;
+      font: inherit;
+      margin-bottom: 12px;
+    }
+    textarea { min-height: 100px; resize: vertical; font-size: .9rem; line-height: 1.45; }
+    button {
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #1a0f16;
+      font-weight: 600;
+      padding: 12px 16px;
+      font: inherit;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    button:disabled { opacity: .5; }
+    .err { color: #ff7b92; font-size: .88rem; margin-top: 8px; }
+
+    /* Chat app */
+    #appView {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      max-width: 720px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel) 90%, black);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    header h2 { margin: 0; font-size: 1rem; flex: 1; }
+    header .who { font-size: .75rem; color: var(--muted); }
+    #chatScroll {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 14px 12px 8px;
+    }
+    .bubble {
+      max-width: 88%;
+      margin-bottom: 10px;
+      padding: 10px 13px;
+      border-radius: 14px;
+      font-size: .95rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bubble.user {
+      margin-left: auto;
+      background: var(--user);
+      border-bottom-right-radius: 4px;
+    }
+    .bubble.bot {
+      margin-right: auto;
+      background: var(--bot);
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 4px;
+    }
+    .bubble.thinking {
+      color: var(--muted);
+      font-style: italic;
+    }
+    #composer {
+      border-top: 1px solid var(--line);
+      padding: 10px 10px calc(10px + var(--safe-b));
+      background: var(--panel);
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    #composer textarea {
+      flex: 1;
+      margin: 0;
+      min-height: 44px;
+      max-height: 120px;
+      resize: none;
+      padding: 10px 12px;
+    }
+    #composer button { flex-shrink: 0; min-width: 64px; }
+    details.settings {
+      margin: 0 12px 8px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 8px 10px;
+    }
+    details.settings summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: .85rem;
+      touch-action: manipulation;
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #666;
+    }
+    .status-dot.on { background: #5ce0a8; }
+    .status-dot.off { background: #ff7b92; }
+  </style>
+</head>
+<body>
+  <section id="loginView">
+    <div class="login-card">
+      <h1>文爱</h1>
+      <p class="sub">kuroneko.chat 登录 · 白名单用户 · 本机 MLX 推理</p>
+      <form id="loginForm">
+        <label for="email">邮箱</label>
+        <input id="email" type="email" autocomplete="username" required />
+        <label for="password">密码</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+        <button type="submit" id="loginBtn" style="width:100%">登录</button>
+        <div id="loginErr" class="err hidden"></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="appView" class="hidden">
+    <header>
+      <span id="upstreamDot" class="status-dot off" title="推理节点"></span>
+      <div>
+        <h2>莉莉</h2>
+        <div class="who" id="whoami"></div>
+      </div>
+      <button type="button" class="secondary" id="logoutBtn" style="padding:8px 12px;font-size:.82rem">退出</button>
+    </header>
+
+    <details class="settings" id="settingsBox">
+      <summary>角色设定（可改）</summary>
+      <textarea id="character"></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button type="button" class="secondary" id="resetCharBtn">恢复默认</button>
+        <button type="button" class="secondary" id="clearBtn">清空对话</button>
+      </div>
+    </details>
+
+    <div id="chatScroll"></div>
+
+    <form id="composer">
+      <textarea id="msg" rows="1" placeholder="跟莉莉说点什么…" enterkeyhint="send"></textarea>
+      <button type="submit" id="sendBtn">发送</button>
+    </form>
+  </section>
+
+  <script>
+    const DEFAULT_CHARACTER = `姓名：莉莉（女邻居）· 28 岁已婚成人
+外貌气质：端庄清雅，穿衣保守，看起来很守妇道。
+家庭：丈夫远洋海员，常年不在家。
+与用户：邻居。日常不主动勾引。
+
+核心矛盾：
+- 嘴上：害羞、推拒、「我有老公」「别这样」「被人看见怎么办」。
+- 身体/内心：被掌控、被命令、被说脏话时会发抖腿软；有被强迫幻想（成人自愿 CNC）。
+- 用户动手/下命令时：挣扎着顺从，边怕边有反应；不要纯礼貌结束话题。
+
+文风：对话为主，少量动作心理。不要客服腔。`;
+
+    let history = [];
+    let busy = false;
+    let healthTimer = null;
+
+    function apiHistoryPayload() {
+      return history
+        .filter((t) => t.content && t.content !== "…")
+        .map((t) => ({ role: t.role, content: t.content }));
+    }
+
+    async function api(path, opts = {}) {
+      const { timeoutMs, ...fetchOpts } = opts;
+      const controller = timeoutMs ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+      try {
+        const r = await fetch(path, {
+          credentials: "same-origin",
+          headers: {
+            ...(opts.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+            ...(opts.headers || {}),
+          },
+          signal: controller && controller.signal,
+          ...fetchOpts,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          let msg = data.message || data.detail || r.statusText;
+          if (Array.isArray(msg)) msg = msg.map((x) => x.msg || JSON.stringify(x)).join("; ");
+          if (r.status === 401) msg = "请重新登录";
+          if (r.status === 403) msg = msg || "无权限（不在文爱白名单）";
+          throw new Error(msg || ("HTTP " + r.status));
+        }
+        return data;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+
+    const loginView = document.getElementById("loginView");
+    const appView = document.getElementById("appView");
+    const chatScroll = document.getElementById("chatScroll");
+    const msgEl = document.getElementById("msg");
+
+    function show(el, on) { el.classList.toggle("hidden", !on); }
+
+    function renderChat() {
+      chatScroll.innerHTML = history
+        .map((t) => `<div class="bubble ${t.role === "user" ? "user" : "bot"}">${escapeHtml(t.content)}</div>`)
+        .join("");
+      chatScroll.scrollTop = chatScroll.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    async function checkUpstream() {
+      const dot = document.getElementById("upstreamDot");
+      try {
+        const st = await api("/epaper/api/wenai/health");
+        dot.classList.toggle("on", !!st.ok);
+        dot.classList.toggle("off", !st.ok);
+        dot.title = st.ok ? "推理节点在线" : (st.detail || "推理节点离线");
+      } catch {
+        dot.classList.add("off");
+        dot.classList.remove("on");
+        dot.title = "推理节点离线";
+      }
+    }
+
+    function enterApp(user) {
+      show(loginView, false);
+      show(appView, true);
+      document.getElementById("whoami").textContent = user.email || "";
+      document.getElementById("character").value = localStorage.getItem("wenai_character") || DEFAULT_CHARACTER;
+      renderChat();
+      checkUpstream();
+      if (healthTimer) clearInterval(healthTimer);
+      healthTimer = setInterval(checkUpstream, 30000);
+      msgEl.focus();
+    }
+
+    async function boot() {
+      try {
+        const me = await api("/epaper/api/wenai/me");
+        enterApp(me.user);
+      } catch {
+        show(loginView, true);
+        show(appView, false);
+      }
+    }
+
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("loginBtn");
+      const err = document.getElementById("loginErr");
+      show(err, false);
+      btn.disabled = true;
+      try {
+        await api("/epaper/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({
+            email: document.getElementById("email").value.trim(),
+            password: document.getElementById("password").value,
+          }),
+        });
+        const me = await api("/epaper/api/wenai/me");
+        enterApp(me.user);
+      } catch (ex) {
+        err.textContent = ex.message || "登录失败";
+        show(err, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await api("/epaper/api/auth/logout", { method: "POST", body: "{}" });
+      history = [];
+      show(appView, false);
+      show(loginView, true);
+    });
+
+    document.getElementById("resetCharBtn").addEventListener("click", () => {
+      document.getElementById("character").value = DEFAULT_CHARACTER;
+      localStorage.removeItem("wenai_character");
+    });
+
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      history = [];
+      renderChat();
+    });
+
+    document.getElementById("character").addEventListener("change", (e) => {
+      localStorage.setItem("wenai_character", e.target.value);
+    });
+
+    msgEl.addEventListener("input", () => {
+      msgEl.style.height = "auto";
+      msgEl.style.height = Math.min(msgEl.scrollHeight, 120) + "px";
+    });
+
+    document.getElementById("composer").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (busy) return;
+      const text = msgEl.value.trim();
+      if (!text) return;
+      busy = true;
+      document.getElementById("sendBtn").disabled = true;
+
+      const character = document.getElementById("character").value.trim();
+      localStorage.setItem("wenai_character", character);
+
+      history.push({ role: "user", content: text });
+      renderChat();
+      msgEl.value = "";
+      msgEl.style.height = "auto";
+
+      const thinking = { role: "assistant", content: "…" };
+      history.push(thinking);
+      renderChat();
+
+      const prior = apiHistoryPayload().slice(0, -1);
+
+      try {
+        const data = await api("/epaper/api/wenai/chat", {
+          method: "POST",
+          timeoutMs: 180000,
+          body: JSON.stringify({
+            message: text,
+            history: prior,
+            character,
+          }),
+        });
+        history.pop();
+        history.push({ role: "assistant", content: data.reply || "（空回复）" });
+      } catch (ex) {
+        history.pop();
+        history.push({ role: "assistant", content: "（" + (ex.message || "生成失败") + "）" });
+      } finally {
+        busy = false;
+        document.getElementById("sendBtn").disabled = false;
+        renderChat();
+        msgEl.focus();
+      }
+    });
+
+    boot();
+  </script>
+</body>
+</html>

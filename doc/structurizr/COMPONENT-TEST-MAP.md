@@ -11,8 +11,12 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 | REQ-SCRIPT-PERSIST | script_store | unit | `rlcd/tests/test_script_store.py`, `server/tests/test_script_sign.py`. Board: flash the new partition table once, deploy, pull power, script resumes; bad signature is not stored |
 | REQ-DEVICE-REGISTER | control_plane | manual | UI register + token rotate |
 | REQ-WIFI-PROV | wifi_nvs | manual | OC-Setup portal; safe_upload keeps NVS |
-| REQ-PANEL-SURFACE | panel | manual | Both pio envs upload + flush |
+| REQ-PANEL-SURFACE | panel | manual | Panel pio envs upload + flush; AMOLED when env exists |
 | REQ-LUA-GFX | panel | manual | Lua draw + `gfx.W/H` layout |
+| REQ-LUA-GFX-COLOR | panel | manual | AMOLED: `gfx.color`/`rgb`/`shape`/`safe_r`; see AMOLED-175C-PRODUCT.md |
+| REQ-LUA-TOUCH | script_engine | manual | `input.touch` / `on_touch` only when capability `touch` |
+| REQ-PANEL-AMOLED-175 | device_runtime | manual | Planned `esp32-s3-amoled-175c` product binary |
+| REQ-WEB-FLASH | control_plane | unit | `server/tests/test_firmware_catalog.py`; browser `/flash` + Web Serial |
 | REQ-AUDIO | audio | manual | beep on RLCD |
 | REQ-TTS-CHILD | audio | unit | `rlcd/tests/test_host_logic.py` (girl/boy name + pitch); hear 我是童女 then 我是童男 on RLCD |
 | REQ-BLE-PAD | ble_pad | manual | Pad URL + BLE dir |

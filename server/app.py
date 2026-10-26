@@ -45,9 +45,11 @@ from pydantic import BaseModel, Field
 import access
 import accounts
 import device_session
+import firmware_catalog
 import ml_registry
 import render as epd_render
 import script_sign
+import live_comments
 import snake_ctrl
 import tenancy
 from capability_policy import tool_allowed_for_caps
@@ -59,6 +61,8 @@ SCRIPT_SIGNING_KEY = Path(
     os.environ.get("EPD_SCRIPT_SIGNING_KEY", str(DATA_DIR / "script_signing_key.pem"))
 )
 STATIC_DIR = BASE_DIR / "static"
+FIRMWARE_DIR = firmware_catalog.FIRMWARE_DIR
+FIRMWARE_DIR.mkdir(parents=True, exist_ok=True)
 ASSET_DIR = DATA_DIR / "assets"
 BITMAP_DIR = DATA_DIR / "bitmaps"
 VOICE_DIR = DATA_DIR / "voice"
@@ -71,6 +75,9 @@ DEFAULT_DEVICE_ID = os.environ.get("EPD_DEFAULT_DEVICE_ID", "a4cb8fdf8440")
 PUBLIC_BASE = os.environ.get("EPD_PUBLIC_BASE", "https://onlyclaws.world").rstrip("/")
 COOKIE_PATH = urlparse(PUBLIC_BASE).path.rstrip("/") or "/"
 CONSOLE_URL = f"{PUBLIC_BASE}/console/"
+WENAI_UPSTREAM = os.environ.get("WENAI_UPSTREAM", "").rstrip("/")
+WENAI_SECRET = os.environ.get("WENAI_SECRET", "").strip()
+WENAI_ENABLED = os.environ.get("WENAI_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 # device_id -> (width, height, display_name) — hints only; ownership is in DB
 DEVICE_PANELS: dict[str, tuple[int, int, str]] = {
@@ -264,7 +271,9 @@ app = FastAPI(
     openapi_url=None,
 )
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
+app.mount("/firmware", StaticFiles(directory=FIRMWARE_DIR), name="firmware")
 app.include_router(snake_ctrl.router)
+app.include_router(live_comments.router)
 
 
 class LoginIn(BaseModel):
@@ -497,6 +506,21 @@ async def require_user(request: Request) -> dict[str, Any]:
         status_code=401,
         detail="login required (session cookie) or Authorization: Bearer <oct_… agent token>",
     )
+
+
+async def require_wenai_user(request: Request) -> dict[str, Any]:
+    """Human session + WENAI_ALLOWLIST (or EPD_ALLOWLIST fallback)."""
+    if not WENAI_ENABLED:
+        raise HTTPException(status_code=404, detail="Not Found")
+    sess = read_session(request)
+    if not sess:
+        raise HTTPException(status_code=401, detail="login required")
+    if sess.get("auth") == "agent_token":
+        raise HTTPException(status_code=403, detail="wenai requires human login")
+    email = tenancy.session_email(sess)
+    if not tenancy.wenai_email_allowed(email):
+        raise HTTPException(status_code=403, detail="not authorized for wenai")
+    return sess
 
 
 class AgentTokenCreateIn(BaseModel):
@@ -773,6 +797,121 @@ async def apply_redirect() -> RedirectResponse:
 @app.get("/apply/")
 async def apply_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "apply.html")
+
+
+@app.get("/flash")
+async def flash_redirect() -> RedirectResponse:
+    return RedirectResponse(url="flash/", status_code=301)
+
+
+@app.get("/flash/")
+async def flash_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "flash.html")
+
+
+@app.get("/api/firmware")
+async def api_firmware_list(request: Request) -> dict[str, Any]:
+    include_all = request.query_params.get("all", "").lower() in ("1", "true", "yes")
+    return {
+        "products": firmware_catalog.list_products(include_all=include_all),
+        "default": firmware_catalog.WEB_FLASH_DEFAULT_ID,
+    }
+
+
+@app.get("/api/firmware/{product_id}/manifest.json")
+async def api_firmware_manifest(product_id: str) -> JSONResponse:
+    product = firmware_catalog.get_product(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="unknown product")
+    if product.get("planned") and not firmware_catalog.parts_ready(
+        firmware_catalog.product_dir(product_id)
+    ):
+        raise HTTPException(status_code=404, detail="product not ready")
+    if not firmware_catalog.parts_ready(firmware_catalog.product_dir(product_id)):
+        raise HTTPException(status_code=404, detail="firmware not packaged")
+    return JSONResponse(firmware_catalog.build_manifest(product))
+
+
+@app.get("/wenai/")
+async def wenai_index() -> FileResponse:
+    if not WENAI_ENABLED:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(STATIC_DIR / "wenai.html")
+
+
+class WenaiChatTurn(BaseModel):
+    role: str
+    content: str
+
+
+class WenaiChatIn(BaseModel):
+    message: str = Field(min_length=1)
+    history: list[WenaiChatTurn] = Field(default_factory=list)
+    character: Optional[str] = None
+
+
+@app.get("/api/wenai/health")
+async def wenai_health(
+    sess: dict[str, Any] = Depends(require_wenai_user),
+) -> dict[str, Any]:
+    _ = sess
+    if not WENAI_UPSTREAM:
+        return {"ok": False, "upstream": False, "detail": "WENAI_UPSTREAM not set"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"{WENAI_UPSTREAM}/api/health",
+                headers={"Authorization": f"Bearer {WENAI_SECRET}"},
+            )
+            body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            return {"ok": r.status_code == 200 and bool(body.get("ok")), "upstream": body}
+    except Exception as exc:
+        return {"ok": False, "upstream": False, "detail": str(exc)}
+
+
+@app.get("/api/wenai/me")
+async def wenai_me(sess: dict[str, Any] = Depends(require_wenai_user)) -> dict[str, Any]:
+    user = sess.get("user") or {}
+    return {
+        "success": True,
+        "user": {
+            "email": sess.get("email"),
+            "name": user.get("name") or user.get("username"),
+        },
+    }
+
+
+@app.post("/api/wenai/chat")
+async def wenai_chat(
+    body: WenaiChatIn,
+    sess: dict[str, Any] = Depends(require_wenai_user),
+) -> dict[str, Any]:
+    _ = sess
+    if not WENAI_UPSTREAM or not WENAI_SECRET:
+        raise HTTPException(status_code=503, detail="wenai upstream not configured")
+    payload = {
+        "message": body.message.strip(),
+        "history": [{"role": t.role, "content": t.content} for t in body.history],
+        "character": body.character,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            r = await client.post(
+                f"{WENAI_UPSTREAM}/api/chat",
+                json=payload,
+                headers={"Authorization": f"Bearer {WENAI_SECRET}"},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"wenai upstream error: {exc}") from exc
+    if r.status_code >= 400:
+        detail = r.text[:300]
+        try:
+            detail = r.json().get("detail", detail)
+        except Exception:
+            pass
+        raise HTTPException(status_code=r.status_code, detail=detail)
+    data = r.json()
+    return {"success": True, "reply": data.get("reply", "")}
 
 
 @app.get("/api/health")

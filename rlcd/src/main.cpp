@@ -341,6 +341,8 @@ void fillStatus(DynamicJsonDocument &doc) {
   meta["product"] = "epaper-397";
 #elif defined(BOARD_PANEL_RLCD)
   meta["product"] = "rlcd-42";
+#elif defined(BOARD_PANEL_AMOLED)
+  meta["product"] = "amoled-175c";
 #else
   meta["product"] = "s3-bare";
 #endif
@@ -705,7 +707,19 @@ void setupImpl() {
                 ESP.getFreeHeap());
 
   if (!scriptStoreRunsOffline()) {
-    while (!ensureWifiConnected()) delay(1000);
+    if (ocCapArm()) {
+      // USB arm JSON must reach loop(); SoftAP portal would block setup forever.
+      WifiCreds creds;
+      if (wifiStoreLoad(creds)) {
+        connectWifiWith(creds, 3000);
+      }
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.println(
+            "[wifi] arm continuing offline (USB ok); long-press key for SoftAP");
+      }
+    } else {
+      while (!ensureWifiConnected()) delay(1000);
+    }
   } else {
     WifiCreds creds;
     if (wifiStoreLoad(creds)) connectWifiWith(creds, 8000);
@@ -797,6 +811,14 @@ void loopImpl() {
         WifiCreds creds;
         if (wifiStoreLoad(creds)) connectWifiWith(creds, 3000);
         nextWifiTry = millis() + 30000;
+      }
+    } else if (ocCapArm()) {
+      // Never block the arm USB poll on SoftAP; long-press KEY still provisions.
+      static uint32_t nextArmWifiTry = 0;
+      if ((int32_t)(millis() - nextArmWifiTry) >= 0) {
+        WifiCreds creds;
+        if (wifiStoreLoad(creds)) connectWifiWith(creds, 3000);
+        nextArmWifiTry = millis() + 30000;
       }
     } else {
       WifiCreds creds;

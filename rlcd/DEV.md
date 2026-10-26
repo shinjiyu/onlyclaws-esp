@@ -42,7 +42,17 @@ cp include/device_secrets.h.example include/device_secrets.h
 | `esp32-s3-bare` | 无面板、无音频 |
 | `esp32-s3-rlcd-42` | ST7305 RLCD 400×300 + 音频 + BLE |
 | `esp32-s3-epaper-397` | GxEPD2 ePaper 3.97" 800×480 + 音频 |
+| `esp32-s3-amoled-175c` | 圆形 AMOLED 1.75C（**planned**，见 `doc/structurizr/AMOLED-175C-PRODUCT.md`） |
 | `esp32-roarm-m2` | RoArm-M2 机械臂（classic ESP32，STS @ GPIO18/19，无面板） |
+
+浏览器烧录：控制面 `/flash/`（ESP Web Tools）。**线上 CI 只打 AMOLED 1.75C**：
+
+```bash
+pio run -e esp32-s3-amoled-175c
+bash scripts/package_web_flash.sh
+# → server/firmware/esp32-s3-amoled-175c/…
+# GitHub Actions: .github/workflows/web-flash-amoled.yml
+```
 
 ```bash
 cd rlcd

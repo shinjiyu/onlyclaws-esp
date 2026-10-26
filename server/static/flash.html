@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OnlyClaws — Web 烧录</title>
+  <meta name="description" content="用浏览器经 USB 烧录 OnlyClaws 固件。Chrome / Edge，HTTPS 或 localhost。" />
+  <link rel="stylesheet" href="/assets/oc.css" />
+  <style>
+    .flash-hero { padding: 48px 0 24px; }
+    .flash-hero h1 { font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -.02em; margin: 0 0 8px; }
+    .flash-hero .lede { color: var(--muted); max-width: 40rem; margin: 0; }
+    .sku-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin: 28px 0 40px; }
+    .sku {
+      border: 1px solid var(--line);
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 16px 16px 14px;
+      display: flex; flex-direction: column; gap: 8px;
+      cursor: pointer;
+      text-align: left;
+      font: inherit; color: inherit;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .sku:hover { border-color: var(--line-2); }
+    .sku.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .sku .name { font-weight: 700; }
+    .sku .meta { font-size: .82rem; color: var(--muted); }
+    .sku .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tag {
+      font-size: .72rem; border: 1px solid var(--line); border-radius: 999px;
+      padding: 1px 8px; color: var(--muted);
+    }
+    .tag.ok { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); color: var(--green); }
+    .tag.wait { border-color: color-mix(in srgb, var(--amber) 40%, var(--line)); color: var(--amber); }
+    .tag.plan { border-color: var(--line); }
+    .install-card {
+      border: 1px solid var(--line); background: var(--card);
+      border-radius: var(--radius); padding: 22px; margin-bottom: 40px;
+    }
+    .install-card h2 { margin: 0 0 6px; font-size: 1.15rem; }
+    .install-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
+    esp-web-install-button { --esp-tools-button-color: var(--accent); }
+    .notes { font-size: .9rem; color: var(--muted); margin-top: 18px; }
+    .notes ol { margin: 8px 0 0; padding-left: 1.2rem; }
+    .noserial {
+      border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--line));
+      background: color-mix(in srgb, var(--amber) 8%, var(--card));
+      border-radius: var(--radius); padding: 12px 14px; margin-top: 14px;
+      font-size: .9rem;
+    }
+  </style>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 8l8-5 8 5v8l-8 5-8-5V8zm8 1.2L7.2 12 12 14.8 16.8 12 12 9.2z"/></svg>
+        OnlyClaws <small>flash</small>
+      </a>
+      <nav class="nav-links">
+        <a href="/#hardware">硬件</a>
+        <a href="/console/">控制台</a>
+        <a href="https://github.com/shinjiyu/onlyclaws-esp" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+      <div class="spacer"></div>
+      <a class="btn sm ghost" href="/console/" data-i18n-skip>控制台</a>
+    </div>
+  </header>
+
+  <main class="wrap flash-hero">
+    <h1>浏览器烧录固件</h1>
+    <p class="lede">当前线上公开包只有 <strong>圆形 AMOLED 1.75C</strong>（CI 单 SKU；其它板子仍可用 PlatformIO）。Chrome / Edge + USB，需 HTTPS 或 localhost。烧录后去控制台登记并配网。</p>
+
+    <div id="skuGrid" class="sku-grid" role="listbox" aria-label="固件产品"></div>
+
+    <div class="install-card" id="installCard">
+      <h2 id="selTitle">选择上方产品</h2>
+      <p class="muted small" id="selBlurb">准备好 USB 线后再点安装。</p>
+      <div class="install-actions">
+        <esp-web-install-button class="hidden" id="installBtn"></esp-web-install-button>
+        <button type="button" class="btn" id="installDisabled" disabled>暂无固件包</button>
+        <a class="btn ghost sm" id="pioHint" href="https://github.com/shinjiyu/onlyclaws-esp#quick-start" target="_blank" rel="noopener">用 PlatformIO 烧录</a>
+      </div>
+      <div id="noSerial" class="noserial hidden">当前浏览器不支持 Web Serial。请换 Chrome / Edge，或用 PlatformIO。</div>
+      <div class="notes">
+        <strong>注意</strong>
+        <ol>
+          <li>首次全量安装可能擦除 Flash（含 NVS 里的 Wi‑Fi / token）。已配过网的板子如需保留 NVS，请用仓库里的 <code>safe_upload_keep_nvs.sh</code>。</li>
+          <li>ESP32-S3 原生 USB：按住 BOOT 再插线或点复位，进入下载模式后再点安装。</li>
+          <li>运维：在服务器上对对应 env 执行 <code>rlcd/scripts/package_web_flash.sh &lt;env&gt;</code> 生成 <code>server/firmware/&lt;id&gt;/</code>。</li>
+        </ol>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const grid = document.getElementById("skuGrid");
+    const selTitle = document.getElementById("selTitle");
+    const selBlurb = document.getElementById("selBlurb");
+    const installBtn = document.getElementById("installBtn");
+    const installDisabled = document.getElementById("installDisabled");
+    const noSerial = document.getElementById("noSerial");
+    const lang = (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
+
+    if (!("serial" in navigator)) noSerial.classList.remove("hidden");
+
+    let selected = null;
+    let products = [];
+
+    function label(p) {
+      return lang === "zh" ? (p.title_zh || p.name) : p.name;
+    }
+
+    function statusTag(p) {
+      if (p.ready) return '<span class="tag ok">ready' + (p.version ? " · " + p.version : "") + "</span>";
+      if (p.planned) return '<span class="tag plan">planned</span>';
+      return '<span class="tag wait">pack bins to enable</span>';
+    }
+
+    function select(id) {
+      selected = products.find((p) => p.id === id) || null;
+      [...grid.querySelectorAll(".sku")].forEach((el) => {
+        el.classList.toggle("on", el.dataset.id === id);
+      });
+      if (!selected) return;
+      selTitle.textContent = label(selected);
+      selBlurb.textContent = selected.blurb || "";
+      if (selected.ready) {
+        installBtn.manifest = selected.manifest_url;
+        installBtn.classList.remove("hidden");
+        installDisabled.classList.add("hidden");
+      } else {
+        installBtn.classList.add("hidden");
+        installDisabled.classList.remove("hidden");
+        installDisabled.textContent = selected.planned
+          ? (lang === "zh" ? "驱动尚未上线" : "Driver not shipped yet")
+          : (lang === "zh" ? "服务器尚未打包固件" : "Firmware not packaged on server");
+      }
+    }
+
+    function render() {
+      grid.innerHTML = "";
+      for (const p of products) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "sku";
+        btn.dataset.id = p.id;
+        btn.setAttribute("role", "option");
+        btn.innerHTML =
+          '<div class="name">' + label(p) + "</div>" +
+          '<div class="meta">' + (p.chipFamily || "") + (p.serialType ? " · " + p.serialType : "") + "</div>" +
+          '<div class="tags">' + statusTag(p) + "</div>";
+        btn.addEventListener("click", () => select(p.id));
+        grid.appendChild(btn);
+      }
+      const prefer =
+        products.find((p) => p.ready) ||
+        products.find((p) => p.id === (window.__fwDefault || "esp32-s3-amoled-175c")) ||
+        products[0];
+      if (prefer) select(prefer.id);
+    }
+
+    fetch("/api/firmware")
+      .then((r) => r.json())
+      .then((data) => {
+        products = data.products || [];
+        window.__fwDefault = data.default || "esp32-s3-amoled-175c";
+        render();
+      })
+      .catch(() => {
+        selBlurb.textContent = lang === "zh" ? "无法加载固件列表。" : "Could not load firmware list.";
+      });
+  </script>
+</body>
+</html>

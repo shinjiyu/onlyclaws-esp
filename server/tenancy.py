@@ -198,6 +198,17 @@ def email_allowed(email: str, conn: Optional[sqlite3.Connection] = None) -> bool
     return conn is not None and access.is_approved(conn, email)
 
 
+def wenai_email_allowed(email: str) -> bool:
+    """WENAI_ALLOWLIST overrides; empty falls back to EPD_ALLOWLIST."""
+    raw = os.environ.get("WENAI_ALLOWLIST", "").strip()
+    if not raw:
+        return email_allowed(email)
+    if raw == "*":
+        return True
+    wl = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    return email.strip().lower() in wl
+
+
 def session_email(sess: dict[str, Any]) -> str:
     return str(sess.get("email") or "").strip().lower()
 

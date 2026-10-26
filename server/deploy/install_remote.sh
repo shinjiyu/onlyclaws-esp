@@ -48,6 +48,43 @@ print("nginx snippet inserted")
 PY
 fi
 
+# Wenai UI at /wenai/
+if ! grep -q 'location /wenai/' "$NGINX_SITE"; then
+  python3 - <<'PY'
+from pathlib import Path
+path = Path("/etc/nginx/sites-enabled/onlyclaws.world")
+text = path.read_text()
+snippet = """
+    # BEGIN WENAI
+    location = /wenai { return 301 /wenai/; }
+    location /wenai/ {
+        proxy_pass         http://127.0.0.1:8787/wenai/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        client_max_body_size 1m;
+        proxy_read_timeout 180s;
+        proxy_send_timeout 180s;
+    }
+    # END WENAI
+"""
+marker = "# END EPAPER"
+if marker in text:
+    text = text.replace(marker, marker + "\n" + snippet, 1)
+elif "# BEGIN UMBRA_SUBPATH" in text:
+    text = text.replace("# BEGIN UMBRA_SUBPATH", snippet + "\n# BEGIN UMBRA_SUBPATH", 1)
+else:
+    idx = text.find("\n}")
+    if idx == -1:
+        raise SystemExit("cannot find nginx insert point for wenai")
+    text = text[:idx] + "\n" + snippet + text[idx:]
+path.write_text(text)
+print("wenai nginx snippet inserted")
+PY
+fi
+
 nginx -t
 systemctl daemon-reload
 systemctl enable epaper

@@ -125,7 +125,7 @@ Also: `POST /api/scripts/{id}/deploy`, `POST /api/script/stop`, `GET /api/script
 
 ### 4.2 Lua API (full board surface)
 
-Color: `0` = off / white plane, `1` = on / black. Size is runtime `gfx.W` × `gfx.H` (RLCD **400×300**, ePaper **800×480**), 1bpp. Lua `source` max is **24000** bytes.
+Color on 1bpp panels: `0` = off / white plane, `1` = on / black. Size is runtime `gfx.W` × `gfx.H` (RLCD **400×300**, ePaper **800×480**, planned AMOLED 1.75C **466×466**). Color/round extras (`gfx.color`, `gfx.rgb`, `gfx.shape`, `input.touch`) are documented in skill.md / `AMOLED-175C-PRODUCT.md`. Lua `source` max is **24000** bytes.
 
 #### Sensors / control
 
@@ -143,7 +143,7 @@ Color: `0` = off / white plane, `1` = on / black. Size is runtime `gfx.W` × `gf
 
 | API | Notes |
 |-----|------|
-| `gfx.W` / `gfx.H` | 400 / 300 |
+| `gfx.W` / `gfx.H` | panel size (not hard-coded) |
 | `gfx.clear(color?)` | fill screen |
 | `gfx.pixel(x,y,color?)` | |
 | `gfx.line(x0,y0,x1,y1,color?)` | |

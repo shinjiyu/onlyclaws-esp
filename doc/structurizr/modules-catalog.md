@@ -12,13 +12,14 @@ Same O(1) rule as mcp_guard.
 | tenancy | infra | `server/tenancy.py` | — | Ownership + tokens |
 | render | infra | `server/render.py` | — | Panel-sized bitmaps |
 | ml_registry | infra | `server/ml_registry.py`, `ml_opset.py` | tenancy | Model upload + op-set check + ECDSA signing + device download ([ML-PLUGIN.md](./ML-PLUGIN.md)) |
+| firmware_dist | infra | `server/firmware_catalog.py`, `server/firmware/`, `rlcd/scripts/package_web_flash.sh` | — | Product bin catalog + ESP Web Tools manifests for `/flash` ([ADR 0008](./decisions/0008-web-flash-and-color-panel.md)) |
 | demos | infra | `demos/` | — | Lua apps (data), not firmware plugins |
 | vision_path | infra | `vision/` | — | **通路 B** 主机：帧 → 对象/空描述/state；非 ESP |
 | jev_servo_path | infra | `jev_servo/` | — | **通路 C** 主机：慢 JEV 每关节安全角区间 → 单次云 `arm.stream`；非 ESP |
 | device_runtime | compose | `rlcd/src/main.cpp` | contracts, wifi_nvs, cloud_http, script_engine, script_store, plugins (wire) | Product env selects which plugins to link |
 | script_engine | compose | `rlcd/src/script_engine.cpp` | contracts | Registers only compiled modules into Lua |
 | control_plane | compose | `server/app.py`, `script_sign.py` | tenancy, render, ml_registry, script_store, contracts | Filters invoke by `capabilities[]`; signs Lua on deploy |
-| panel | plugin | `panel_display` + ST7305 / ePaper | contracts | Compile-time W×H; not in RoArm product |
+| panel | plugin | `panel_display` + ST7305 / ePaper (+ planned CO5300 AMOLED) | contracts | Compile-time W×H; color/round Lua contract for 1.75C ([AMOLED-175C-PRODUCT.md](./AMOLED-175C-PRODUCT.md)); not in RoArm product |
 | audio | plugin | `audio_es8311.cpp` | contracts | Optional; omit on ePaper/RoArm if no codec |
 | ble_pad | plugin | `ble_ctrl` + `http_pad` + `pad_ctrl` | contracts, wifi_nvs | D-pad + Nordic UART transport; off on ePaper |
 | claude_buddy | plugin | `claude_proto.cpp` (pure) + `claude_buddy.cpp` | contracts | Claude desktop Hardware Buddy protocol + prompt card; bytes piped in by device_runtime |
