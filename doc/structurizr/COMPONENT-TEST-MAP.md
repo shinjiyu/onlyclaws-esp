@@ -15,7 +15,8 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 | REQ-LUA-GFX | panel | manual | Lua draw + `gfx.W/H` layout |
 | REQ-LUA-GFX-COLOR | panel | manual | AMOLED: `gfx.color`/`rgb`/`shape`/`safe_r`; see AMOLED-175C-PRODUCT.md |
 | REQ-LUA-TOUCH | script_engine | manual | `input.touch` / `on_touch` only when capability `touch` |
-| REQ-PANEL-AMOLED-175 | device_runtime | manual | Planned `esp32-s3-amoled-175c` product binary |
+| REQ-PANEL-AMOLED-175 | device_runtime | manual | `esp32-s3-amoled-175c` product binary |
+| REQ-PANEL-FOLO-PASSPORT | device_runtime | manual | `esp32-c3-folo-passport` on Folo AI Passport |
 | REQ-WEB-FLASH | control_plane | unit | `server/tests/test_firmware_catalog.py`; browser `/flash` + Web Serial |
 | REQ-AUDIO | audio | manual | beep on RLCD |
 | REQ-TTS-CHILD | audio | unit | `rlcd/tests/test_host_logic.py` (girl/boy name + pitch); hear 我是童女 then 我是童男 on RLCD |

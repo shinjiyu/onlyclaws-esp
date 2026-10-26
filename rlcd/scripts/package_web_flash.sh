@@ -11,12 +11,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 RLCD="$ROOT/rlcd"
 OUT_ROOT="${OC_FIRMWARE_DIR:-$ROOT/server/firmware}"
-DEFAULT_ENV="esp32-s3-amoled-175c"
+DEFAULT_ENV="esp32-c3-folo-passport"
 VERSION_ARG="${2:-}"
 
 map_env_to_id() {
   case "$1" in
-    esp32-s3-rlcd-42|esp32-s3-epaper-397|esp32-s3-bare|esp32-roarm-m2|esp32-s3-amoled-175c) echo "$1" ;;
+    esp32-s3-rlcd-42|esp32-s3-epaper-397|esp32-s3-bare|esp32-roarm-m2|esp32-s3-amoled-175c|esp32-c3-folo-passport) echo "$1" ;;
     *) echo "" ;;
   esac
 }
@@ -91,7 +91,7 @@ main() {
   local target="${1:-$DEFAULT_ENV}"
   if [[ "$target" == "all" ]]; then
     local e
-    for e in esp32-s3-amoled-175c esp32-s3-rlcd-42 esp32-s3-epaper-397 esp32-s3-bare esp32-roarm-m2; do
+    for e in esp32-c3-folo-passport esp32-s3-amoled-175c esp32-s3-rlcd-42 esp32-s3-epaper-397 esp32-s3-bare esp32-roarm-m2; do
       if [[ -f "$RLCD/.pio/build/$e/firmware.bin" ]]; then
         package_one "$e" || true
       else

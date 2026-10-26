@@ -45,7 +45,7 @@ Panel boards and the bare ESP32-S3 expose gfx/audio/sensors (no-ops where the ha
 ### Graphics (panel products)
 
 `gfx.clear` / `pixel` / `line` / `rect` / `fill_rect` / `circle` / `fill_circle` / `text` / `flush`  
-`gfx.W` / `gfx.H` come from the panel (RLCD 400×300, ePaper 800×480, AMOLED 1.75C 466×466). Call `gfx.flush()` after draw ops.
+`gfx.W` / `gfx.H` come from the panel (RLCD 400×300, ePaper 800×480, AMOLED 1.75C 466×466, Folo Passport 240×320). Call `gfx.flush()` after draw ops.
 
 **1bpp panels** (RLCD / ePaper): color `0`/`1`. `gfx.bpp` is `1`, `gfx.color` is false, `gfx.shape` is `"rect"`.
 

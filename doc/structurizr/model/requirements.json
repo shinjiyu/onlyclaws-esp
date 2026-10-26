@@ -99,7 +99,16 @@
       "ui": false,
       "test_kind": "manual",
       "tests": [],
-      "acceptance": "Env esp32-s3-amoled-175c links panel+audio+sensors+ml (no arm/TTS/BLE); product=amoled-175c; pin map in board_pins; CO5300 stub until QSPI driver; sole public web-flash CI SKU via web-flash-amoled.yml"
+      "acceptance": "Env esp32-s3-amoled-175c links panel+audio+sensors+ml (no arm/TTS/BLE); product=amoled-175c; pin map in board_pins; CO5300 stub until QSPI driver; public web-flash SKU"
+    },
+    {
+      "id": "REQ-PANEL-FOLO-PASSPORT",
+      "title": "Product env for FoloToy AI Passport ESP32-C3 ST7789",
+      "component": "device_runtime",
+      "ui": false,
+      "test_kind": "manual",
+      "tests": [],
+      "acceptance": "Env esp32-c3-folo-passport links panel+audio+sensors on ESP32-C3 8MB no PSRAM; product=folo-passport; ST7789 240x320; no ml/tts/arm; public web-flash SKU; FOLO-PASSPORT-PRODUCT.md"
     },
     {
       "id": "REQ-WEB-FLASH",

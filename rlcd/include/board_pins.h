@@ -4,6 +4,7 @@
 //   BOARD_PANEL_EPAPER  Waveshare ESP32-S3-ePaper-3.97
 //   BOARD_PANEL_RLCD    Waveshare ESP32-S3-RLCD-4.2
 //   BOARD_PANEL_AMOLED  Waveshare ESP32-S3-Touch-AMOLED-1.75 / 1.75C
+//   BOARD_PANEL_ST7789  FoloToy AI Passport (ESP32-C3, 240x320)
 //   BOARD_ROARM         Waveshare RoArm-M2 driver (classic ESP32, STS servo bus)
 //   neither             ESP32-S3 bare module (BOOT on GPIO0 only)
 
@@ -120,6 +121,37 @@ constexpr uint8_t ES7210_I2C_ADDR = 0x40;
 constexpr int LCD_WIDTH = 466;
 constexpr int LCD_HEIGHT = 466;
 constexpr int AMOLED_SAFE_R = 233;
+
+#elif defined(BOARD_PANEL_ST7789)
+
+// FoloToy AI Passport — bsp_pins.h (FoloToy/ai-passport).
+constexpr int PIN_LCD_MOSI = 9;
+constexpr int PIN_LCD_SCLK = 8;
+constexpr int PIN_LCD_CS = 1;
+constexpr int PIN_LCD_DC = 20;
+constexpr int PIN_LCD_RST = -1;  // tied high; SWRESET
+constexpr int PIN_LCD_BL = 21;
+
+constexpr int PIN_I2C_SDA = 10;
+constexpr int PIN_I2C_SCL = 7;
+
+constexpr int PIN_BOOT_BTN = 0;
+constexpr int PIN_KEY_BTN = 0;  // ADC ladder on GPIO0 (UP/DOWN/OK) — later
+constexpr int PIN_BAT_ADC = -1;  // CW2017 @ 0x63 on I2C
+
+constexpr int PIN_I2S_MCLK = 6;
+constexpr int PIN_I2S_BCLK = 5;
+constexpr int PIN_I2S_WS = 3;
+constexpr int PIN_I2S_DOUT = 2;
+constexpr int PIN_I2S_DIN = 4;
+constexpr int PIN_AUDIO_PA = -1;  // always-on amp
+constexpr int PIN_AUDIO_I2C_SDA = PIN_I2C_SDA;
+constexpr int PIN_AUDIO_I2C_SCL = PIN_I2C_SCL;
+constexpr uint8_t ES8311_I2C_ADDR = 0x18;
+constexpr uint8_t ES7210_I2C_ADDR = 0x40;  // absent on Passport; soft-fail
+
+constexpr int LCD_WIDTH = 240;
+constexpr int LCD_HEIGHT = 320;
 
 #else  // ESP32-S3 bare module
 

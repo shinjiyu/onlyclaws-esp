@@ -19,6 +19,8 @@
 #include "epd397_panel.h"
 #elif defined(BOARD_PANEL_AMOLED)
 #include "co5300_amoled.h"
+#elif defined(BOARD_PANEL_ST7789)
+#include "st7789_panel.h"
 #else
 #include "st7305_rlcd.h"
 #endif
@@ -36,6 +38,8 @@ constexpr size_t FRAME_BYTES = (size_t)LCD_WIDTH * (size_t)LCD_HEIGHT / 8;
 Epd397Panel display;
 #elif defined(BOARD_PANEL_AMOLED)
 Co5300AmoledStub display;
+#elif defined(BOARD_PANEL_ST7789)
+St7789Panel display;
 #else
 St7305Rlcd display;
 #endif

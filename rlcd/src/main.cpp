@@ -343,6 +343,8 @@ void fillStatus(DynamicJsonDocument &doc) {
   meta["product"] = "rlcd-42";
 #elif defined(BOARD_PANEL_AMOLED)
   meta["product"] = "amoled-175c";
+#elif defined(BOARD_PANEL_ST7789)
+  meta["product"] = "folo-passport";
 #else
   meta["product"] = "s3-bare";
 #endif

@@ -1,8 +1,7 @@
 """Product firmware catalog for browser Web Serial flash (ESP Web Tools).
 
-Online we only publish one SKU via CI for now (AMOLED 1.75C). Other PlatformIO
-envs stay packageable locally (`package_web_flash.sh`) but are hidden from
-`/api/firmware` unless `?all=1`.
+Public web-flash SKUs are marked web_flash=True (AMOLED 1.75C + Folo Passport).
+Other PlatformIO envs stay packageable locally but are hidden unless `?all=1`.
 """
 
 from __future__ import annotations
@@ -23,10 +22,21 @@ DEFAULT_PARTS = (
     ("firmware.bin", 0x10000),
 )
 
-# Sole CI / public web-flash product until the composable matrix is trimmed.
-WEB_FLASH_DEFAULT_ID = "esp32-s3-amoled-175c"
+WEB_FLASH_DEFAULT_ID = "esp32-c3-folo-passport"
 
 PRODUCTS: list[dict[str, Any]] = [
+    {
+        "id": "esp32-c3-folo-passport",
+        "name": "OnlyClaws Folo AI Passport",
+        "title_zh": "Folo AI Passport（C3+ST7789）",
+        "chipFamily": "ESP32-C3",
+        "serialType": "cdc",
+        "pio_env": "esp32-c3-folo-passport",
+        "product": "folo-passport",
+        "blurb": "240×320 ST7789 + ES8311 — ESP32-C3, 8MB, no PSRAM",
+        "web_flash": True,
+        "planned": False,
+    },
     {
         "id": "esp32-s3-amoled-175c",
         "name": "OnlyClaws AMOLED 1.75C",
@@ -35,7 +45,7 @@ PRODUCTS: list[dict[str, Any]] = [
         "serialType": "cdc",
         "pio_env": "esp32-s3-amoled-175c",
         "product": "amoled-175c",
-        "blurb": "466×466 round badge — CI web-flash SKU (panel stub until CO5300)",
+        "blurb": "466×466 round badge (panel stub until CO5300)",
         "web_flash": True,
         "planned": False,
     },

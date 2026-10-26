@@ -49,7 +49,8 @@
 #define OC_HAS_TTS 0
 #endif
 
-#if defined(BOARD_PANEL_RLCD) || defined(BOARD_PANEL_EPAPER) || defined(BOARD_PANEL_AMOLED)
+#if defined(BOARD_PANEL_RLCD) || defined(BOARD_PANEL_EPAPER) || defined(BOARD_PANEL_AMOLED) || \
+    defined(BOARD_PANEL_ST7789)
 #define OC_HAS_SENSORS 1
 #else
 #define OC_HAS_SENSORS 0

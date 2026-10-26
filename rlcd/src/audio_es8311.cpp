@@ -48,8 +48,8 @@ uint8_t micRead(uint8_t reg) { return i2cRead(ES7210_I2C_ADDR, reg); }
 void dumpRegs(const char *tag) {
   Serial.printf(
       "[audio] %s es8311=0x%02X es7210=0x%02X%02X pa=%d mic=%d\n", tag,
-      esRead(0xFD), micRead(0x3D), micRead(0x3E), digitalRead(PIN_AUDIO_PA),
-      (int)micReady);
+      esRead(0xFD), micRead(0x3D), micRead(0x3E),
+      PIN_AUDIO_PA >= 0 ? digitalRead(PIN_AUDIO_PA) : -1, (int)micReady);
 }
 
 bool es8311InitRegs() {
@@ -238,6 +238,7 @@ void audioUnlockI2S() {
 }
 
 void audioSetPa(bool on) {
+  if (PIN_AUDIO_PA < 0) return;
   pinMode(PIN_AUDIO_PA, OUTPUT);
   digitalWrite(PIN_AUDIO_PA, on ? HIGH : LOW);
 }
