@@ -163,6 +163,25 @@
     .log .k-info { color: #e0d08a; }
     .hint { margin-top: 0.5rem; color: var(--muted); font-size: 0.82rem; }
     .err { color: var(--err); font-family: var(--mono); font-size: 0.82rem; margin-top: 0.5rem; }
+    .cam-head {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .cam-head label { margin: 0; width: auto; white-space: nowrap; flex: 0 0 auto; }
+    .btn-cam { background: #fff; color: var(--ink); border: 1px solid var(--line); white-space: nowrap; flex: 0 0 auto; }
+    .btn-cam.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    #camView {
+      display: block;
+      width: 100%;
+      margin-top: 0.85rem;
+      border-radius: 8px;
+      background: #111;
+      min-height: 180px;
+      object-fit: contain;
+    }
+    #camView[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -174,6 +193,31 @@
       </div>
       <div id="badge" class="badge">IDLE</div>
     </header>
+
+    <section class="panel">
+      <div class="cam-head">
+        <label>相机</label>
+        <button class="btn-cam" id="btnCam" type="button">打开相机</button>
+        <span class="sub">单独开关，不跟着 Start</span>
+      </div>
+      <div id="camErr" class="err" hidden></div>
+      <img id="camView" alt="末端摄像头" hidden />
+    </section>
+
+    <section class="panel">
+      <div class="cam-head">
+        <label>去力矩</label>
+        <button class="btn-cam" id="btnTeach" type="button">关力矩</button>
+        <button class="btn-stop" id="btnHold" type="button">立即锁定</button>
+      </div>
+      <div class="hint">先扶住臂再点关力矩。摆好后松手，静止约 1 秒自动锁定。找人或跟随时串口被占用，这个按钮不起作用。</div>
+      <div style="margin-top:0.75rem">
+        <label for="poseName">姿态名（可选）</label>
+        <input id="poseName" type="text" placeholder="填写后锁定时写入 poses.json，例如 desk" />
+      </div>
+      <div id="teachMsg" class="hint"></div>
+      <div id="teachQ" class="scene"></div>
+    </section>
 
     <section class="panel">
       <label for="op">Op（有限指令）</label>
@@ -238,6 +282,34 @@
     let afterSeq = 0;
     let running = false;
     let follow = true;
+    let camOn = false;
+    let camPending = false;
+
+    function applyCam(cam) {
+      const on = !!(cam && cam.on);
+      camOn = on;
+      const btn = $("btnCam");
+      btn.textContent = on ? "关闭相机" : "打开相机";
+      btn.classList.toggle("on", on);
+      const view = $("camView");
+      if (on) {
+        if (!view.getAttribute("src")) view.src = "/api/cam.mjpg?" + Date.now();
+        view.hidden = false;
+      } else if (view.getAttribute("src")) {
+        view.removeAttribute("src");
+        view.hidden = true;
+      } else {
+        view.hidden = true;
+      }
+      const err = $("camErr");
+      if (cam && cam.error) {
+        err.hidden = false;
+        err.textContent = cam.error;
+      } else {
+        err.hidden = true;
+        err.textContent = "";
+      }
+    }
 
     const logEl = $("log");
     logEl.addEventListener("scroll", () => {
@@ -302,11 +374,72 @@
           $("err").textContent = s.last_error;
         }
         appendLogs(s.logs || []);
+        if (!camPending && s.cam) applyCam(s.cam);
+        applyTeach(s.teach, !!s.running);
       } catch (e) {
         $("err").hidden = false;
         $("err").textContent = String(e);
       }
     }
+
+    $("btnCam").onclick = async () => {
+      const next = !camOn;
+      camPending = true;
+      applyCam({ on: next });
+      try {
+        const r = await fetch("/api/cam", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ on: next }),
+        });
+        const j = await r.json();
+        applyCam(j.ok === false ? { on: false, error: j.error || "相机开关失败" } : j);
+      } catch (e) {
+        applyCam({ on: false, error: String(e) });
+      } finally {
+        camPending = false;
+      }
+    };
+
+    function applyTeach(teach, presenceOn) {
+      if (!teach) return;
+      const busy = !!teach.busy;
+      $("btnTeach").disabled = busy || presenceOn;
+      $("poseName").disabled = busy;
+      if (presenceOn || busy) $("btnStart").disabled = true;
+      $("teachMsg").textContent = teach.msg || "";
+      $("teachQ").textContent = teach.q
+        ? "q = " + teach.q.map((x) => Number(x).toFixed(3)).join(", ")
+        : "";
+    }
+
+    $("btnTeach").onclick = async () => {
+      const body = {};
+      const name = $("poseName").value.trim();
+      if (name) body.name = name;
+      const port = $("port").value.trim();
+      if (port) body.port = port;
+      $("btnTeach").disabled = true;
+      const r = await fetch("/api/teach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (!j.ok) $("teachMsg").textContent = j.error || "无法关力矩";
+      refresh();
+    };
+
+    $("btnHold").onclick = async () => {
+      const r = await fetch("/api/hold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const j = await r.json();
+      if (!j.ok) $("teachMsg").textContent = j.error || "无法锁定";
+      refresh();
+    };
 
     $("btnStart").onclick = async () => {
       $("err").hidden = true;

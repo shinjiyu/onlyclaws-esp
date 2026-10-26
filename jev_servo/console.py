@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .cam_feed import FEED
+from .free_drive import DRIVE, pose_name
 from .loop import run_loop
 from .ops import OPS, op_help, parse_op
 
@@ -69,6 +71,8 @@ class LoopController:
             }
 
     def start(self, opts: dict[str, Any]) -> dict[str, Any]:
+        if DRIVE.status()["busy"]:
+            return {"ok": False, "error": "去力矩进行中，先锁定再 Start"}
         with self._lock:
             if self._running:
                 return {"ok": False, "error": "already running"}
@@ -217,7 +221,13 @@ def serve(*, host: str = "127.0.0.1", http_port: int = 8765) -> None:
 
                 qs = parse_qs(urlparse(self.path).query)
                 after = int((qs.get("after") or ["0"])[0])
-                _json(self, 200, CONTROLLER.status(after_seq=after))
+                status = CONTROLLER.status(after_seq=after)
+                status["cam"] = FEED.status()
+                status["teach"] = DRIVE.status()
+                _json(self, 200, status)
+                return
+            if path == "/api/cam.mjpg":
+                self._stream_cam()
                 return
             if path == "/api/ops":
                 _json(self, 200, {"ops": list(OPS), "help": op_help()})
@@ -233,7 +243,54 @@ def serve(*, host: str = "127.0.0.1", http_port: int = 8765) -> None:
             if path == "/api/stop":
                 _json(self, 200, CONTROLLER.stop())
                 return
+            if path == "/api/cam":
+                on = body.get("on")
+                if on is None:
+                    _json(self, 400, {"ok": False, "error": "on required"})
+                    return
+                _json(self, 200, {"ok": True, **FEED.set_on(bool(on))})
+                return
+            if path == "/api/teach":
+                if CONTROLLER.status()["running"]:
+                    _json(self, 200, {"ok": False, "error": "找人或跟随正在占用串口，先 Stop"})
+                    return
+                _json(
+                    self,
+                    200,
+                    DRIVE.start(name=pose_name(body.get("name")), port=body.get("port") or None),
+                )
+                return
+            if path == "/api/hold":
+                if CONTROLLER.status()["running"]:
+                    _json(self, 200, {"ok": False, "error": "找人或跟随正在占用串口，先 Stop"})
+                    return
+                _json(self, 200, DRIVE.request_hold())
+                return
             self.send_error(404)
+
+        def _stream_cam(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                while True:
+                    jpeg = FEED.latest_jpeg() if FEED.on else None
+                    if not jpeg:
+                        time.sleep(0.05)
+                        continue
+                    header = (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(jpeg)).encode("ascii") + b"\r\n\r\n"
+                    )
+                    self.wfile.write(header)
+                    self.wfile.write(jpeg)
+                    self.wfile.write(b"\r\n")
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
 
     httpd = ThreadingHTTPServer((host, http_port), Handler)
     print(f"Presence console http://{host}:{http_port}/", flush=True)

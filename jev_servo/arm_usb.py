@@ -141,3 +141,32 @@ class ArmUsb:
         if isinstance(q, list) and len(q) >= 4:
             return [float(x) for x in q[:4]]
         return self.feedback()
+
+
+class QuietArmUsb(ArmUsb):
+    """Open with DTR/RTS low and wait out the ESP32 reboot that macOS triggers."""
+
+    def __init__(self, port: str | None = None, baud: int = 115200, boot_timeout_s: float = 20.0):
+        import serial
+
+        self.port = port or find_port()
+        self.ser = serial.Serial()
+        self.ser.port = self.port
+        self.ser.baudrate = baud
+        self.ser.timeout = 0.05
+        self.ser.dtr = False
+        self.ser.rts = False
+        self.ser.open()
+        buf = b""
+        deadline = time.time() + boot_timeout_s
+        while time.time() < deadline:
+            buf += self.ser.read(4096)
+            if b"waiting for download" in buf:
+                self.ser.close()
+                raise ArmUsbError("arm ESP32 in download mode; reset it into normal boot")
+            if b"ready." in buf:
+                break
+            if not buf and time.time() > deadline - boot_timeout_s + 1.5:
+                break
+        time.sleep(0.5)
+        self.ser.reset_input_buffer()

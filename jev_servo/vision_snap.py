@@ -20,6 +20,24 @@ from vision.pipeline import describe_bgr  # noqa: E402
 PerceiveMode = Literal["auto", "person", "full"]
 
 
+def _shared_preview_bgr() -> np.ndarray | None:
+    """Frame from the console camera switch, when that switch is on.
+
+    The switch already holds the UVC session. Opening a second one fails.
+    """
+    try:
+        from jev_servo.cam_feed import FEED
+    except Exception:
+        return None
+    if not FEED.on:
+        return None
+    frame = FEED.latest_bgr(wait_s=2.0)
+    if frame is None:
+        err = FEED.status().get("error") or "相机开关已打开，但还没有画面"
+        raise RuntimeError(err)
+    return frame
+
+
 def _try_tip_cam_bgr() -> np.ndarray | None:
     """Prefer mcp_guard tip Unique-ID cam when available."""
     mg_env = os.environ.get("MCP_GUARD_ROOT", "")
@@ -82,10 +100,14 @@ def snap_scene(
         if bgr is None:
             raise FileNotFoundError(f"cannot read image: {image}")
     else:
-        bgr = _try_tip_cam_bgr()
+        bgr = _shared_preview_bgr()
         if bgr is not None:
-            source = "tip_usb"
+            source = "console_cam"
         else:
+            bgr = _try_tip_cam_bgr()
+        if bgr is not None and source == "unknown":
+            source = "tip_usb"
+        elif bgr is None:
             idx = 0 if camera_index is None else camera_index
             bgr = _opencv_bgr(idx)
             source = f"cv2:{idx}"
