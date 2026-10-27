@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OnlyClaws — Web 烧录</title>
-  <meta name="description" content="用浏览器经 USB 烧录 OnlyClaws 固件。Chrome / Edge，HTTPS 或 localhost。" />
+  <meta name="description" content="登录后经 USB 烧录固件，并自动写入 device_token。" />
   <link rel="stylesheet" href="/assets/oc.css" />
   <style>
     .flash-hero { padding: 48px 0 24px; }
     .flash-hero h1 { font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -.02em; margin: 0 0 8px; }
     .flash-hero .lede { color: var(--muted); max-width: 40rem; margin: 0; }
-    .sku-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin: 28px 0 40px; }
+    .sku-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin: 28px 0 20px; }
     .sku {
       border: 1px solid var(--line);
       background: var(--card);
@@ -40,17 +40,50 @@
     }
     .install-card h2 { margin: 0 0 6px; font-size: 1.15rem; }
     .install-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
-    esp-web-install-button { --esp-tools-button-color: var(--accent); }
+    .wifi-fields {
+      display: grid; gap: 12px; grid-template-columns: 1fr 1fr;
+      margin-top: 14px; max-width: 520px;
+    }
+    @media (max-width: 560px) { .wifi-fields { grid-template-columns: 1fr; } }
+    .wifi-fields label { display: block; font-size: .82rem; color: var(--muted); margin-bottom: 4px; }
+    .wifi-fields input {
+      width: 100%; box-sizing: border-box;
+      border: 1px solid var(--line); border-radius: 8px;
+      background: var(--bg); color: inherit; padding: 8px 10px; font: inherit;
+    }
+    .log {
+      margin-top: 14px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted); white-space: pre-wrap; max-height: 180px; overflow: auto;
+      border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+      background: color-mix(in srgb, var(--card) 85%, #000);
+    }
+    .log:empty { display: none; }
     .notes { font-size: .9rem; color: var(--muted); margin-top: 18px; }
     .notes ol { margin: 8px 0 0; padding-left: 1.2rem; }
-    .noserial {
+    .noserial, .banner {
       border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--line));
       background: color-mix(in srgb, var(--amber) 8%, var(--card));
       border-radius: var(--radius); padding: 12px 14px; margin-top: 14px;
       font-size: .9rem;
     }
+    .ok-banner {
+      border-color: color-mix(in srgb, var(--green) 35%, var(--line));
+      background: color-mix(in srgb, var(--green) 8%, var(--card));
+    }
+    .login-wrap { min-height: calc(100vh - 60px); display: grid; place-items: center; padding: 40px 20px; }
+    .login { width: 100%; max-width: 400px; }
+    .login h1 { font-size: 1.5rem; margin: 0 0 6px; letter-spacing: -.01em; }
+    .login .sub { color: var(--muted); margin: 0 0 22px; font-size: .9rem; }
+    .login .btn { width: 100%; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: .85rem; margin-bottom: 6px; color: var(--muted); }
+    .field input {
+      width: 100%; box-sizing: border-box;
+      border: 1px solid var(--line); border-radius: 8px;
+      background: var(--bg); color: inherit; padding: 10px 12px; font: inherit;
+    }
+    .err { color: #c44; font-size: .88rem; margin-top: 10px; }
   </style>
-  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
 <body>
   <header class="nav">
@@ -65,49 +98,120 @@
         <a href="https://github.com/shinjiyu/onlyclaws-esp" target="_blank" rel="noopener">GitHub</a>
       </nav>
       <div class="spacer"></div>
-      <a class="btn sm ghost" href="/console/" data-i18n-skip>控制台</a>
+      <span class="muted small hidden" id="whoami"></span>
+      <button type="button" class="btn sm ghost hidden" id="logoutBtn">退出</button>
+      <a class="btn sm ghost" href="/console/">控制台</a>
     </div>
   </header>
 
-  <main class="wrap flash-hero">
-    <h1>浏览器烧录固件</h1>
-    <p class="lede">公开包：<strong>Folo AI Passport（C3）</strong>与<strong>圆形 AMOLED 1.75C</strong>。Chrome / Edge + USB（Passport 选 USB JTAG/serial debug unit），需 HTTPS 或 localhost。烧录后去控制台登记并配网。</p>
+  <div id="loginView" class="login-wrap hidden">
+    <form id="loginForm" class="card login">
+      <h1>登录后烧录</h1>
+      <p class="sub">烧录时会自动登记设备并写入 device_token，板子开机即可连云。</p>
+      <div class="field">
+        <label for="email">邮箱</label>
+        <input id="email" type="email" autocomplete="username" required placeholder="you@example.com" />
+      </div>
+      <div class="field">
+        <label for="password">密码</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+      </div>
+      <button class="btn" type="submit" id="loginBtn">登录</button>
+      <div id="loginErr" class="err hidden"></div>
+      <p class="sub" style="margin:14px 0 0">还没有权限？<a href="/apply/">提交申请</a></p>
+    </form>
+  </div>
+
+  <main id="flashView" class="wrap flash-hero hidden">
+    <h1>浏览器烧录并绑定</h1>
+    <p class="lede">登录后烧录会读取芯片 MAC、登记到你的账号，并把 <code>device_token</code> 写入 NVS。可选填 Wi‑Fi，省去 SoftAP 配网。</p>
 
     <div id="skuGrid" class="sku-grid" role="listbox" aria-label="固件产品"></div>
 
     <div class="install-card" id="installCard">
       <h2 id="selTitle">选择上方产品</h2>
       <p class="muted small" id="selBlurb">准备好 USB 线后再点安装。</p>
+
+      <div class="wifi-fields">
+        <div>
+          <label for="wifiSsid">Wi‑Fi SSID（可选）</label>
+          <input id="wifiSsid" type="text" maxlength="32" autocomplete="off" placeholder="家里的 Wi‑Fi" />
+        </div>
+        <div>
+          <label for="wifiPass">Wi‑Fi 密码（可选）</label>
+          <input id="wifiPass" type="password" maxlength="64" autocomplete="off" placeholder="可留空" />
+        </div>
+      </div>
+
       <div class="install-actions">
-        <esp-web-install-button class="hidden" id="installBtn"></esp-web-install-button>
-        <button type="button" class="btn" id="installDisabled" disabled>暂无固件包</button>
-        <a class="btn ghost sm" id="pioHint" href="https://github.com/shinjiyu/onlyclaws-esp#quick-start" target="_blank" rel="noopener">用 PlatformIO 烧录</a>
+        <button type="button" class="btn" id="flashBtn" disabled>连接 USB 并烧录</button>
+        <a class="btn ghost sm" href="https://github.com/shinjiyu/onlyclaws-esp#quick-start" target="_blank" rel="noopener">用 PlatformIO 烧录</a>
       </div>
       <div id="noSerial" class="noserial hidden">当前浏览器不支持 Web Serial。请换 Chrome / Edge，或用 PlatformIO。</div>
+      <div id="statusBanner" class="banner hidden"></div>
+      <div id="flashLog" class="log" aria-live="polite"></div>
       <div class="notes">
         <strong>注意</strong>
         <ol>
-          <li>首次全量安装可能擦除 Flash（含 NVS 里的 Wi‑Fi / token）。已配过网的板子如需保留 NVS，请用仓库里的 <code>safe_upload_keep_nvs.sh</code>。</li>
-          <li>ESP32-S3 原生 USB：按住 BOOT 再插线或点复位，进入下载模式后再点安装。</li>
-          <li>运维：在服务器上对对应 env 执行 <code>rlcd/scripts/package_web_flash.sh &lt;env&gt;</code> 生成 <code>server/firmware/&lt;id&gt;/</code>。</li>
+          <li>全量烧录会写入新的 NVS（含 token / 可选 Wi‑Fi），覆盖板上旧的配网与 token。</li>
+          <li>ESP32-C3 Passport：选 USB JTAG/serial debug unit。ESP32-S3：按住 BOOT 再插线或复位进入下载模式。</li>
+          <li>烧录完成后设备会出现在<a href="/console/">控制台 → 设备</a>。</li>
         </ol>
       </div>
     </div>
   </main>
 
-  <script>
+  <script type="module">
+    import { ESPLoader, Transport } from "https://cdn.jsdelivr.net/npm/esptool-js@0.5.4/+esm";
+
+    const loginView = document.getElementById("loginView");
+    const flashView = document.getElementById("flashView");
     const grid = document.getElementById("skuGrid");
     const selTitle = document.getElementById("selTitle");
     const selBlurb = document.getElementById("selBlurb");
-    const installBtn = document.getElementById("installBtn");
-    const installDisabled = document.getElementById("installDisabled");
+    const flashBtn = document.getElementById("flashBtn");
     const noSerial = document.getElementById("noSerial");
+    const flashLog = document.getElementById("flashLog");
+    const statusBanner = document.getElementById("statusBanner");
+    const whoami = document.getElementById("whoami");
+    const logoutBtn = document.getElementById("logoutBtn");
     const lang = (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
 
     if (!("serial" in navigator)) noSerial.classList.remove("hidden");
 
     let selected = null;
     let products = [];
+    let busy = false;
+
+    function show(el, on) { el.classList.toggle("hidden", !on); }
+
+    function log(line) {
+      flashLog.textContent += (flashLog.textContent ? "\n" : "") + line;
+      flashLog.scrollTop = flashLog.scrollHeight;
+    }
+
+    function setBanner(text, ok) {
+      statusBanner.textContent = text;
+      statusBanner.classList.toggle("hidden", !text);
+      statusBanner.classList.toggle("ok-banner", !!ok);
+    }
+
+    async function api(path, opts = {}) {
+      const r = await fetch(path, {
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+        ...opts,
+        body: opts.body != null ? JSON.stringify(opts.body) : undefined,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const err = new Error(data.detail || r.statusText || "request failed");
+        err.status = r.status;
+        err.detail = data.detail;
+        throw err;
+      }
+      return data;
+    }
 
     function label(p) {
       return lang === "zh" ? (p.title_zh || p.name) : p.name;
@@ -127,17 +231,12 @@
       if (!selected) return;
       selTitle.textContent = label(selected);
       selBlurb.textContent = selected.blurb || "";
-      if (selected.ready) {
-        installBtn.manifest = selected.manifest_url;
-        installBtn.classList.remove("hidden");
-        installDisabled.classList.add("hidden");
-      } else {
-        installBtn.classList.add("hidden");
-        installDisabled.classList.remove("hidden");
-        installDisabled.textContent = selected.planned
+      flashBtn.disabled = busy || !selected.ready || !("serial" in navigator);
+      flashBtn.textContent = selected.ready
+        ? (lang === "zh" ? "连接 USB 并烧录" : "Connect USB & flash")
+        : (selected.planned
           ? (lang === "zh" ? "驱动尚未上线" : "Driver not shipped yet")
-          : (lang === "zh" ? "服务器尚未打包固件" : "Firmware not packaged on server");
-      }
+          : (lang === "zh" ? "服务器尚未打包固件" : "Firmware not packaged"));
     }
 
     function render() {
@@ -157,21 +256,206 @@
       }
       const prefer =
         products.find((p) => p.ready) ||
-        products.find((p) => p.id === (window.__fwDefault || "esp32-s3-amoled-175c")) ||
+        products.find((p) => p.id === (window.__fwDefault || "esp32-c3-folo-passport")) ||
         products[0];
       if (prefer) select(prefer.id);
     }
 
-    fetch("/api/firmware")
-      .then((r) => r.json())
-      .then((data) => {
-        products = data.products || [];
-        window.__fwDefault = data.default || "esp32-s3-amoled-175c";
-        render();
-      })
-      .catch(() => {
-        selBlurb.textContent = lang === "zh" ? "无法加载固件列表。" : "Could not load firmware list.";
-      });
+    function u8ToBinaryString(u8) {
+      let s = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < u8.length; i += chunk) {
+        s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+      }
+      return s;
+    }
+
+    function b64ToBinaryString(b64) {
+      const bin = atob(b64);
+      const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      return u8ToBinaryString(u8);
+    }
+
+    function normalizeMac(mac) {
+      return String(mac || "")
+        .toLowerCase()
+        .replace(/[^0-9a-f]/g, "");
+    }
+
+    async function enter(user) {
+      whoami.textContent = user.email || "";
+      show(whoami, true);
+      show(logoutBtn, true);
+      show(loginView, false);
+      show(flashView, true);
+      const data = await api("/api/firmware");
+      products = data.products || [];
+      window.__fwDefault = data.default || "esp32-c3-folo-passport";
+      render();
+    }
+
+    async function boot() {
+      try {
+        const me = await api("/api/auth/me");
+        await enter(me.user || me);
+      } catch (_) {
+        show(loginView, true);
+        show(flashView, false);
+      }
+    }
+
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("loginBtn");
+      const err = document.getElementById("loginErr");
+      show(err, false);
+      btn.disabled = true;
+      try {
+        const data = await api("/api/auth/login", {
+          method: "POST",
+          body: {
+            email: document.getElementById("email").value.trim(),
+            password: document.getElementById("password").value,
+          },
+        });
+        document.getElementById("password").value = "";
+        await enter(data.user);
+      } catch (ex) {
+        err.textContent =
+          ex.status === 403
+            ? (lang === "zh" ? "账号尚未开通控制台，请先申请。" : "Account not approved yet.")
+            : (lang === "zh" ? "邮箱或密码不对。" : "Wrong email or password.");
+        show(err, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      try { await api("/api/auth/logout", { method: "POST", body: {} }); } catch (_) {}
+      whoami.textContent = "";
+      show(whoami, false);
+      show(logoutBtn, false);
+      show(flashView, false);
+      show(loginView, true);
+    });
+
+    const terminal = {
+      clean() {},
+      writeLine(data) { log(String(data).replace(/\r/g, "").trimEnd()); },
+      write(data) {
+        const s = String(data).replace(/\r/g, "");
+        if (s.trim()) log(s.trimEnd());
+      },
+    };
+
+    flashBtn.addEventListener("click", async () => {
+      if (!selected || !selected.ready || busy) return;
+      busy = true;
+      flashBtn.disabled = true;
+      flashLog.textContent = "";
+      setBanner("");
+      let transport = null;
+      try {
+        log(lang === "zh" ? "选择串口…" : "Pick a serial port…");
+        const port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200, bufferSize: 8192 });
+        transport = new Transport(port, true);
+        const loader = new ESPLoader({
+          transport,
+          baudrate: 115200,
+          romBaudrate: 115200,
+          terminal,
+        });
+        log(lang === "zh" ? "同步芯片…" : "Syncing chip…");
+        const chip = await loader.main();
+        log("chip: " + chip);
+
+        if (!loader.chip || typeof loader.chip.readMac !== "function") {
+          throw new Error(lang === "zh" ? "无法读取芯片 MAC" : "Could not read chip MAC");
+        }
+        const mac = normalizeMac(await loader.chip.readMac(loader));
+        if (mac.length !== 12) {
+          throw new Error(lang === "zh" ? "芯片 MAC 格式异常: " + mac : "Unexpected MAC: " + mac);
+        }
+        log("MAC: " + mac);
+
+        log(lang === "zh" ? "登记设备并生成 token…" : "Registering device & minting token…");
+        const prov = await api("/api/firmware/provision", {
+          method: "POST",
+          body: {
+            product_id: selected.id,
+            device_id: mac,
+            wifi_ssid: document.getElementById("wifiSsid").value.trim(),
+            wifi_pass: document.getElementById("wifiPass").value,
+          },
+        });
+        log("device_id=" + prov.device.id + " bound");
+
+        const fileArray = [];
+        for (const part of prov.parts) {
+          if (part.data_base64) {
+            fileArray.push({ data: b64ToBinaryString(part.data_base64), address: part.offset });
+            log(`nvs @ 0x${part.offset.toString(16)}`);
+            continue;
+          }
+          log("fetch " + part.path);
+          const resp = await fetch(part.path, { credentials: "same-origin" });
+          if (!resp.ok) throw new Error("download failed: " + part.path);
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          fileArray.push({ data: u8ToBinaryString(buf), address: part.offset });
+        }
+
+        log(lang === "zh" ? "写入 Flash…" : "Writing flash…");
+        await loader.writeFlash({
+          fileArray,
+          flashSize: "keep",
+          flashMode: "keep",
+          flashFreq: "keep",
+          eraseAll: false,
+          compress: true,
+          reportProgress: (fileIndex, written, total) => {
+            if (total > 0 && written === total) {
+              log(`part ${fileIndex + 1}/${fileArray.length} done`);
+            }
+          },
+        });
+
+        try {
+          await loader.after("hard_reset");
+        } catch (_) {
+          /* some CDC boards reset themselves */
+        }
+
+        setBanner(
+          lang === "zh"
+            ? `完成：设备 ${prov.device.id} 已绑定到你的账号，token 已写入板子。`
+            : `Done: device ${prov.device.id} bound; token written to the board.`,
+          true
+        );
+        log(lang === "zh" ? "完成。" : "Done.");
+      } catch (ex) {
+        console.error(ex);
+        const msg = ex && ex.message ? ex.message : String(ex);
+        if (ex && ex.name === "NotFoundError") {
+          setBanner(lang === "zh" ? "未选择串口。" : "No serial port selected.");
+        } else if (ex && ex.status === 409) {
+          setBanner(lang === "zh" ? "这台设备已被其他账号绑定。" : "Device already claimed by another account.");
+        } else {
+          setBanner((lang === "zh" ? "烧录失败：" : "Flash failed: ") + msg);
+        }
+        log("error: " + msg);
+      } finally {
+        try {
+          if (transport) await transport.disconnect();
+        } catch (_) {}
+        busy = false;
+        flashBtn.disabled = !selected || !selected.ready;
+      }
+    });
+
+    boot();
   </script>
 </body>
 </html>

@@ -1,0 +1,29 @@
+{
+  "name": "OnlyClaws Folo AI Passport",
+  "version": "c198ba0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C3",
+      "serialType": "cdc",
+      "parts": [
+        {
+          "path": "/firmware/esp32-c3-folo-passport/bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "/firmware/esp32-c3-folo-passport/partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "/firmware/esp32-c3-folo-passport/boot_app0.bin",
+          "offset": 57344
+        },
+        {
+          "path": "/firmware/esp32-c3-folo-passport/firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

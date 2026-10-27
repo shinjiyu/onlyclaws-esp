@@ -47,6 +47,7 @@ import accounts
 import device_session
 import firmware_catalog
 import ml_registry
+import nvs_cloud
 import render as epd_render
 import script_sign
 import live_comments
@@ -75,6 +76,12 @@ DEFAULT_DEVICE_ID = os.environ.get("EPD_DEFAULT_DEVICE_ID", "a4cb8fdf8440")
 PUBLIC_BASE = os.environ.get("EPD_PUBLIC_BASE", "https://onlyclaws.world").rstrip("/")
 COOKIE_PATH = urlparse(PUBLIC_BASE).path.rstrip("/") or "/"
 CONSOLE_URL = f"{PUBLIC_BASE}/console/"
+# Written into device NVS during login-gated web flash (firmware polls /epaper/…).
+DEVICE_CLOUD_HOST = (
+    os.environ.get("EPD_DEVICE_CLOUD_HOST", "").strip()
+    or (urlparse(PUBLIC_BASE).hostname or "onlyclaws.world")
+)
+DEVICE_CLOUD_PREFIX = os.environ.get("EPD_DEVICE_CLOUD_PREFIX", "/epaper").strip() or "/epaper"
 WENAI_UPSTREAM = os.environ.get("WENAI_UPSTREAM", "").rstrip("/")
 WENAI_SECRET = os.environ.get("WENAI_SECRET", "").strip()
 WENAI_ENABLED = os.environ.get("WENAI_ENABLED", "").strip().lower() in ("1", "true", "yes")
@@ -809,17 +816,32 @@ async def flash_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "flash.html")
 
 
+def _require_human_session(sess: dict[str, Any]) -> str:
+    """Web flash binds a board to a person — agent tokens cannot provision."""
+    if sess.get("auth") == "agent_token":
+        raise HTTPException(status_code=403, detail="web flash requires browser login")
+    return tenancy.session_email(sess)
+
+
 @app.get("/api/firmware")
-async def api_firmware_list(request: Request) -> dict[str, Any]:
+async def api_firmware_list(
+    request: Request, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    _require_human_session(sess)
     include_all = request.query_params.get("all", "").lower() in ("1", "true", "yes")
     return {
         "products": firmware_catalog.list_products(include_all=include_all),
         "default": firmware_catalog.WEB_FLASH_DEFAULT_ID,
+        "cloud_host": DEVICE_CLOUD_HOST,
+        "cloud_prefix": DEVICE_CLOUD_PREFIX,
     }
 
 
 @app.get("/api/firmware/{product_id}/manifest.json")
-async def api_firmware_manifest(product_id: str) -> JSONResponse:
+async def api_firmware_manifest(
+    product_id: str, sess: dict[str, Any] = Depends(require_user)
+) -> JSONResponse:
+    _require_human_session(sess)
     product = firmware_catalog.get_product(product_id)
     if not product:
         raise HTTPException(status_code=404, detail="unknown product")
@@ -830,6 +852,104 @@ async def api_firmware_manifest(product_id: str) -> JSONResponse:
     if not firmware_catalog.parts_ready(firmware_catalog.product_dir(product_id)):
         raise HTTPException(status_code=404, detail="firmware not packaged")
     return JSONResponse(firmware_catalog.build_manifest(product))
+
+
+class FirmwareProvisionIn(BaseModel):
+    product_id: str = Field(..., min_length=3, max_length=64)
+    device_id: str = Field(..., min_length=4, max_length=32)
+    name: str = ""
+    wifi_ssid: str = Field("", max_length=32)
+    wifi_pass: str = Field("", max_length=64)
+
+
+@app.post("/api/firmware/provision")
+async def api_firmware_provision(
+    body: FirmwareProvisionIn, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    """Claim the chip MAC for the logged-in user, mint a token, return NVS + flash parts.
+
+    The browser reads the MAC over Web Serial, calls this, then flashes firmware plus
+    the returned NVS image at 0x9000 so the board boots already bound.
+    """
+    email = _require_human_session(sess)
+    product = firmware_catalog.get_product(body.product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="unknown product")
+    pdir = firmware_catalog.product_dir(body.product_id)
+    if not firmware_catalog.parts_ready(pdir):
+        raise HTTPException(status_code=404, detail="firmware not packaged")
+
+    device_id = body.device_id.strip().lower().replace(":", "").replace("-", "")
+    if len(device_id) < 4 or not device_id.isalnum():
+        raise HTTPException(status_code=400, detail="device_id must be the chip MAC (hex)")
+
+    name = body.name.strip() or f"{product.get('title_zh') or product['name']} {device_id[-4:]}"
+    token = tenancy.new_device_token()
+    th = tenancy.hash_token(token)
+    now = utc_now()
+    with db() as conn:
+        row = tenancy.get_device(conn, device_id)
+        if row:
+            owner = (row["owner_email"] or "").strip().lower()
+            if owner and owner != email:
+                raise HTTPException(status_code=409, detail="device already claimed")
+            conn.execute(
+                """
+                UPDATE devices
+                SET name=?, owner_email=?, token_hash=?, claimed_at=?
+                WHERE id=?
+                """,
+                (name, email, th, now, device_id),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO devices (id, name, meta, owner_email, token_hash, claimed_at)
+                VALUES (?, ?, '{}', ?, ?, ?)
+                """,
+                (device_id, name, email, th, now),
+            )
+
+    try:
+        nvs = nvs_cloud.build_cloud_nvs(
+            host=DEVICE_CLOUD_HOST,
+            prefix=DEVICE_CLOUD_PREFIX,
+            device_id=device_id,
+            token=token,
+            wifi_ssid=body.wifi_ssid or None,
+            wifi_pass=body.wifi_pass or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    base = f"/firmware/{body.product_id}"
+    parts: list[dict[str, Any]] = [
+        {"path": f"{base}/{fname}", "offset": off}
+        for fname, off in firmware_catalog.DEFAULT_PARTS
+    ]
+    parts.append(
+        {
+            "path": "nvs",
+            "offset": nvs_cloud.NVS_OFFSET,
+            "data_base64": base64.b64encode(nvs).decode("ascii"),
+        }
+    )
+    return {
+        "success": True,
+        "device": {
+            "id": device_id,
+            "name": name,
+            "owner_email": email,
+            "claimed_at": now,
+        },
+        "device_token": token,
+        "cloud_host": DEVICE_CLOUD_HOST,
+        "cloud_prefix": DEVICE_CLOUD_PREFIX,
+        "chipFamily": product["chipFamily"],
+        "serialType": product.get("serialType"),
+        "parts": parts,
+        "note": "Token is written into NVS during flash; save it only if you need a backup.",
+    }
 
 
 @app.get("/wenai/")

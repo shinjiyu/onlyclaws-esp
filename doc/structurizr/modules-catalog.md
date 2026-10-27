@@ -12,7 +12,7 @@ Same O(1) rule as mcp_guard.
 | tenancy | infra | `server/tenancy.py` | — | Ownership + tokens |
 | render | infra | `server/render.py` | — | Panel-sized bitmaps |
 | ml_registry | infra | `server/ml_registry.py`, `ml_opset.py` | tenancy | Model upload + op-set check + ECDSA signing + device download ([ML-PLUGIN.md](./ML-PLUGIN.md)) |
-| firmware_dist | infra | `server/firmware_catalog.py`, `server/firmware/`, `rlcd/scripts/package_web_flash.sh` | — | Product bin catalog + ESP Web Tools manifests for `/flash` ([ADR 0008](./decisions/0008-web-flash-and-color-panel.md)) |
+| firmware_dist | infra | `server/firmware_catalog.py`, `server/nvs_cloud.py`, `server/firmware/`, `rlcd/scripts/package_web_flash.sh` | tenancy | Product bin catalog + login-gated provision (NVS token inject) for `/flash` ([ADR 0008](./decisions/0008-web-flash-and-color-panel.md)) |
 | demos | infra | `demos/` | — | Lua apps (data), not firmware plugins |
 | vision_path | infra | `vision/` | — | **通路 B** 主机：帧 → 对象/空描述/state；非 ESP |
 | jev_servo_path | infra | `jev_servo/` | — | **通路 C** 主机：慢 JEV 每关节安全角区间 → 单次云 `arm.stream`；非 ESP |

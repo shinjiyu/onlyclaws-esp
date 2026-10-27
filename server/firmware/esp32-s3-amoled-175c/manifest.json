@@ -1,0 +1,29 @@
+{
+  "name": "OnlyClaws AMOLED 1.75C",
+  "version": "c198ba0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "serialType": "cdc",
+      "parts": [
+        {
+          "path": "/firmware/esp32-s3-amoled-175c/bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "/firmware/esp32-s3-amoled-175c/partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "/firmware/esp32-s3-amoled-175c/boot_app0.bin",
+          "offset": 57344
+        },
+        {
+          "path": "/firmware/esp32-s3-amoled-175c/firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}
