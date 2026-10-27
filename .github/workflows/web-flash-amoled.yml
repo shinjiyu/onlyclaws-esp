@@ -60,6 +60,12 @@ jobs:
       - name: Fetch TFLite Micro + esp-nn
         run: bash scripts/fetch_tflm.sh
 
+      # device_secrets.h is gitignored; CI needs the example stub so the AMOLED
+      # SKU compiles. Placeholder token is fine: this job only builds bins.
+      - name: Stub device_secrets.h for CI
+        working-directory: rlcd
+        run: cp include/device_secrets.h.example include/device_secrets.h
+
       - name: Build ${{ env.PIO_ENV }}
         working-directory: rlcd
         run: pio run -e "$PIO_ENV"
