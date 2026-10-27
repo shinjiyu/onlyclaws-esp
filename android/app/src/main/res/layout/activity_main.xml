@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <Button
+        android:id="@+id/permit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="16dp"
+        android:backgroundTint="#E85D04"
+        android:text="@string/permit_overlay"
+        android:textAllCaps="false"
+        android:textColor="#FFFFFF"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/wallpaper"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="8dp"
+        android:backgroundTint="#1C1B19"
+        android:text="@string/set_wallpaper"
+        android:textAllCaps="false"
+        android:textColor="#FFFFFF" />
+
+    <FrameLayout
+        android:id="@+id/a2ui_host"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/log_pane"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <TextView
+            android:id="@+id/log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:padding="20dp"
+            android:textColor="#1C1B19"
+            android:textSize="14sp" />
+    </ScrollView>
+</LinearLayout>

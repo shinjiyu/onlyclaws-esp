@@ -200,6 +200,7 @@ The ESP32-S3 builds also run small neural networks that an agent uploads at runt
 |------|--------------|
 | [`rlcd/`](rlcd/) | Firmware. Build and flash from here |
 | [`server/`](server/) | Control plane: devices, scripts, events, bitmaps, console |
+| [`android/`](android/) | OnlyClaws Android (OCA): Rhino JS container on phone; same session / `js` invoke as the boards |
 | [`demos/`](demos/) | Lua apps to deploy: Snake (key, phone D-pad or HTTP controller), a live RL-training dashboard, a Wi-Fi quality monitor, RoArm pose hold, and yes/no keyword spotting |
 | [`ml/`](ml/) | Models ready to upload to `/api/ml/models` (`.tflite` + meta) |
 | [`jev_servo/`](jev_servo/) | Host-side arm control: forward kinematics, USB and cloud arm channels, MCP server, web console |
