@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -30,6 +31,14 @@ class MainActivity : AppCompatActivity() {
             findViewById(R.id.log_pane),
             findViewById(R.id.wallpaper),
         )
+        app.desk.attach(findViewById(R.id.desk_host))
+        app.desk.watchLogs(app)
+        app.overlay.attachPage(findViewById(R.id.page_host))
+        onBackPressedDispatcher.addCallback(this) {
+            if (app.overlay.backPage()) return@addCallback
+            isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+        }
         findViewById<Button>(R.id.permit).setOnClickListener {
             startActivity(
                 Intent(
@@ -93,7 +102,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        (application as OcApp).a2ui.detach()
+        val app = application as OcApp
+        app.overlay.detachPage()
+        app.desk.unwatchLogs(app)
+        app.desk.detach()
+        app.a2ui.detach()
         super.onDestroy()
     }
 

@@ -72,5 +72,17 @@ class OcService : Service() {
 
     companion object {
         private const val CHANNEL = "oca"
+
+        fun updateNote(context: android.content.Context, text: String) {
+            val manager = context.getSystemService(NotificationManager::class.java) ?: return
+            if (manager.getNotificationChannel(CHANNEL) == null) return
+            val note = NotificationCompat.Builder(context, CHANNEL)
+                .setSmallIcon(R.drawable.ic_oca)
+                .setContentTitle(context.getString(R.string.app_name))
+                .setContentText(text)
+                .setOngoing(true)
+                .build()
+            manager.notify(1, note)
+        }
     }
 }

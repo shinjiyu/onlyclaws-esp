@@ -34,7 +34,9 @@ with `POST /api/invoke` and a `js` tool. Do not commit tokens.
 |--------|------|
 | `oca.log` | log line |
 | `a2ui` | Basic Catalog v0.9 (`send`/`push`, `clear`, `catalog`) |
-| `web` | overlay WebView (`load`/`url`/`eval`/`clear`/`touch`) |
+| `web` | `load` / `url` / `eval` / `clear` / `loggedIn` / `showing`. A login URL is shown in the app and closes once `SESSDATA` is set. Any other URL is loaded off-screen, muted, and does not take touches, so the phone stays usable. |
+| `desk` | three screens: 运行, 配置, 日志. `desk.show({ title, status, login, running, keyReady, error, checking, open, tokens, gap, gapMin, gapMax, gapStep, prompts, prompt, custom, rows, stats, events })`. `tokens` is the running total. `open` is `运行` / `配置` / `日志` when the script wants to change screen. 开始 calls `start` after the script checks the saved key against the model. A failed check sets `error`. The gap slider reports `gap`. A preset reports its id. Custom text reports `promptText`. |
+| `keys` | `get` / `set` / `has` for one private file per name, such as `deepseek`. The value is not drawn on the screen. |
 | `tts` | `say` / `stop` + `onDone` |
 | `wallpaper` | preset load/clear (`scene: "crash"` or flat color) |
 | `ui` | `w`/`h`, `safe`, `keyboard` (dp) |

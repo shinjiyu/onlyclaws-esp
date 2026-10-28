@@ -21,14 +21,18 @@ class OcApp : Application() {
         container = JsContainer { line -> append(line) }
         overlay = OverlayPlugin(this, container) { line -> append(line) }
         a2ui = A2uiPlugin(this, container) { line -> append(line) }
+        desk = DeskPlugin(container) { line -> append(line) }
         tts = TtsPlugin(this, container) { line -> append(line) }
         wallpaper = WallpaperPlugin(this) { line -> append(line) }
         http = HttpPlugin()
+        keys = KeysPlugin(filesDir)
         container.use(overlay)
         container.use(a2ui)
+        container.use(desk)
         container.use(tts)
         container.use(wallpaper)
         container.use(http)
+        container.use(keys)
         reloadScript()
         watchActiveFile()
     }
@@ -37,11 +41,15 @@ class OcApp : Application() {
         private set
     lateinit var a2ui: A2uiPlugin
         private set
+    lateinit var desk: DeskPlugin
+        private set
     lateinit var tts: TtsPlugin
         private set
     lateinit var wallpaper: WallpaperPlugin
         private set
     lateinit var http: HttpPlugin
+        private set
+    lateinit var keys: KeysPlugin
         private set
 
     fun reloadScript() {

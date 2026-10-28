@@ -16,6 +16,7 @@ import android.view.Choreographer
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import org.mozilla.javascript.BaseFunction
 import org.mozilla.javascript.Context as JsContext
@@ -38,7 +39,7 @@ class OverlayPlugin(
     val metrics = ScreenMetrics()
     private val buffer = SceneBuffer(onLog)
     private val window = OverlayWindow(app, onLog, ::onPointer)
-    private val web = WebOverlay(app, onLog, ::allowed)
+    private val web = WebOverlay(app, onLog, ::stopPage)
     private var saved = Frame.EMPTY
     private var pumping = false
     private var lastNanos = 0L
@@ -108,6 +109,23 @@ class OverlayPlugin(
             onLog("浮层未授权")
         }
         return false
+    }
+
+    fun attachPage(host: ViewGroup) = web.attach(host)
+
+    fun detachPage() = web.detach()
+
+    fun backPage(): Boolean = web.back()
+
+    private fun stopPage() {
+        container.enter { cx, scope ->
+            val fn = scope.get("onAction", scope)
+            if (fn !is BaseFunction) return@enter
+            val event = cx.newObject(scope)
+            ScriptableObject.putProperty(event, "id", "stop")
+            ScriptableObject.putProperty(event, "action", "stop")
+            fn.call(cx, scope, scope, arrayOf(event))
+        }
     }
 
     /** After the user grants overlay, load the saved script once. */
