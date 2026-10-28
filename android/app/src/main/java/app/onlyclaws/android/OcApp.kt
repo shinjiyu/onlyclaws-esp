@@ -18,6 +18,7 @@ class OcApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        SessionSeed.fromAssets(this)
         container = JsContainer { line -> append(line) }
         overlay = OverlayPlugin(this, container) { line -> append(line) }
         a2ui = A2uiPlugin(this, container) { line -> append(line) }

@@ -19,14 +19,36 @@ gradle assembleDebug
 # APK: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Identity is not in the APK. After install, put `files/session.json` on the device:
+Identity lives in `files/session.json`:
 
 ```json
 {"device_id":"<id>","token":"<device_token>"}
 ```
 
-Register the device at the console (`POST /api/devices/register`), then push scripts
-with `POST /api/invoke` and a `js` tool. Do not commit tokens.
+**Install package from the console (normal path).** Console → OCA phones → Create,
+then Download APK. The server takes the unsigned release APK, adds
+`assets/session.json` for that phone, then zipaligns and signs it with one fixed key
+(`server/oca_pack.py`, ADR 0009). On start, `SessionSeed` copies the packaged file to
+`files/session.json` when it differs from the last one applied, so a newer package
+takes over and a hand-placed file survives otherwise. Each download issues a new
+token; the previous package stops connecting.
+
+Publish the base APK for the server:
+
+```bash
+bash android/scripts/package_oca_base.sh   # → server/oca/oca-base.apk + VERSION
+```
+
+**Dev build.** A debug build carries no `assets/session.json`. Download
+`session.json` from the same console row and put it in `files/` with
+`adb … run-as app.onlyclaws.android`. Debug and server packages have different
+signatures: switching between them needs one uninstall, which clears `keys` and the
+Bilibili login.
+
+Scripts: `/presets/oca/` on the server lists ready-made ones (Bilibili play is
+`scripts/bilibili-play.js`, copied to `server/presets/oca/`; run
+`python server/presets.py sync` after editing it). Agents send any script with
+`POST /api/invoke` and a `js` tool. Do not commit tokens.
 
 ## JS surface (host objects)
 

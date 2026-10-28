@@ -44,3 +44,7 @@ android/**/build/
 android/local.properties
 android/*.apk
 android/*.aab
+# OCA install-package base + signing key (server/oca_pack.py)
+server/oca/
+*.jks
+*.keystore

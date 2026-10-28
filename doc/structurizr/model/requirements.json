@@ -120,6 +120,24 @@
       "acceptance": "GET /flash serves the installer UI; GET /api/firmware lists products with ready flags; each ready product exposes an ESP Web Tools manifest and bin parts under /firmware/<id>/; Chrome/Edge over HTTPS or localhost; packaging script copies PlatformIO artifacts without committing bins"
     },
     {
+      "id": "REQ-OCA-PROVISION",
+      "title": "Signed-in owner creates an OCA phone and downloads its install package",
+      "component": "oca_dist",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["server/tests/test_oca_pack.py", "android/app/src/test/java/app/onlyclaws/android/SessionSeedTest.kt"],
+      "acceptance": "Human session only (oct_ gets 403). POST /api/oca/devices creates a kind=oca device owned by the caller with a server id. POST /api/oca/devices/{id}/apk mints a new device_token (old one rejected), writes assets/session.json {device_id, token} into the unsigned base APK, keeps stored entries stored, drops old signature files, zipaligns and signs with the fixed server key; 503 when base APK, key or tools are missing. POST .../session returns the same JSON for dev builds. The app copies a changed packaged session.json to files/session.json on start and leaves an unchanged one alone. ADR 0009"
+    },
+    {
+      "id": "REQ-PRESETS",
+      "title": "Preset script pages for ESP32 boards and OCA phones",
+      "component": "presets",
+      "ui": false,
+      "test_kind": "unit",
+      "tests": ["server/tests/test_presets.py"],
+      "acceptance": "/presets/esp32/ and /presets/oca/ list presets without login; GET /api/presets?kind= and /api/presets/{id}/source download them; copies under server/presets/ equal their origins in demos/ and android/scripts/; POST /api/presets/{id}/deploy (login) to an owned device of the same kind sends Lua through signed deploy or JS through invoke js; another kind is 400. ADR 0009"
+    },
+    {
       "id": "REQ-AUDIO",
       "title": "Audio plugin beep and PCM on boards with ES8311",
       "component": "audio",
@@ -180,7 +198,7 @@
       "ui": false,
       "test_kind": "unit",
       "tests": ["server/tests/test_capabilities.py"],
-      "acceptance": "/status meta.capabilities lists compiled plugins; invoke of absent tool is rejected server-side or no-oped on device; agent docs reflect per-device map"
+      "acceptance": "/status meta.capabilities lists compiled plugins; invoke of absent tool is rejected server-side or no-oped on device; devices reporting container (OCA) accept the js tool; agent docs reflect per-device map"
     },
     {
       "id": "REQ-PLUGIN-BUILD",

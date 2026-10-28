@@ -151,9 +151,12 @@
         <button type="button" data-tab="events" data-i18n="tab.events">事件</button>
         <div class="sep"></div>
         <button type="button" data-tab="devices" data-i18n="tab.devices">设备</button>
+        <button type="button" data-tab="oca" data-i18n="tab.oca">OCA 手机</button>
         <button type="button" data-tab="tokens" data-i18n="tab.tokens">Agent 令牌</button>
         <button type="button" data-tab="review" class="hidden" id="reviewTabBtn"><span data-i18n="tab.review">申请审核</span><span class="badge hidden" id="reviewBadge"></span></button>
         <div class="sep"></div>
+        <a class="docs" href="../presets/esp32/" data-i18n="side.presets.esp32">ESP32 预置脚本</a>
+        <a class="docs" href="../presets/oca/" data-i18n="side.presets.oca">OCA 预置脚本</a>
         <a class="docs" href="../api/agent/skill.md" target="_blank" rel="noopener">skill.md ↗</a>
         <a class="docs" href="../api/agent/docs" target="_blank" rel="noopener" data-i18n="side.docs">Agent 文档 ↗</a>
       </aside>
@@ -174,6 +177,7 @@
               <div class="item"><span class="n">2</span><div><b data-i18n="ob.2.t"></b><span data-i18n-html="ob.2.b"></span></div><a class="btn sm ghost" href="/flash/" data-i18n="ob.2.btn">Web 烧录</a></div>
               <div class="item" id="ob3"><span class="n">3</span><div><b data-i18n="ob.3.t"></b><span data-i18n-html="ob.3.b"></span></div><button class="btn sm ghost" type="button" data-goto="tokens" data-i18n="ob.3.btn">签发令牌</button></div>
             </div>
+            <p class="hint" style="margin:14px 0 0" data-i18n-html="ob.oca"></p>
           </div>
 
           <div id="ovDevice" class="hidden">
@@ -346,6 +350,39 @@
           </div>
         </section>
 
+        <!-- oca phones -->
+        <section data-panel="oca" class="hidden">
+          <div class="panel-head">
+            <div><h2 data-i18n="oca.title">OCA 手机</h2><p data-i18n="oca.sub"></p></div>
+            <a class="btn sm ghost" href="../presets/oca/" data-i18n="oca.presets">OCA 预置脚本</a>
+          </div>
+          <form class="card" id="ocaForm">
+            <h3 data-i18n="oca.new">添加一台手机</h3>
+            <p class="hint" data-i18n="oca.new.hint"></p>
+            <div class="row" style="align-items:flex-end">
+              <div class="field" style="flex:1;min-width:180px;margin:0">
+                <label for="ocaName" data-i18n="dev.name">名称（可选）</label>
+                <input id="ocaName" type="text" maxlength="60" data-i18n-ph="oca.name.ph" />
+              </div>
+              <button class="btn accent" type="submit" id="ocaBtn" data-i18n="oca.create">创建</button>
+            </div>
+            <div id="ocaMsg" class="note hidden"></div>
+          </form>
+          <div class="card">
+            <div class="row" style="justify-content:space-between;margin-bottom:8px">
+              <h3 data-i18n="oca.mine">我的手机</h3>
+              <span class="tag" id="ocaPkg"></span>
+            </div>
+            <div id="ocaList"></div>
+            <div id="ocaDlMsg" class="note hidden"></div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="oca.steps">安装步骤</h3>
+            <ol class="small" style="margin:8px 0 0;padding-left:20px;line-height:1.8" data-i18n-html="oca.steps.list"></ol>
+            <p class="hint" style="margin:10px 0 0" data-i18n="oca.steps.note"></p>
+          </div>
+        </section>
+
         <!-- tokens -->
         <section data-panel="tokens" class="hidden">
           <div class="panel-head">
@@ -458,7 +495,7 @@
         "push.ok": "已入队 {id}…，设备拉取后显示。", "push.uploading": "正在上传 {name}（{kb} KB）…",
         "push.err.empty": "标题和正文至少填一个", "push.err.nofile": "请先选择图片", "push.err.heic": "不支持 HEIC / 实况图，请先导出为 JPG",
         "push.err.big": "图片 {mb}MB 太大，请压缩到 5MB 以内",
-        "msg.empty": "还没有投递记录。", "msg.full": "全刷", "msg.partial": "局刷",
+        "msg.empty": "还没有投递记录。", "msg.full": "全刷", "msg.partial": "局刷", "msg.bytes": "{n} KB",
         "events.title": "设备事件", "events.sub": "Lua 里调用 <code>emit(name, table)</code> 产生的事件，Agent 用 <code>GET /api/events</code> 读取。",
         "events.empty": "还没有事件。",
         "dev.title": "设备", "dev.sub": "每台设备有独立令牌，只有你能看到和控制自己的设备。",
@@ -488,6 +525,28 @@
         "rv.by": "{who} 于 {t} 审核",
         "rv.done": "已处理 {email}",
         "hw.rlcd-42": "RLCD 4.2", "hw.epaper-397": "ePaper 3.97", "hw.bare-s3": "ESP32-S3 模组", "hw.other": "暂无硬件",
+        "tab.oca": "OCA 手机", "side.presets.esp32": "ESP32 预置脚本", "side.presets.oca": "OCA 预置脚本",
+        "ob.oca": "没有板子？安卓手机也能接入：<a href=\"#oca\">OCA 手机</a>。",
+        "st.kind": "类型", "kind.oca": "OCA 手机", "dev.oca.manage": "管理",
+        "ov.oca.script": "手机运行的是 JS 脚本。到 <a href=\"../presets/oca/\">OCA 预置脚本</a> 选一个发到这台手机。",
+        "scripts.oca": "当前设备是 OCA 手机，只能运行 JS。请到 OCA 预置脚本页发送。",
+        "oca.title": "OCA 手机", "oca.sub": "OnlyClaws Android：安卓手机上的 JS 容器，和板子走同一套设备会话。",
+        "oca.presets": "OCA 预置脚本",
+        "oca.new": "添加一台手机", "oca.new.hint": "创建后为这台手机下载专属安装包，里面已经带好它的连接凭证，装上就能连。",
+        "oca.name.ph": "我的 Pixel", "oca.create": "创建",
+        "oca.created": "已创建 {name}（{id}）。下一步：下载安装包。",
+        "oca.mine": "我的手机", "oca.none": "还没有 OCA 手机。",
+        "oca.apk": "下载安装包", "oca.busy": "正在打包…",
+        "oca.nopkg": "未下载安装包",
+        "oca.pkg.ready": "安装包 v{v}", "oca.pkg.missing": "服务器未配置安装包",
+        "oca.pkg.missing.long": "服务器还没配置安装包（缺：{m}）。可以先下载 session.json，用 adb 推到开发版。",
+        "oca.redo.confirm": "重新下载会换新凭证，这台手机上已装的包会立刻断开，需要装新包。继续？",
+        "oca.apk.ok": "已下载 {file}。传到手机上安装。",
+        "oca.apk.redo": "已下载 {file}。旧安装包已断开，在手机上覆盖安装这个新包即可。",
+        "oca.sess.ok": "已下载 session.json。用 adb 推到开发版：<code>adb push session.json /data/local/tmp/ && adb shell run-as app.onlyclaws.android cp /data/local/tmp/session.json files/</code>",
+        "oca.steps": "安装步骤",
+        "oca.steps.list": "<li>点「创建」，再点「下载安装包」。安装包只属于这台手机。</li><li>把 APK 传到安卓手机（Android 8.0 及以上）安装，系统会提示允许安装未知来源应用。</li><li>打开 OnlyClaws，允许通知和悬浮窗。连上后这里显示「在线」。</li><li>到 <a href=\"../presets/oca/\">OCA 预置脚本</a> 把 B 站陪看等脚本发到手机。</li>",
+        "oca.steps.note": "手机上装过自己编译的开发版时，要先卸载一次（签名不同）；卸载会清掉手机上保存的 key 和 B 站登录。之后再下载新包都可以直接覆盖安装。",
       },
       en: {
         "console.doc_title": "Console · OnlyClaws",
@@ -549,7 +608,7 @@
         "push.ok": "Queued {id}…; it shows once the device picks it up.", "push.uploading": "Uploading {name} ({kb} KB)…",
         "push.err.empty": "Enter a title or a body", "push.err.nofile": "Choose an image first", "push.err.heic": "HEIC / Live Photos aren't supported. Export to JPG first.",
         "push.err.big": "Image is {mb}MB. Keep it under 5MB.",
-        "msg.empty": "Nothing pushed yet.", "msg.full": "full", "msg.partial": "partial",
+        "msg.empty": "Nothing pushed yet.", "msg.full": "full", "msg.partial": "partial", "msg.bytes": "{n} KB",
         "events.title": "Device events", "events.sub": "Events from <code>emit(name, table)</code> in Lua. Agents read them with <code>GET /api/events</code>.",
         "events.empty": "No events yet.",
         "dev.title": "Devices", "dev.sub": "Each device has its own token. Only you can see and control your devices.",
@@ -579,6 +638,28 @@
         "rv.by": "reviewed by {who} {t}",
         "rv.done": "Updated {email}",
         "hw.rlcd-42": "RLCD 4.2", "hw.epaper-397": "ePaper 3.97", "hw.bare-s3": "ESP32-S3 module", "hw.other": "no hardware yet",
+        "tab.oca": "OCA phones", "side.presets.esp32": "ESP32 presets", "side.presets.oca": "OCA presets",
+        "ob.oca": "No board? An Android phone works too: <a href=\"#oca\">OCA phones</a>.",
+        "st.kind": "Type", "kind.oca": "OCA phone", "dev.oca.manage": "Manage",
+        "ov.oca.script": "Phones run JS. Pick one from <a href=\"../presets/oca/\">OCA presets</a> and send it to this phone.",
+        "scripts.oca": "This device is an OCA phone and only runs JS. Send scripts from the OCA presets page.",
+        "oca.title": "OCA phones", "oca.sub": "OnlyClaws Android: a JS container on an Android phone, on the same device session as the boards.",
+        "oca.presets": "OCA presets",
+        "oca.new": "Add a phone", "oca.new.hint": "After creating it, download an install package made for this phone. It already carries the phone's credentials, so it connects once installed.",
+        "oca.name.ph": "My Pixel", "oca.create": "Create",
+        "oca.created": "Created {name} ({id}). Next: download the install package.",
+        "oca.mine": "My phones", "oca.none": "No OCA phones yet.",
+        "oca.apk": "Download APK", "oca.busy": "Packaging…",
+        "oca.nopkg": "no package yet",
+        "oca.pkg.ready": "package v{v}", "oca.pkg.missing": "package not set up on server",
+        "oca.pkg.missing.long": "The server has no install package yet (missing: {m}). You can download session.json and push it to a dev build with adb.",
+        "oca.redo.confirm": "A new download issues new credentials. The package already on this phone disconnects until you install the new one. Continue?",
+        "oca.apk.ok": "Downloaded {file}. Install it on the phone.",
+        "oca.apk.redo": "Downloaded {file}. The old package no longer connects; install this one over it on the phone.",
+        "oca.sess.ok": "Downloaded session.json. For a dev build: <code>adb push session.json /data/local/tmp/ && adb shell run-as app.onlyclaws.android cp /data/local/tmp/session.json files/</code>",
+        "oca.steps": "Install",
+        "oca.steps.list": "<li>Click Create, then Download APK. The package belongs to this phone only.</li><li>Copy the APK to an Android phone (8.0 or later) and install it; allow installs from unknown sources when asked.</li><li>Open OnlyClaws and allow notifications and the overlay. The phone shows as online here once connected.</li><li>Go to <a href=\"../presets/oca/\">OCA presets</a> and send Bilibili play or another script to the phone.</li>",
+        "oca.steps.note": "If the phone has a dev build you compiled yourself, uninstall it once first (different signature). Uninstalling clears keys and the Bilibili login saved on the phone. Later packages install over each other.",
       },
     });
     OC.apply();
@@ -587,7 +668,7 @@
     const h = OC.escapeHtml;
     const PUBLIC_BASE = location.origin + OC.BASE;
     const DEVICE_KEY = "epd_device_id";
-    const TABS = ["overview", "scripts", "push", "events", "devices", "tokens", "review"];
+    const TABS = ["overview", "scripts", "push", "events", "devices", "oca", "tokens", "review"];
     const DEFAULT_LUA = [
       "function on_start()",
       "  gfx.clear(0)",
@@ -605,7 +686,7 @@
       "",
     ].join("\n");
 
-    const state = { me: null, devices: [], deviceId: localStorage.getItem(DEVICE_KEY) || "", tab: "overview", rvStatus: "pending", pushMode: "text" };
+    const state = { me: null, devices: [], deviceId: localStorage.getItem(DEVICE_KEY) || "", tab: "overview", rvStatus: "pending", pushMode: "text", ocaPkg: null, ocaBusy: false };
 
     function note(el, kind, html) {
       el.className = "note " + kind;
@@ -787,7 +868,7 @@
     $$("[data-refresh]").forEach((b) => b.addEventListener("click", () => { refreshDevices().then(() => load(state.tab)); }));
 
     function load(tab) {
-      const fn = { overview: loadOverview, scripts: loadScripts, push: loadMessages, events: loadEvents, devices: renderDevices, tokens: loadTokens, review: loadReview }[tab];
+      const fn = { overview: loadOverview, scripts: loadScripts, push: loadMessages, events: loadEvents, devices: renderDevices, oca: loadOca, tokens: loadTokens, review: loadReview }[tab];
       if (fn) fn();
     }
 
@@ -807,6 +888,7 @@
       if (state.deviceId) localStorage.setItem(DEVICE_KEY, state.deviceId);
       renderPicker();
       if (state.tab === "devices") renderDevices();
+      if (state.tab === "oca" && !state.ocaBusy) renderOca();
     }
 
     function renderPicker() {
@@ -820,7 +902,7 @@
       const d = current();
       $("#navDot").className = "dot " + (d ? (d.online ? "on" : "off") : "");
       const hint = $("#iHint");
-      if (d && hint) hint.textContent = t("push.file.help.dev", { w: d.width, h: d.height });
+      if (d && hint && d.width) hint.textContent = t("push.file.help.dev", { w: d.width, h: d.height });
     }
     $("#deviceSelect").addEventListener("change", (e) => {
       state.deviceId = e.target.value;
@@ -845,10 +927,12 @@
         <div class="list-item">
           <span class="dot ${d.online ? "on" : "off"}" style="margin-top:7px"></span>
           <div class="grow">
-            <div class="title">${h(d.name || d.id)} <span class="tag ${d.online ? "green" : ""}">${h(t(d.online ? "st.online" : "st.offline"))}</span></div>
-            <div class="meta">${h([d.id, d.width + "×" + d.height, d.fw, d.ip, d.rssi != null ? d.rssi + " dBm" : "", d.last_seen ? t("dev.seen", { t: OC.fmtTime(d.last_seen) }) : t("dev.never")].filter(Boolean).join(" · "))}</div>
+            <div class="title">${h(d.name || d.id)} <span class="tag ${d.online ? "green" : ""}">${h(t(d.online ? "st.online" : "st.offline"))}</span>${d.kind === "oca" ? ` <span class="tag">${h(t("kind.oca"))}</span>` : ""}</div>
+            <div class="meta">${h([d.id, d.width ? d.width + "×" + d.height : "", d.fw, d.ip, d.rssi != null ? d.rssi + " dBm" : "", d.last_seen ? t("dev.seen", { t: OC.fmtTime(d.last_seen) }) : t("dev.never")].filter(Boolean).join(" · "))}</div>
           </div>
-          <button class="btn sm ghost" type="button" data-rotate="${h(d.id)}">${h(t("dev.rotate"))}</button>
+          ${d.kind === "oca"
+            ? `<button class="btn sm ghost" type="button" data-goto="oca">${h(t("dev.oca.manage"))}</button>`
+            : `<button class="btn sm ghost" type="button" data-rotate="${h(d.id)}">${h(t("dev.rotate"))}</button>`}
         </div>`).join("") + `</div>`;
       $$("[data-rotate]", box).forEach((b) => b.addEventListener("click", async () => {
         if (!confirm(t("dev.rotate.confirm"))) return;
@@ -879,6 +963,106 @@
       } finally { btn.disabled = false; }
     });
 
+    // ---- oca phones ----
+    async function postDownload(path, filename) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 180000);
+      try {
+        const r = await fetch(OC.BASE + path, { method: "POST", credentials: "same-origin", signal: ctrl.signal });
+        if (!r.ok) {
+          const data = await r.json().catch(() => ({}));
+          const err = new Error(data.message || r.statusText || "HTTP " + r.status);
+          err.status = r.status;
+          throw err;
+        }
+        const url = URL.createObjectURL(await r.blob());
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } finally { clearTimeout(timer); }
+    }
+
+    async function loadOca() {
+      try { state.ocaPkg = await api("/api/oca/package"); }
+      catch (ex) { if (onAuthError(ex)) return; state.ocaPkg = null; }
+      renderOca();
+      const pkg = state.ocaPkg;
+      const msg = $("#ocaDlMsg");
+      if (pkg && !pkg.ready) note(msg, "info", h(t("oca.pkg.missing.long", { m: (pkg.missing || []).join(", ") })));
+      else hideNote(msg);
+    }
+
+    function renderOca() {
+      const pkg = state.ocaPkg;
+      const ready = !!(pkg && pkg.ready);
+      const tag = $("#ocaPkg");
+      tag.textContent = pkg ? (ready ? t("oca.pkg.ready", { v: pkg.version || "?" }) : t("oca.pkg.missing")) : "";
+      tag.className = "tag " + (ready ? "green" : "amber");
+      const phones = state.devices.filter((d) => d.kind === "oca");
+      const box = $("#ocaList");
+      if (!phones.length) {
+        box.innerHTML = `<div class="empty">${h(t("oca.none"))}</div>`;
+      } else {
+        box.innerHTML = `<div class="list">` + phones.map((d) => `
+          <div class="list-item">
+            <span class="dot ${d.online ? "on" : "off"}" style="margin-top:7px"></span>
+            <div class="grow">
+              <div class="title">${h(d.name || d.id)} <span class="tag ${d.online ? "green" : ""}">${h(t(d.online ? "st.online" : "st.offline"))}</span>${d.has_token ? "" : ` <span class="tag amber">${h(t("oca.nopkg"))}</span>`}</div>
+              <div class="meta">${h([d.id, d.fw, d.last_seen ? t("dev.seen", { t: OC.fmtTime(d.last_seen) }) : t("dev.never")].filter(Boolean).join(" · "))}</div>
+            </div>
+            <div class="row" style="gap:6px;justify-content:flex-end">
+              <button class="btn sm accent" type="button" data-apk="${h(d.id)}" ${ready ? "" : "disabled"}>${h(t("oca.apk"))}</button>
+              <button class="btn sm ghost" type="button" data-sess="${h(d.id)}">session.json</button>
+            </div>
+          </div>`).join("") + `</div>`;
+      }
+      $$("[data-apk]", box).forEach((b) => b.addEventListener("click", () => ocaDownload(b, "apk")));
+      $$("[data-sess]", box).forEach((b) => b.addEventListener("click", () => ocaDownload(b, "session")));
+    }
+
+    async function ocaDownload(btn, what) {
+      const id = btn.dataset.apk || btn.dataset.sess;
+      const d = state.devices.find((x) => x.id === id);
+      const redo = !!(d && d.has_token);
+      if (redo && !confirm(t("oca.redo.confirm"))) return;
+      const msg = $("#ocaDlMsg");
+      const label = btn.textContent;
+      const file = what === "apk" ? `onlyclaws-oca-${id}.apk` : "session.json";
+      btn.disabled = true;
+      if (what === "apk") btn.textContent = t("oca.busy");
+      state.ocaBusy = true;
+      try {
+        await postDownload(`/api/oca/devices/${encodeURIComponent(id)}/${what}`, file);
+        note(msg, "ok", what === "apk" ? h(t(redo ? "oca.apk.redo" : "oca.apk.ok", { file })) : t("oca.sess.ok"));
+      } catch (ex) {
+        if (!onAuthError(ex)) note(msg, "err", h(ex.message));
+      } finally {
+        state.ocaBusy = false;
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+      await refreshDevices();
+    }
+
+    $("#ocaForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = $("#ocaMsg");
+      const btn = $("#ocaBtn");
+      btn.disabled = true;
+      try {
+        const data = await api("/api/oca/devices", { method: "POST", body: { name: $("#ocaName").value.trim() } });
+        note(msg, "ok", h(t("oca.created", { name: data.device.name, id: data.device.id })));
+        $("#ocaName").value = "";
+        await refreshDevices();
+        renderOca();
+      } catch (ex) { if (!onAuthError(ex)) note(msg, "err", h(ex.message)); }
+      finally { btn.disabled = false; }
+    });
+
     // ---- overview ----
     async function loadOverview() {
       const d = current();
@@ -887,13 +1071,16 @@
       if (!d) { $("#ovSub").textContent = ""; return; }
       $("#ovSub").textContent = t("ov.sub", { name: d.name || d.id, seen: d.last_seen ? OC.fmtTime(d.last_seen) : t("dev.never") });
       const m = d.meta || {};
+      const phone = d.kind === "oca";
       $("#ovStats").innerHTML = [
         [t("st.status"), `<span class="dot ${d.online ? "on" : "off"}"></span> ${h(t(d.online ? "st.online" : "st.offline"))}`, false],
-        [t("st.panel"), h(d.width + "×" + d.height), false],
+        phone ? [t("st.kind"), h(t("kind.oca")), true] : [t("st.panel"), h(d.width + "×" + d.height), false],
         [t("st.net"), h([d.rssi != null ? d.rssi + " dBm" : "", d.ip || ""].filter(Boolean).join(" · ") || t("common.none")), true],
-        [t("st.sensors"), h(sensorText(m)), true],
+        phone ? [t("st.fw"), h(d.fw || t("common.none")), true] : [t("st.sensors"), h(sensorText(m)), true],
       ].map(([k, v, sm]) => `<div class="stat"><div class="k">${h(k)}</div><div class="v${sm ? " sm" : ""}">${v}</div></div>`).join("");
-      await loadScriptStatus($("#ovScript"));
+      $("#ovStop").classList.toggle("hidden", phone);
+      if (phone) $("#ovScript").innerHTML = t("ov.oca.script");
+      else await loadScriptStatus($("#ovScript"));
       try {
         const ev = await api("/api/events?limit=5&device_id=" + encodeURIComponent(d.id));
         renderEvents($("#ovEvents"), ev.events || [], true);
@@ -1022,6 +1209,7 @@
       hideNote(msg);
       const d = current();
       if (deploy && !d) return note(msg, "err", h(t("scripts.nodev")));
+      if (deploy && d.kind === "oca") return note(msg, "err", h(t("scripts.oca")));
       const body = {
         name: $("#sName").value.trim() || "script",
         language: "lua",
@@ -1113,10 +1301,18 @@
         const st = m.status || "";
         const cls = st === "acked" || st === "delivered" ? "green" : st === "pending" ? "amber" : st === "failed" ? "red" : "";
         const label = m.type && m.type !== "bitmap" ? m.type : (m.full_refresh ? t("msg.full") : t("msg.partial"));
-        const body = m.type === "script" ? "" : (m.body || "");
+        let body = m.type === "script" ? "" : (m.body || "");
+        let title = m.type === "script" ? "▶ " + scriptNameSync(m.title) : (m.title || "—");
+        if (m.type === "invoke") {
+          try {
+            const tools = (JSON.parse(body).tools || []).map((s) => s.tool).filter(Boolean);
+            title = "▶ " + (tools.join(", ") || "invoke");
+            body = t("msg.bytes", { n: (new TextEncoder().encode(m.body).length / 1024).toFixed(1) });
+          } catch (_) {}
+        }
         return `<div class="list-item">
           <div class="grow">
-            <div class="title">${h(m.type === "script" ? "▶ " + scriptNameSync(m.title) : (m.title || "—"))}</div>
+            <div class="title">${h(title)}</div>
             ${body ? `<div class="small" style="color:var(--ink-2);white-space:pre-wrap;max-height:4.8em;overflow:hidden">${h(body.slice(0, 300))}</div>` : ""}
             <div class="meta">${h([label, m.device_id, OC.fmtTime(m.created_at)].filter(Boolean).join(" · "))}</div>
           </div>

@@ -1,6 +1,6 @@
 /* OnlyClaws shared helpers: base path, i18n, fetch wrapper. */
 (function () {
-  const BASE = location.pathname.replace(/\/(console|apply)(\/.*)?$/, "").replace(/\/$/, "");
+  const BASE = location.pathname.replace(/\/(console|apply|presets)(\/.*)?$/, "").replace(/\/$/, "");
   const LANG_KEY = "oc_lang";
   const dict = { zh: {}, en: {} };
 
@@ -67,10 +67,13 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
         let msg = data.message || data.detail || r.statusText;
+        let detail = null;
         if (Array.isArray(msg)) msg = msg.map((x) => x.msg || JSON.stringify(x)).join("; ");
+        else if (msg && typeof msg === "object") { detail = msg; msg = msg.message || JSON.stringify(msg); }
         const err = new Error(msg || "HTTP " + r.status);
         err.status = r.status;
         err.code = msg;
+        err.detail = detail;
         throw err;
       }
       return data;

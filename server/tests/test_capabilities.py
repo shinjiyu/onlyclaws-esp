@@ -39,9 +39,16 @@ def test_unknown_denied():
     assert not tool_allowed_for_caps("", ["arm"])
 
 
+def test_js_only_on_container():
+    assert tool_allowed_for_caps("js", ["container"])
+    assert not tool_allowed_for_caps("js", ["core", "panel", "audio", "arm"])
+    assert not tool_allowed_for_caps("gfx.flush", ["container"])
+
+
 if __name__ == "__main__":
     test_emit_always()
     test_panel_tools()
     test_roarm_tools()
     test_unknown_denied()
+    test_js_only_on_container()
     print("ok")

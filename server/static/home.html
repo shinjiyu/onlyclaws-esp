@@ -106,6 +106,7 @@
         <a href="#how" data-i18n="nav.how">工作方式</a>
         <a href="#hardware" data-i18n="nav.hardware">硬件</a>
         <a href="flash/" data-i18n="nav.flash">烧录</a>
+        <a href="presets/esp32/" data-i18n="nav.presets">预置脚本</a>
         <a href="#code" data-i18n="nav.code">代码</a>
         <a href="api/agent/skill.md" target="_blank" rel="noopener" data-i18n="nav.docs">Agent 文档</a>
         <a href="https://github.com/shinjiyu/onlyclaws-esp" target="_blank" rel="noopener">GitHub</a>
@@ -371,7 +372,7 @@ curl $BASE/api/events \
     OC.addStrings({
       zh: {
         "home.doc_title": "OnlyClaws：给 Agent 的 ESP32 运行时",
-        "nav.how": "工作方式", "nav.hardware": "硬件", "nav.flash": "烧录", "nav.code": "代码", "nav.docs": "Agent 文档", "nav.console": "控制台", "nav.apply": "申请",
+        "nav.how": "工作方式", "nav.hardware": "硬件", "nav.flash": "烧录", "nav.code": "代码", "nav.docs": "Agent 文档", "nav.console": "控制台", "nav.apply": "申请", "nav.presets": "预置脚本",
         "hero.eyebrow": "开源 ESP32 Agent 运行时",
         "hero.title": "给 Agent 一只<em>爪子</em>，<br />伸进真实世界。",
         "hero.lede": "OnlyClaws 把一块 ESP32 变成 Agent 的外设。固件只烧一次，之后 Agent 通过 HTTP 下发 Lua 脚本，板子负责画屏、发声、动机械臂、读传感器、回报事件。模型留在云端，板子只管执行。",
@@ -432,7 +433,7 @@ curl $BASE/api/events \
       },
       en: {
         "home.doc_title": "OnlyClaws: an agent runtime for ESP32",
-        "nav.how": "How it works", "nav.hardware": "Hardware", "nav.flash": "Flash", "nav.code": "Code", "nav.docs": "Agent docs", "nav.console": "Console", "nav.apply": "Apply",
+        "nav.how": "How it works", "nav.hardware": "Hardware", "nav.flash": "Flash", "nav.code": "Code", "nav.docs": "Agent docs", "nav.console": "Console", "nav.apply": "Apply", "nav.presets": "Presets",
         "hero.eyebrow": "Open-source agent runtime for ESP32",
         "hero.title": "Give your agent<br />a <em>claw</em> in the real world.",
         "hero.lede": "OnlyClaws turns an ESP32 into a peripheral for your agent. Flash the firmware once. After that the agent sends Lua over HTTP, and the board draws, plays sound, moves a robot arm, reads sensors and reports events. The model stays in the cloud; the board just runs the script.",

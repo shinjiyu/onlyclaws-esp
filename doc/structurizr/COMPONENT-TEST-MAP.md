@@ -18,6 +18,8 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 | REQ-PANEL-AMOLED-175 | device_runtime | manual | `esp32-s3-amoled-175c` product binary |
 | REQ-PANEL-FOLO-PASSPORT | device_runtime | manual | `esp32-c3-folo-passport` on Folo AI Passport |
 | REQ-WEB-FLASH | control_plane | unit | `server/tests/test_firmware_catalog.py`, `server/tests/test_nvs_cloud.py`; browser `/flash` (login → MAC → provision NVS + flash) |
+| REQ-OCA-PROVISION | oca_dist | unit | `server/tests/test_oca_pack.py` (inject keeps stored entries, drops old signature, zipalign → apksigner, owner-only routes, token rotation); `OC_OCA_E2E=1` signs the real base APK and runs `apksigner verify`; `android/.../SessionSeedTest.kt`. Phone: console → Create → Download APK → install → online |
+| REQ-PRESETS | presets | unit | `server/tests/test_presets.py` (copies equal origins, public list/source, deploy by kind, caps check); browser `/presets/esp32/`, `/presets/oca/` |
 | REQ-AUDIO | audio | manual | beep on RLCD |
 | REQ-TTS-CHILD | audio | unit | `rlcd/tests/test_host_logic.py` (girl/boy name + pitch); hear 我是童女 then 我是童男 on RLCD |
 | REQ-BLE-PAD | ble_pad | manual | Pad URL + BLE dir |
@@ -30,7 +32,7 @@ When unit/contract tests appear, list them here and flip `test_kind` in `require
 | REQ-ML-RUN | ml | manual | `ml.load` online then offline from cache; tampered blob refused; `/status` meta.ml |
 | REQ-ML-KWS | ml | manual | Upload `ml/models/micro_speech`; Lua yes/no on RLCD |
 | REQ-PUSH-BITMAP | control_plane | manual | push image matches panel size |
-| REQ-CAPABILITIES | contracts | unit | `server/tests/test_capabilities.py` + `/status` meta.capabilities |
+| REQ-CAPABILITIES | contracts | unit | `server/tests/test_capabilities.py` (incl. `js` only with `container`) + `/status` meta.capabilities |
 | REQ-PLUGIN-BUILD | device_runtime | manual | `OC_PLUGIN_*` in platformio.ini; Lua/invoke gated |
 | REQ-ARM-PASSTHROUGH | arm | manual | `arm.move`/`stream`/`feedback`/`stop` invoke on `esp32-roarm-m2`; STS WritePosEx IDs 11–15 |
 | REQ-ARM-LUA | arm | manual | Lua `arm.feedback` / `arm.stream` / `arm.stop` on RoArm product only |

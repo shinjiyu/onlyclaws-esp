@@ -199,6 +199,30 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                         "role" "infra"
                     }
                 }
+
+                ocaDist = container "OCA package" "Stock APK + per-phone session.json, zipalign + apksigner (fixed key)" "Python" {
+                    tags "Infra"
+                    properties {
+                        "path" "server/oca_pack.py + server/oca/ + android/scripts/package_oca_base.sh"
+                        "role" "infra"
+                    }
+                }
+
+                presets = container "Presets" "Public preset scripts per device kind (ESP32 Lua, OCA JS)" "Python" {
+                    tags "Infra"
+                    properties {
+                        "path" "server/presets.py + server/presets/"
+                        "role" "infra"
+                    }
+                }
+
+                ocaApp = container "OnlyClaws Android" "Phone runtime: device session, Rhino JS container, js tool" "Kotlin android/" {
+                    tags "Compose"
+                    properties {
+                        "path" "android/"
+                        "role" "compose"
+                    }
+                }
             }
         }
 
@@ -207,8 +231,12 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
         operator -> jevServoHost "goal+scene → joint intervals (pathway C)"
         jevServoHost -> visionHost "reads SceneDesc.state"
         jevServoHost -> controlPlane "single arm.stream goal per tick (oct_)"
-        owner -> controlPlane "register device; mint tokens"
+        owner -> controlPlane "register device; mint tokens; create OCA; download APK"
         deviceRuntime -> cloudHost "pending / status / ack (device_token)"
+        ocaApp -> cloudHost "device session; js invoke (device_token)"
+        ocaApp -> contracts "same device wire"
+        controlPlane -> ocaDist "inject session.json, sign APK"
+        controlPlane -> presets "list / download / deploy presets"
         controlPlane -> cloudHost "same deploy when self-hosted"
         armPlugin -> waveshareArm "servo bus"
         # Vision / JEV servo do NOT depend on armPlugin in-firmware; Host bridges via cloud.

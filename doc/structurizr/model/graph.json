@@ -11,6 +11,9 @@
     { "id": "render", "role": "infra", "path": "server/render.py" },
     { "id": "ml_registry", "role": "infra", "path": "server/ml_registry.py + ml_opset.py (model upload, op-set check, signing, device download)", "status": "implemented" },
     { "id": "firmware_dist", "role": "infra", "path": "server/firmware_catalog.py + server/firmware/ + rlcd/scripts/package_web_flash.sh", "status": "implemented" },
+    { "id": "oca_dist", "role": "infra", "path": "server/oca_pack.py + server/oca/ (base APK, VERSION) + android/scripts/package_oca_base.sh", "status": "implemented" },
+    { "id": "presets", "role": "infra", "path": "server/presets.py + server/presets/ (copies of demos/ Lua and android/scripts/ JS)", "status": "implemented" },
+    { "id": "oca_app", "role": "compose", "path": "android/ (OnlyClaws Android: Rhino JS container on the phone; device session + js tool)", "status": "implemented" },
     { "id": "device_runtime", "role": "compose", "path": "rlcd/src/main.cpp" },
     { "id": "script_engine", "role": "compose", "path": "rlcd/src/script_engine.cpp" },
     { "id": "control_plane", "role": "compose", "path": "server/app.py + script_sign.py" },
@@ -56,6 +59,10 @@
     { "from": "control_plane", "to": "render", "kind": "uses" },
     { "from": "control_plane", "to": "ml_registry", "kind": "uses" },
     { "from": "control_plane", "to": "firmware_dist", "kind": "uses" },
+    { "from": "control_plane", "to": "oca_dist", "kind": "uses" },
+    { "from": "control_plane", "to": "presets", "kind": "uses" },
+    { "from": "presets", "to": "demos", "kind": "mirrors" },
+    { "from": "oca_app", "to": "contracts", "kind": "implements-wire" },
     { "from": "ml_registry", "to": "tenancy", "kind": "uses" },
     { "from": "control_plane", "to": "contracts", "kind": "implements-wire" }
   ],
@@ -72,6 +79,9 @@
     "control_plane filters invoke tools by device capabilities[] reported in /status.",
     "script_store: signed Lua on the littlefs data partition (not the ML spiffs mount). Atomic .tmp rename, 3 versions, rollback, safe mode. OTA app slots must not overlap it. See SCRIPT-PERSIST.md and ADR 0007.",
     "firmware_dist: browser Web Serial flash (/flash + ESP Web Tools manifests). Bins live under server/firmware/<product>/; not committed. See ADR 0008.",
-    "AMOLED 1.75C: Lua color/round/touch contract in AMOLED-175C-PRODUCT.md; CO5300 driver not yet linked."
+    "AMOLED 1.75C: Lua color/round/touch contract in AMOLED-175C-PRODUCT.md; CO5300 driver not yet linked.",
+    "oca_dist: per-download OCA install package (stock unsigned APK + assets/session.json, zipalign + apksigner with one fixed key). Human login only. See ADR 0009.",
+    "presets: public preset catalog per device kind (esp32 Lua, oca JS); server copies are checked against demos/ and android/scripts/. Deploy goes through signed Lua deploy or invoke js.",
+    "oca_app is a second device runtime (the phone). Same device session; reports capability container; control_plane allows the js tool only for container."
   ]
 }
