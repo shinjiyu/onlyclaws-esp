@@ -23,10 +23,12 @@ class OcApp : Application() {
         a2ui = A2uiPlugin(this, container) { line -> append(line) }
         tts = TtsPlugin(this, container) { line -> append(line) }
         wallpaper = WallpaperPlugin(this) { line -> append(line) }
+        http = HttpPlugin()
         container.use(overlay)
         container.use(a2ui)
         container.use(tts)
         container.use(wallpaper)
+        container.use(http)
         reloadScript()
         watchActiveFile()
     }
@@ -38,6 +40,8 @@ class OcApp : Application() {
     lateinit var tts: TtsPlugin
         private set
     lateinit var wallpaper: WallpaperPlugin
+        private set
+    lateinit var http: HttpPlugin
         private set
 
     fun reloadScript() {

@@ -39,6 +39,11 @@ class OcService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        scheduleOcRestart(this)
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         wire?.stop()
         wire = null
