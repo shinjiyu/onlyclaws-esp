@@ -21,13 +21,11 @@ class MainActivity : AppCompatActivity() {
     private val show: (String) -> Unit = { text ->
         findViewById<TextView>(R.id.log).text = text.ifEmpty { "启动中" }
     }
-    private var bar: HarnessBar? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         val app = application as OcApp
-        bar = HarnessBar(this, app.harness, app.asr).also { it.attach() }
+        findViewById<View>(R.id.harness_bar).visibility = View.GONE
         app.a2ui.attach(
             findViewById(R.id.a2ui_host),
             findViewById(R.id.log_pane),
@@ -57,11 +55,16 @@ class MainActivity : AppCompatActivity() {
                 ),
             )
         }
+        val needed = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            needed += Manifest.permission.POST_NOTIFICATIONS
         }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            needed += Manifest.permission.RECORD_AUDIO
+        }
+        if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1)
         ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
             val density = resources.displayMetrics.density.toDouble()
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -100,20 +103,19 @@ class MainActivity : AppCompatActivity() {
         refreshPermit()
         if (Settings.canDrawOverlays(this)) {
             (application as OcApp).overlay.resumeIfNeeded()
+            (application as OcApp).chat.attach()
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == HarnessBar.REQUEST_MIC) {
-            bar?.onPermission(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        if (requestCode == 2 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            (application as OcApp).append("麦克风已允许，按住悬浮窗里的「说」")
         }
     }
 
     override fun onDestroy() {
         val app = application as OcApp
-        bar?.detach()
-        bar = null
         app.overlay.detachPage()
         app.desk.unwatchLogs(app)
         app.desk.detach()

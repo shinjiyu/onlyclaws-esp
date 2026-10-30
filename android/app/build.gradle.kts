@@ -56,6 +56,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("io.coil-kt:coil-compose:2.7.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     testImplementation("com.caoccao.javet:javet:6.0.2")
     testImplementation("com.caoccao.javet:javet-v8-macos-arm64:6.0.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

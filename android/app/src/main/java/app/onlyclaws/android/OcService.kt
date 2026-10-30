@@ -36,6 +36,7 @@ class OcService : Service() {
             wire = session
             session.start()
         }
+        (application as OcApp).chat.attach()
         return START_STICKY
     }
 

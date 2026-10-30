@@ -11,3 +11,4 @@ captures/
 .cxx/
 *.hprof
 /app/libs/*.aar
+/agent/node_modules/

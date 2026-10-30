@@ -23,6 +23,7 @@ class OcApp : Application() {
         instance = this
         SessionSeed.fromAssets(this)
         container = JsContainer(onLog = { line -> append(line) })
+        container.onError = { lastScriptError = ScriptError(it, System.currentTimeMillis()) }
         overlay = OverlayPlugin(this, container) { line -> append(line) }
         a2ui = A2uiPlugin(this, container) { line -> append(line) }
         desk = DeskPlugin(container) { line -> append(line) }
@@ -37,14 +38,20 @@ class OcApp : Application() {
         container.use(wallpaper)
         container.use(http)
         container.use(keys)
-        harness = Harness(this)
+        agent = AgentRuntime(this)
+        chat = ChatOverlay(this)
         reloadScript()
         watchActiveFile()
+        agent.start()
     }
 
-    lateinit var harness: Harness
+    lateinit var agent: AgentRuntime
+        private set
+    lateinit var chat: ChatOverlay
         private set
     val asr by lazy { LocalAsr(this) }
+    @Volatile var lastScriptError: ScriptError? = null
+        private set
 
     /** Every script goes in here. Scripts the harness wrote get no keys, web page, or desk. */
     fun load(source: String, done: (Result<Unit>) -> Unit) {
@@ -144,3 +151,5 @@ class OcApp : Application() {
         lateinit var instance: OcApp
     }
 }
+
+data class ScriptError(val text: String, val at: Long)
