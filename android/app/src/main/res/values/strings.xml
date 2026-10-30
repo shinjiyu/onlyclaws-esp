@@ -9,6 +9,6 @@
     <string name="set_wallpaper">设为动态壁纸</string>
     <string name="harness_hint">想要什么，说一句</string>
     <string name="harness_mic">说</string>
-    <string name="harness_listening">停</string>
+    <string name="harness_listening">松开</string>
     <string name="harness_send">做</string>
 </resources>

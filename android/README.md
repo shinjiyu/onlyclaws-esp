@@ -52,8 +52,12 @@ Scripts: `/presets/oca/` on the server lists ready-made ones (Bilibili play is
 
 ## Harness on the phone
 
-The strip at the bottom takes a sentence, typed or spoken through the phone's own
-speech recognizer, and turns it into a script on the phone (`Harness`, `HarnessText`).
+The strip at the bottom takes a sentence, typed or spoken, and turns it into a script on
+the phone (`Harness`, `HarnessText`). Hold 说 to talk: SenseVoice (sherpa-onnx) recognizes
+it on the phone and sends it on release (`LocalAsr`). The model is not in the APK; it is
+read from `files/asr/sv/` (`model.int8.onnx`, `tokens.txt`). For now copy it there with
+`adb push` to `/data/local/tmp` and `run-as app.onlyclaws.android cp`. The sherpa-onnx AAR
+is downloaded into `app/libs/` on the first Gradle run.
 It asks `deepseek-flash` at `api.deepseek.com` with the key in `keys/deepseek`; paste a
 `sk-…` key into the strip once to store it. The reply is compiled with V8, installed,
 and watched for 1.5 s. A compile error, a failed `onStart`, or an early runtime error goes

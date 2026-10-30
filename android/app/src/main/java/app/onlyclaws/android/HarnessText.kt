@@ -102,7 +102,30 @@ function onAction(e) {
     }
 
     fun retryPrompt(problem: String): String =
-        "这一版没装上：$problem\n改好后重新给出完整脚本，仍然只回一个 ```js 代码块。"
+        "这一版没装上：$problem\n先根据上面的报错、出错那一行和日志找出原因，再改。" +
+            "不要用 try/catch 把错误吞掉。改好后重新给出完整脚本，仍然只回一个 ```js 代码块。"
+
+    /**
+     * What went wrong while the script was installed and running, in terms of the code the model wrote.
+     * [code] is installed one line below [MARK], so reported lines are moved up by one.
+     */
+    fun diagnose(problem: String, code: String, logs: List<String>): String {
+        val lines = code.lines()
+        val cited = sortedSetOf<Int>()
+        val text = LINE.replace(problem) { m ->
+            val n = m.groupValues[1].toInt() - 1
+            if (n in 1..lines.size) cited += n
+            "第 $n 行"
+        }
+        val out = StringBuilder(text)
+        for (n in cited) out.append("\n第 $n 行是：").append(lines[n - 1].trim().take(LINE_CHARS))
+        val tail = logs.takeLast(LOG_LINES).map { LINE.replace(it) { m -> "第 ${m.groupValues[1].toInt() - 1} 行" } }
+        if (tail.isNotEmpty()) {
+            out.append("\n试装时的日志：")
+            tail.forEach { out.append("\n- ").append(it.take(LINE_CHARS)) }
+        }
+        return out.toString()
+    }
 
     /** The first fenced block, or the whole reply when it is plainly a script. */
     fun extractScript(reply: String): String? {
@@ -133,4 +156,7 @@ function onAction(e) {
     private val ON_START = Regex("function\\s+onStart\\s*\\(")
     private val TITLE = Regex("^\\s*//\\s*标题\\s*[:：]\\s*(.+)$", RegexOption.MULTILINE)
     private val KEY = Regex("sk-[A-Za-z0-9_-]{16,}")
+    private val LINE = Regex("第 (\\d+) 行")
+    private const val LOG_LINES = 20
+    private const val LINE_CHARS = 200
 }

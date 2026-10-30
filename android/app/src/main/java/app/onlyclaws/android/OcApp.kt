@@ -4,12 +4,15 @@ import android.app.Application
 import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import java.io.File
 import java.util.ArrayDeque
+import java.util.concurrent.CopyOnWriteArraySet
 
 class OcApp : Application() {
     val lines = ArrayDeque<String>()
     private val listeners = mutableSetOf<(String) -> Unit>()
+    private val taps = CopyOnWriteArraySet<(String) -> Unit>()
     private val main = Handler(Looper.getMainLooper())
     private var lastSource = ""
     private var watcher: FileObserver? = null
@@ -41,6 +44,7 @@ class OcApp : Application() {
 
     lateinit var harness: Harness
         private set
+    val asr by lazy { LocalAsr(this) }
 
     /** Every script goes in here. Scripts the harness wrote get no keys, web page, or desk. */
     fun load(source: String, done: (Result<Unit>) -> Unit) {
@@ -104,7 +108,18 @@ class OcApp : Application() {
 
     private val reloadRunnable = Runnable { reloadScript() }
 
+    /** [tap] sees every log line as it is written, on the writer's thread. */
+    fun tap(tap: (String) -> Unit) {
+        taps += tap
+    }
+
+    fun untap(tap: (String) -> Unit) {
+        taps -= tap
+    }
+
     fun append(line: String) {
+        Log.i(TAG, line)
+        taps.forEach { it(line) }
         main.post {
             lines.addLast(line)
             while (lines.size > 40) lines.removeFirst()
@@ -125,6 +140,7 @@ class OcApp : Application() {
     }
 
     companion object {
+        private const val TAG = "OCA"
         lateinit var instance: OcApp
     }
 }

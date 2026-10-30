@@ -65,8 +65,29 @@ class A2uiPlugin(
     private var parser: androidx.a2ui.model.processor.A2uiMessageParser<String>? = null
     private val pending = ArrayDeque<String>()
     private val surfaceIds = LinkedHashSet<String>()
+    private val order = Any()
+    private var staged: MutableList<String>? = null
+    private var drawing = true
 
     val catalogId: String = CATALOG
+
+    /** The incoming script draws into a holding list; the old surfaces stay until it is in place. */
+    override fun beforeSwap() {
+        staged = mutableListOf()
+    }
+
+    override fun afterSwap(ok: Boolean, pumpsFrames: Boolean) {
+        val messages = staged ?: return
+        staged = null
+        if (!ok) return
+        clear()
+        messages.forEach(::deliver)
+    }
+
+    /** Off while the outgoing script runs onStop, so it cannot touch the new screen. */
+    override fun setDrawing(enabled: Boolean) {
+        drawing = enabled
+    }
 
     fun attach(host: ViewGroup, empty: View, chrome: View? = null) {
         this.host = host
@@ -97,7 +118,7 @@ class A2uiPlugin(
     override fun install(scope: JsScope) = scope.define("a2ui") {
         fn("send") { send(it.json(0)) }
         fn("push") { send(it.json(0)) }
-        fn("clear") { clear() }
+        fn("clear") { if (drawing && staged == null) clear() }
         value("catalog", catalogId)
     }
 
@@ -106,12 +127,12 @@ class A2uiPlugin(
         parser: androidx.a2ui.model.processor.A2uiMessageParser<String>,
         reportedCatalog: String,
     ) {
-        this.processor = processor
-        this.parser = parser
         if (reportedCatalog != catalogId) onLog("目录号是 $reportedCatalog")
-        val queued = pending.toList()
-        pending.clear()
-        queued.forEach { deliver(it) }
+        synchronized(order) {
+            this.processor = processor
+            this.parser = parser
+            while (pending.isNotEmpty()) processor.processInput(parser, pending.removeFirst())
+        }
     }
 
     internal fun onOutbound(event: A2uiClientToServerMessage) {
@@ -145,18 +166,26 @@ class A2uiPlugin(
             onLog("a2ui.send 需要一条协议消息")
             return
         }
+        if (!drawing) return
+        staged?.let {
+            it += json
+            return
+        }
         deliver(json)
     }
 
+    /** The script thread sends and the UI thread binds; one lock keeps messages in the order sent. */
     private fun deliver(json: String) {
         note(json)
-        val processor = processor
-        val parser = parser
-        if (processor == null || parser == null) {
-            pending.add(json)
-            return
+        synchronized(order) {
+            val processor = processor
+            val parser = parser
+            if (processor == null || parser == null) {
+                pending.add(json)
+                return
+            }
+            processor.processInput(parser, json)
         }
-        processor.processInput(parser, json)
     }
 
     private fun clear() {

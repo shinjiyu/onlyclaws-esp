@@ -87,6 +87,20 @@ class HarnessTextTest {
     }
 
     @Test
+    fun diagnoseUsesTheModelsLineNumbersAndQuotesTheLine() {
+        val code = "// 标题：坏\nfunction onStart() {\n  boom();\n}"
+        val report = HarnessText.diagnose(
+            "装上时出错：ReferenceError: boom is not defined（第 4 行）",
+            code,
+            listOf("开始了", "脚本出错：ReferenceError: boom is not defined（第 4 行）"),
+        )
+        assertTrue(report, report.startsWith("装上时出错：ReferenceError: boom is not defined（第 3 行）"))
+        assertTrue(report, report.contains("第 3 行是：boom();"))
+        assertTrue(report, report.contains("- 开始了"))
+        assertTrue(report, report.contains("- 脚本出错：ReferenceError: boom is not defined（第 3 行）"))
+    }
+
+    @Test
     fun theSystemExampleItselfPasses() {
         val example = HarnessText.extractScript(HarnessText.SYSTEM.substringAfter("例子："))
         assertNotNull(example)

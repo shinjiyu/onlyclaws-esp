@@ -33,7 +33,18 @@ android {
     }
 }
 
+// Not on Maven; fetched once from the sherpa-onnx release into app/libs (git-ignored).
+val sherpaAar = file("libs/sherpa-onnx-2.0.1.aar")
+if (!sherpaAar.isFile) {
+    sherpaAar.parentFile.mkdirs()
+    val part = File(sherpaAar.path + ".part")
+    uri("https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar")
+        .toURL().openStream().use { input -> part.outputStream().use { input.copyTo(it) } }
+    part.renameTo(sherpaAar)
+}
+
 dependencies {
+    implementation(files(sherpaAar))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

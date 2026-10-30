@@ -27,7 +27,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         val app = application as OcApp
-        bar = HarnessBar(this, app.harness).also { it.attach() }
+        bar = HarnessBar(this, app.harness, app.asr).also { it.attach() }
         app.a2ui.attach(
             findViewById(R.id.a2ui_host),
             findViewById(R.id.log_pane),

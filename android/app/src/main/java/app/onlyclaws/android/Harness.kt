@@ -5,6 +5,7 @@ import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.ArrayDeque
+import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -93,7 +94,7 @@ class Harness(private val app: OcApp) {
         var problem = ""
         var swapped = false
         for (attempt in 1..TRIES) {
-            post(if (attempt == 1) "正在写" else "第 $attempt 次重写：$problem", true)
+            post(if (attempt == 1) "正在写" else "第 $attempt 次重写：${problem.lineSequence().first()}", true)
             val reply = chat(key, messages)
             if (reply.error.isNotEmpty()) {
                 problem = reply.error
@@ -106,12 +107,20 @@ class Harness(private val app: OcApp) {
                 post("正在试装", true)
                 val source = HarnessText.MARK + "\n" + code
                 val since = System.currentTimeMillis()
-                problem = install(source)
-                if (problem.isEmpty()) {
-                    swapped = true
-                    Thread.sleep(SETTLE_MS)
-                    if (runtimeErrorAt >= since) problem = "运行时出错：$runtimeError"
+                val logs = Collections.synchronizedList(mutableListOf<String>())
+                val tap: (String) -> Unit = { logs += it }
+                app.tap(tap)
+                try {
+                    problem = install(source)
+                    if (problem.isEmpty()) {
+                        swapped = true
+                        Thread.sleep(SETTLE_MS)
+                        if (runtimeErrorAt >= since) problem = "运行时出错：$runtimeError"
+                    }
+                } finally {
+                    app.untap(tap)
                 }
+                if (problem.isNotEmpty()) problem = HarnessText.diagnose(problem, code, logs.toList())
                 if (problem.isEmpty()) {
                     app.container.writeActive(app, source)
                     runtimeError = ""
@@ -124,7 +133,7 @@ class Harness(private val app: OcApp) {
             messages.put(message("user", HarnessText.retryPrompt(problem)))
         }
         if (swapped) main.post { app.reloadScript() }
-        post("没做成：$problem。屏幕保持原样", false)
+        post("没做成：${problem.lineSequence().first()}。屏幕保持原样", false)
     }
 
     /** Empty when the script is in place. Blocks this thread until the container has tried it. */
@@ -132,7 +141,7 @@ class Harness(private val app: OcApp) {
         val done = CountDownLatch(1)
         var problem = ""
         app.load(source) { result ->
-            result.onFailure { problem = "装上时出错：${it.message?.lineSequence()?.firstOrNull().orEmpty()}" }
+            result.onFailure { problem = "装上时出错：${it.message.orEmpty()}" }
             done.countDown()
         }
         if (!done.await(INSTALL_WAIT_S, TimeUnit.SECONDS)) return "onStart 太久没返回"
