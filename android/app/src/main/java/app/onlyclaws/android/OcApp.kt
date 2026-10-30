@@ -34,8 +34,26 @@ class OcApp : Application() {
         container.use(wallpaper)
         container.use(http)
         container.use(keys)
+        harness = Harness(this)
         reloadScript()
         watchActiveFile()
+    }
+
+    lateinit var harness: Harness
+        private set
+
+    /** Every script goes in here. Scripts the harness wrote get no keys, web page, or desk. */
+    fun load(source: String, done: (Result<Unit>) -> Unit) {
+        val generated = source.startsWith(HarnessText.MARK)
+        val allow: (JsPlugin) -> Boolean = if (generated) {
+            { it === a2ui || it === tts || it === http || it === wallpaper }
+        } else {
+            { true }
+        }
+        container.load(source, allow) { result ->
+            if (result.isSuccess) main.post { lastSource = source }
+            done(result)
+        }
     }
 
     lateinit var overlay: OverlayPlugin
@@ -59,12 +77,14 @@ class OcApp : Application() {
         val source = saved ?: boot
         if (source == lastSource) return
         lastSource = source
-        container.load(source) { result ->
+        load(source) { result ->
             result.onFailure { err ->
                 append("脚本未加载：${err.message}")
-                if (saved != null && boot != lastSource) {
-                    lastSource = boot
-                    container.load(boot) { }
+                main.post {
+                    if (saved != null && boot != lastSource) {
+                        lastSource = boot
+                        load(boot) { }
+                    }
                 }
             }
         }

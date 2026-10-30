@@ -39,6 +39,7 @@ import org.mozilla.javascript.NativeJSON
 import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.Undefined
+import org.mozilla.javascript.json.JsonParser
 import androidx.a2ui.compose.runtime.A2uiMessageParser
 import androidx.a2ui.compose.ui.A2uiMessageProcessor
 import androidx.a2ui.model.catalog.functions.A2uiLocaleProvider
@@ -121,8 +122,12 @@ class A2uiPlugin(
 
     internal fun onOutbound(event: A2uiClientToServerMessage) {
         when (event) {
-            is A2uiClientEventMessage -> fire(event.componentId, event.type.ifEmpty { event.componentId })
-            is A2uiClientErrorMessage -> onLog("界面错误 ${event.message}")
+            is A2uiClientEventMessage ->
+                fire(event.componentId, event.type.ifEmpty { event.componentId }, event.context)
+            is A2uiClientErrorMessage -> {
+                onLog("界面错误 ${event.message}")
+                container.report("界面错误 ${event.message}")
+            }
         }
     }
 
@@ -183,13 +188,15 @@ class A2uiPlugin(
         }
     }
 
-    private fun fire(id: String, action: String) {
+    private fun fire(id: String, action: String, context: Map<String, Any?>) {
+        val values = contextJson(context)
         container.enter { cx, scope ->
             val fn = scope.get("onAction", scope)
             if (fn !is BaseFunction) return@enter
             val event = cx.newObject(scope)
             ScriptableObject.putProperty(event, "id", id)
             ScriptableObject.putProperty(event, "action", action)
+            ScriptableObject.putProperty(event, "context", JsonParser(cx, scope).parseValue(values))
             fn.call(cx, scope, scope, arrayOf(event))
         }
     }
@@ -236,6 +243,25 @@ class A2uiPlugin(
 
     companion object {
         const val CATALOG = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+
+        /** Event context as JSON text. Values the renderer keeps as JSON elements come out as their own JSON. */
+        fun contextJson(context: Map<String, Any?>): String = jsonOf(context)
+
+        private fun jsonOf(value: Any?): String = when (value) {
+            null -> "null"
+            is String -> JSONObject.quote(value)
+            is Boolean -> value.toString()
+            is Number -> JSONObject.numberToString(value)
+            is Map<*, *> -> value.entries.joinToString(",", "{", "}") { (k, v) ->
+                JSONObject.quote(k.toString()) + ":" + jsonOf(v)
+            }
+            is Iterable<*> -> value.joinToString(",", "[", "]") { jsonOf(it) }
+            is Array<*> -> value.joinToString(",", "[", "]") { jsonOf(it) }
+            else -> {
+                val text = value.toString()
+                if (runCatching { JSONObject("{\"v\":$text}") }.isSuccess) text else JSONObject.quote(text)
+            }
+        }
     }
 }
 

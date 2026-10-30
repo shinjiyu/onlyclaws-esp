@@ -24,15 +24,20 @@ class JsContainer(private val onLog: (String) -> Unit) {
     private var lastError = ""
     private var lastErrorAt = 0L
 
+    /** Errors after a script is in place: hooks, frames, the UI it drew. */
+    @Volatile
+    var onError: ((String) -> Unit)? = null
+
     fun use(plugin: JsPlugin) {
         plugins += plugin
     }
 
-    fun load(source: String, done: (Result<Unit>) -> Unit) {
+    /** Only plugins that pass [allow] are installed into the new script's scope. */
+    fun load(source: String, allow: (JsPlugin) -> Boolean = { true }, done: (Result<Unit>) -> Unit) {
         handler.post {
             plugins.forEach { it.beforeSwap() }
             var pumps = false
-            val result = runCatching { pumps = swap(source) }
+            val result = runCatching { pumps = swap(source, allow) }
             plugins.forEach { it.afterSwap(result.isSuccess, pumps) }
             plugins.forEach { it.afterTurn() }
             done(result)
@@ -86,13 +91,17 @@ class JsContainer(private val onLog: (String) -> Unit) {
         File(context.filesDir, "active.js").writeText(source)
     }
 
-    private fun swap(source: String): Boolean {
+    fun report(message: String) {
+        handler.post { noteError(message) }
+    }
+
+    private fun swap(source: String, allow: (JsPlugin) -> Boolean): Boolean {
         val cx = JsContext.enter()
         try {
             cx.optimizationLevel = -1
             val fresh = cx.initStandardObjects()
             ScriptableObject.putProperty(fresh, "oca", OcaLog(onLog))
-            plugins.forEach { it.install(cx, fresh) }
+            plugins.filter(allow).forEach { it.install(cx, fresh) }
             cx.evaluateString(fresh, source, "script.js", 1, null)
             call(cx, fresh, "onStart")
             val pumps = fresh.get("onFrame", fresh) is BaseFunction
@@ -118,12 +127,16 @@ class JsContainer(private val onLog: (String) -> Unit) {
     }
 
     private fun noteError(t: Throwable) {
-        val msg = t.message?.lineSequence()?.firstOrNull().orEmpty()
+        noteError(t.message?.lineSequence()?.firstOrNull().orEmpty())
+    }
+
+    private fun noteError(msg: String) {
         val now = System.currentTimeMillis()
         if (msg == lastError && now - lastErrorAt < 2000) return
         lastError = msg
         lastErrorAt = now
         onLog("脚本出错：$msg")
+        onError?.invoke(msg)
     }
 
     private class OcaLog(private val emit: (String) -> Unit) : ScriptableObject() {

@@ -22,7 +22,7 @@ class OcService : Service() {
             val session = SessionWire(
                 this,
                 onScript = { source, reply ->
-                    app.container.load(source) { result ->
+                    app.load(source) { result ->
                         result.onSuccess {
                             app.container.writeActive(this, source)
                             app.append("脚本已换上")

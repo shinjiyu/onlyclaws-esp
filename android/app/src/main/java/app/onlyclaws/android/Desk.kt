@@ -77,6 +77,23 @@ class DeskPlugin(
         private set
     private var logWatch: ((String) -> Unit)? = null
 
+    /** The desk covers the screen only while the running script has called `desk.show`. */
+    @Volatile
+    private var visible = true
+
+    @Volatile
+    private var shownThisSwap = false
+
+    override fun beforeSwap() {
+        shownThisSwap = false
+    }
+
+    override fun afterSwap(ok: Boolean, pumpsFrames: Boolean) {
+        if (!ok || shownThisSwap) return
+        visible = false
+        main.post { host?.visibility = View.GONE }
+    }
+
     fun attach(host: ViewGroup) {
         this.host = host
         main.post {
@@ -104,7 +121,7 @@ class DeskPlugin(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 ),
             )
-            host.visibility = View.VISIBLE
+            host.visibility = if (visible) View.VISIBLE else View.GONE
         }
     }
 
@@ -147,6 +164,8 @@ class DeskPlugin(
             onLog("界面内容无效")
             return
         }
+        shownThisSwap = true
+        visible = true
         main.post {
             model = next
             host?.visibility = View.VISIBLE

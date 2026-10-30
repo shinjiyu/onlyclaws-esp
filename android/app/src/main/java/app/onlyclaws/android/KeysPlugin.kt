@@ -28,13 +28,13 @@ class KeysPlugin(root: File) : JsPlugin {
         return File(dir, name)
     }
 
-    private fun read(name: String): String {
+    internal fun read(name: String): String {
         val target = file(name) ?: return ""
         if (!target.isFile) return ""
         return runCatching { target.readText() }.getOrDefault("").trim()
     }
 
-    private fun write(name: String, value: String): Boolean {
+    internal fun write(name: String, value: String): Boolean {
         val target = file(name) ?: return false
         val text = value.trim()
         if (text.isEmpty() || text.length > 400 || text.any { it == '\n' || it == '\r' }) return false

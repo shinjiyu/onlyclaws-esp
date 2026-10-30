@@ -21,11 +21,13 @@ class MainActivity : AppCompatActivity() {
     private val show: (String) -> Unit = { text ->
         findViewById<TextView>(R.id.log).text = text.ifEmpty { "启动中" }
     }
+    private var bar: HarnessBar? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         val app = application as OcApp
+        bar = HarnessBar(this, app.harness).also { it.attach() }
         app.a2ui.attach(
             findViewById(R.id.a2ui_host),
             findViewById(R.id.log_pane),
@@ -101,8 +103,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == HarnessBar.REQUEST_MIC) {
+            bar?.onPermission(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        }
+    }
+
     override fun onDestroy() {
         val app = application as OcApp
+        bar?.detach()
+        bar = null
         app.overlay.detachPage()
         app.desk.unwatchLogs(app)
         app.desk.detach()

@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+<FrameLayout
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1">
 
 <LinearLayout
     android:layout_width="match_parent"
@@ -71,3 +77,74 @@
     android:visibility="gone" />
 
 </FrameLayout>
+
+<LinearLayout
+    android:id="@+id/harness_bar"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#1C1B19"
+    android:orientation="vertical"
+    android:paddingHorizontal="12dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="10dp">
+
+    <TextView
+        android:id="@+id/harness_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:paddingHorizontal="4dp"
+        android:paddingBottom="6dp"
+        android:textColor="#CFC8BC"
+        android:textSize="13sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/harness_input"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="#2B2A27"
+            android:hint="@string/harness_hint"
+            android:imeOptions="actionSend"
+            android:inputType="text"
+            android:maxLines="3"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="10dp"
+            android:textColor="#F3EEE6"
+            android:textColorHint="#8A847A"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/harness_mic"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:backgroundTint="#3A3833"
+            android:minWidth="0dp"
+            android:paddingHorizontal="14dp"
+            android:text="@string/harness_mic"
+            android:textAllCaps="false"
+            android:textColor="#F3EEE6" />
+
+        <Button
+            android:id="@+id/harness_send"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:backgroundTint="#E85D04"
+            android:minWidth="0dp"
+            android:paddingHorizontal="14dp"
+            android:text="@string/harness_send"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+</LinearLayout>
+
+</LinearLayout>

@@ -50,6 +50,23 @@ Scripts: `/presets/oca/` on the server lists ready-made ones (Bilibili play is
 `python server/presets.py sync` after editing it). Agents send any script with
 `POST /api/invoke` and a `js` tool. Do not commit tokens.
 
+## Harness on the phone
+
+The strip at the bottom takes a sentence, typed or spoken through the phone's own
+speech recognizer, and turns it into a script on the phone (`Harness`, `HarnessText`).
+It asks `deepseek-flash` at `api.deepseek.com` with the key in `keys/deepseek`; paste a
+`sk-…` key into the strip once to store it. The reply is compiled with Rhino, installed,
+and watched for 1.5 s. A compile error, a failed `onStart`, or an early runtime error goes
+back to the model; after three tries the previous script is put back. When the running
+script is one the harness wrote, the next sentence edits it instead of starting over.
+
+Scripts the harness writes start with `// oca:generated`. `OcApp.load` gives them only
+`a2ui`, `tts`, `http`, `wallpaper`, and `oca` — no `keys`, `web`, `ui`, or `desk` — on
+every load, including after a restart. Scripts from the console keep every plugin.
+
+Button actions pass bound values as `e.context` (for example a `TextField` path), so a
+generated screen can read what was typed.
+
 ## JS surface (host objects)
 
 | Object | Role |
