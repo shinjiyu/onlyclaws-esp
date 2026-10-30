@@ -216,7 +216,7 @@ workspace "OnlyClaws ESP" "Agent/device framework: cloud control plane + ESP32 L
                     }
                 }
 
-                ocaApp = container "OnlyClaws Android" "Phone runtime: device session, Rhino JS container, js tool" "Kotlin android/" {
+                ocaApp = container "OnlyClaws Android" "Phone runtime: device session, V8 JS container, js tool" "Kotlin android/" {
                     tags "Compose"
                     properties {
                         "path" "android/"

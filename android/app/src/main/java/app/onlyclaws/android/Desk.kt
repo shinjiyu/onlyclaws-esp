@@ -54,12 +54,6 @@ import android.os.Handler
 import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.NativeJSON
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Undefined
 
 /**
  * The screen the person actually sees. A script fills it with `desk.show({...})`.
@@ -141,21 +135,12 @@ class DeskPlugin(
         host = null
     }
 
-    override fun install(cx: JsContext, scope: Scriptable) {
-        val api = Api()
-        api.parentScope = scope
-        ScriptableObject.putProperty(scope, "desk", api)
+    override fun install(scope: JsScope) = scope.define("desk") {
+        fn("show") { args -> args.json(0)?.let(::show) }
     }
 
-    private fun show(cx: JsContext, scope: Scriptable, arg: Any?) {
-        val text = when (arg) {
-            null, is Undefined -> return
-            is String -> arg
-            else -> runCatching {
-                NativeJSON.stringify(cx, scope, arg, null, null) as? String
-            }.getOrNull()
-        }
-        if (text.isNullOrBlank()) {
+    private fun show(text: String) {
+        if (text.isBlank()) {
             onLog("界面内容无效")
             return
         }
@@ -189,31 +174,9 @@ class DeskPlugin(
     private fun savePrompt(value: String) = fire("promptText", "prompt", value)
 
     private fun fire(id: String, action: String, value: String = "") {
-        container.enter { cx, scope ->
-            val fn = scope.get("onAction", scope)
-            if (fn !is BaseFunction) return@enter
-            val event = cx.newObject(scope)
-            ScriptableObject.putProperty(event, "id", id)
-            ScriptableObject.putProperty(event, "action", action)
-            if (value.isNotEmpty()) ScriptableObject.putProperty(event, "value", value)
-            fn.call(cx, scope, scope, arrayOf(event))
-        }
-    }
-
-    private inner class Api : ScriptableObject() {
-        override fun getClassName(): String = "desk"
-
-        override fun get(name: String, start: Scriptable?): Any = when (name) {
-            "show" -> showFn
-            else -> NOT_FOUND
-        }
-
-        private val showFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                show(cx, scope, args?.firstOrNull())
-                return Undefined.instance
-            }
-        }
+        val event = linkedMapOf<String, Any?>("id" to id, "action" to action)
+        if (value.isNotEmpty()) event["value"] = value
+        container.fire("onAction", event)
     }
 }
 

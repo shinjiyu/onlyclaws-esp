@@ -28,7 +28,7 @@ class HarnessTextTest {
     }
 
     @Test
-    fun checkPassesEs5WithOnStart() {
+    fun checkPassesWithOnStart() {
         assertNull(HarnessText.check(todo))
     }
 
@@ -40,10 +40,15 @@ class HarnessTextTest {
     }
 
     @Test
-    fun checkRejectsWhatTheContainerCannotParse() {
-        assertNotNull(HarnessText.check("let x = 1;\nfunction onStart() {}"))
-        assertNotNull(HarnessText.check("class A {}\nfunction onStart() {}"))
-        assertNotNull(HarnessText.check("for (var v of [1]) {}\nfunction onStart() {}"))
+    fun checkAcceptsModernSyntax() {
+        val code = """
+            const xs = [1, 2].map((n) => n * 2);
+            class A { #n = 1; get n() { return this.#n; } }
+            const s = `${'$'}{xs[0]}`;
+            async function later() { await null; }
+            function onStart() { oca.log(new A().n ?? s); }
+        """.trimIndent()
+        assertNull(HarnessText.check(code))
     }
 
     @Test

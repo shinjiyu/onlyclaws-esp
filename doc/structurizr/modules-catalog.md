@@ -21,7 +21,7 @@ Same O(1) rule as mcp_guard.
 | device_runtime | compose | `rlcd/src/main.cpp` | contracts, wifi_nvs, cloud_http, script_engine, script_store, plugins (wire) | Product env selects which plugins to link |
 | script_engine | compose | `rlcd/src/script_engine.cpp` | contracts | Registers only compiled modules into Lua |
 | control_plane | compose | `server/app.py`, `script_sign.py` | tenancy, render, ml_registry, script_store, contracts, firmware_dist, oca_dist, presets | Filters invoke by `capabilities[]`; signs Lua on deploy; `js` invoke only for `container` (OCA) |
-| oca_app | compose | `android/` | contracts (device wire) | OnlyClaws Android phone runtime: Rhino JS container, reports `container`; seeds `files/session.json` from a packaged asset |
+| oca_app | compose | `android/` | contracts (device wire) | OnlyClaws Android phone runtime: V8 (Javet) JS container, reports `container`; seeds `files/session.json` from a packaged asset |
 | panel | plugin | `panel_display` + ST7305 / ePaper (+ planned CO5300 AMOLED) | contracts | Compile-time W×H; color/round Lua contract for 1.75C ([AMOLED-175C-PRODUCT.md](./AMOLED-175C-PRODUCT.md)); not in RoArm product |
 | audio | plugin | `audio_es8311.cpp` | contracts | Optional; omit on ePaper/RoArm if no codec |
 | ble_pad | plugin | `ble_ctrl` + `http_pad` + `pad_ctrl` | contracts, wifi_nvs | D-pad + Nordic UART transport; off on ePaper |

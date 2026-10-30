@@ -19,7 +19,7 @@ class OcApp : Application() {
         super.onCreate()
         instance = this
         SessionSeed.fromAssets(this)
-        container = JsContainer { line -> append(line) }
+        container = JsContainer(onLog = { line -> append(line) })
         overlay = OverlayPlugin(this, container) { line -> append(line) }
         a2ui = A2uiPlugin(this, container) { line -> append(line) }
         desk = DeskPlugin(container) { line -> append(line) }

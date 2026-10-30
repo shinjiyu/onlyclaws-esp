@@ -5,11 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Undefined
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -83,10 +78,7 @@ class TtsPlugin(
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
                 if (utteranceId != lastId) return
-                container.enter { cx, scope ->
-                    val fn = scope.get("onDone", scope)
-                    if (fn is BaseFunction) fn.call(cx, scope, scope, emptyArray())
-                }
+                container.fire("onDone")
             }
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
@@ -97,10 +89,13 @@ class TtsPlugin(
         while (pending.isNotEmpty()) sayNow(pending.removeFirst())
     }
 
-    override fun install(cx: JsContext, scope: Scriptable) {
-        val api = Api()
-        api.parentScope = scope
-        ScriptableObject.putProperty(scope, "tts", api)
+    override fun install(scope: JsScope) = scope.define("tts") {
+        fn("say") { args ->
+            val text = args.string(0)
+            require(text.isNotEmpty()) { "tts.say(text)" }
+            say(text)
+        }
+        fn("stop") { stop() }
     }
 
     override fun beforeSwap() {
@@ -134,31 +129,5 @@ class TtsPlugin(
     private fun stop() {
         pending.clear()
         engine?.stop()
-    }
-
-    private inner class Api : ScriptableObject() {
-        override fun getClassName(): String = "tts"
-
-        override fun get(name: String, start: Scriptable?): Any = when (name) {
-            "say" -> sayFn
-            "stop" -> stopFn
-            else -> NOT_FOUND
-        }
-
-        private val sayFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                val text = args?.firstOrNull()?.toString().orEmpty()
-                if (text.isEmpty()) throw JsContext.reportRuntimeError("tts.say(text)")
-                say(text)
-                return Undefined.instance
-            }
-        }
-
-        private val stopFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                stop()
-                return Undefined.instance
-            }
-        }
     }
 }

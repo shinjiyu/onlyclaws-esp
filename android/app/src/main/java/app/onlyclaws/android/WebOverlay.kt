@@ -24,11 +24,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Undefined
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -387,43 +382,14 @@ class WebOverlay(
         }
     }
 
-    fun api(): ScriptableObject = Api()
-
-    private inner class Api : ScriptableObject() {
-        override fun getClassName(): String = "web"
-
-        override fun get(name: String, start: Scriptable?): Any = when (name) {
-            "load" -> fn { load(text(it)) }
-            "url" -> fn { url(text(it)) }
-            "eval" -> evalFn
-            "clear" -> fn { clear() }
-            "touch" -> fn { touch(it?.firstOrNull()?.let { v -> JsContext.toBoolean(v) } == true) }
-            "loggedIn" -> boolFn { loggedIn() }
-            "showing" -> boolFn { showing() }
-            else -> NOT_FOUND
-        }
-
-        private val evalFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                return eval(text(args))
-            }
-        }
-
-        private fun fn(body: (Array<out Any>?) -> Unit) = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                body(args)
-                return Undefined.instance
-            }
-        }
-
-        private fun boolFn(body: () -> Boolean) = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                return body()
-            }
-        }
-
-        private fun text(args: Array<out Any>?): String =
-            if (args.isNullOrEmpty()) "" else JsContext.toString(args[0])
+    fun install(scope: JsScope) = scope.define("web") {
+        fn("load") { load(it.string(0)); Unit }
+        fn("url") { url(it.string(0)); Unit }
+        fn("eval") { eval(it.string(0)) }
+        fn("clear") { clear(); Unit }
+        fn("touch") { touch(it.bool(0)) }
+        fn("loggedIn") { loggedIn() }
+        fn("showing") { showing() }
     }
 
     companion object {

@@ -13,7 +13,7 @@
     { "id": "firmware_dist", "role": "infra", "path": "server/firmware_catalog.py + server/firmware/ + rlcd/scripts/package_web_flash.sh", "status": "implemented" },
     { "id": "oca_dist", "role": "infra", "path": "server/oca_pack.py + server/oca/ (base APK, VERSION) + android/scripts/package_oca_base.sh", "status": "implemented" },
     { "id": "presets", "role": "infra", "path": "server/presets.py + server/presets/ (copies of demos/ Lua and android/scripts/ JS)", "status": "implemented" },
-    { "id": "oca_app", "role": "compose", "path": "android/ (OnlyClaws Android: Rhino JS container on the phone; device session + js tool)", "status": "implemented" },
+    { "id": "oca_app", "role": "compose", "path": "android/ (OnlyClaws Android: V8 (Javet) JS container on the phone; device session + js tool)", "status": "implemented" },
     { "id": "device_runtime", "role": "compose", "path": "rlcd/src/main.cpp" },
     { "id": "script_engine", "role": "compose", "path": "rlcd/src/script_engine.cpp" },
     { "id": "control_plane", "role": "compose", "path": "server/app.py + script_sign.py" },

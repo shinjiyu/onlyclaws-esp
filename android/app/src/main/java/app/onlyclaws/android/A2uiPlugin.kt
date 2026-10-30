@@ -33,13 +33,6 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.NativeJSON
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Undefined
-import org.mozilla.javascript.json.JsonParser
 import androidx.a2ui.compose.runtime.A2uiMessageParser
 import androidx.a2ui.compose.ui.A2uiMessageProcessor
 import androidx.a2ui.model.catalog.functions.A2uiLocaleProvider
@@ -101,10 +94,11 @@ class A2uiPlugin(
         chrome = null
     }
 
-    override fun install(cx: JsContext, scope: Scriptable) {
-        val api = Api()
-        api.parentScope = scope
-        ScriptableObject.putProperty(scope, "a2ui", api)
+    override fun install(scope: JsScope) = scope.define("a2ui") {
+        fn("send") { send(it.json(0)) }
+        fn("push") { send(it.json(0)) }
+        fn("clear") { clear() }
+        value("catalog", catalogId)
     }
 
     internal fun bind(
@@ -146,8 +140,8 @@ class A2uiPlugin(
         }
     }
 
-    private fun send(payload: Any?) {
-        val json = stringify(payload) ?: run {
+    private fun send(json: String?) {
+        if (json == null) {
             onLog("a2ui.send 需要一条协议消息")
             return
         }
@@ -189,56 +183,9 @@ class A2uiPlugin(
     }
 
     private fun fire(id: String, action: String, context: Map<String, Any?>) {
-        val values = contextJson(context)
-        container.enter { cx, scope ->
-            val fn = scope.get("onAction", scope)
-            if (fn !is BaseFunction) return@enter
-            val event = cx.newObject(scope)
-            ScriptableObject.putProperty(event, "id", id)
-            ScriptableObject.putProperty(event, "action", action)
-            ScriptableObject.putProperty(event, "context", JsonParser(cx, scope).parseValue(values))
-            fn.call(cx, scope, scope, arrayOf(event))
-        }
-    }
-
-    private fun stringify(payload: Any?): String? = when (payload) {
-        null, is Undefined -> null
-        is String -> payload
-        is JSONObject -> payload.toString()
-        else -> runCatching {
-            NativeJSON.stringify(
-                JsContext.getCurrentContext(),
-                JsContext.getCurrentContext().initStandardObjects(),
-                payload,
-                null,
-                null,
-            ) as String
-        }.getOrNull()
-    }
-
-    private inner class Api : ScriptableObject() {
-        override fun getClassName(): String = "a2ui"
-
-        override fun get(name: String, start: Scriptable?): Any = when (name) {
-            "send", "push" -> sendFn
-            "clear" -> clearFn
-            "catalog" -> catalogId
-            else -> NOT_FOUND
-        }
-
-        private val sendFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                send(args?.firstOrNull())
-                return Undefined.instance
-            }
-        }
-
-        private val clearFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                clear()
-                return Undefined.instance
-            }
-        }
+        val event = "{\"id\":${JSONObject.quote(id)},\"action\":${JSONObject.quote(action)}," +
+            "\"context\":${contextJson(context)}}"
+        container.fire("onAction", JsJson(event))
     }
 
     companion object {

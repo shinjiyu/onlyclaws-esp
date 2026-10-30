@@ -9,12 +9,6 @@ import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import org.json.JSONObject
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.NativeJSON
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Undefined
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 
@@ -29,29 +23,13 @@ class WallpaperPlugin(
     private val app: Context,
     private val onLog: (String) -> Unit,
 ) : JsPlugin {
-    override fun install(cx: JsContext, scope: Scriptable) {
-        val api = Api()
-        api.parentScope = scope
-        ScriptableObject.putProperty(scope, "wallpaper", api)
+    override fun install(scope: JsScope) = scope.define("wallpaper") {
+        fn("load") { load(it.json(0)) }
+        fn("clear") { clear() }
     }
 
-    private fun load(payload: Any?) {
-        val json = when (payload) {
-            null, is Undefined -> null
-            is JSONObject -> payload
-            is String -> runCatching { JSONObject(payload) }.getOrNull()
-            else -> runCatching {
-                JSONObject(
-                    NativeJSON.stringify(
-                        JsContext.getCurrentContext(),
-                        JsContext.getCurrentContext().initStandardObjects(),
-                        payload,
-                        null,
-                        null,
-                    ) as String,
-                )
-            }.getOrNull()
-        }
+    private fun load(payload: String?) {
+        val json = payload?.let { runCatching { JSONObject(it) }.getOrNull() }
         if (json == null) {
             clear()
             return
@@ -63,30 +41,6 @@ class WallpaperPlugin(
     private fun clear() {
         PresetStore.clear(app)
         onLog("壁纸预设已清掉")
-    }
-
-    private inner class Api : ScriptableObject() {
-        override fun getClassName(): String = "wallpaper"
-
-        override fun get(name: String, start: Scriptable?): Any = when (name) {
-            "load" -> loadFn
-            "clear" -> clearFn
-            else -> NOT_FOUND
-        }
-
-        private val loadFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                load(args?.firstOrNull())
-                return Undefined.instance
-            }
-        }
-
-        private val clearFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                clear()
-                return Undefined.instance
-            }
-        }
     }
 }
 

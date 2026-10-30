@@ -1,6 +1,6 @@
 # OnlyClaws Android (OCA)
 
-Phone-side JS container for OnlyClaws. The APK is the host (Rhino, session wire,
+Phone-side JS container for OnlyClaws. The APK is the host (V8 via Javet, session wire,
 A2UI, transparent WebView overlay, TTS, live wallpaper). Behavior lives in a
 downloaded script (`files/active.js`), pushed over the device session as a `js`
 tool — same control plane as the boards.
@@ -55,7 +55,7 @@ Scripts: `/presets/oca/` on the server lists ready-made ones (Bilibili play is
 The strip at the bottom takes a sentence, typed or spoken through the phone's own
 speech recognizer, and turns it into a script on the phone (`Harness`, `HarnessText`).
 It asks `deepseek-flash` at `api.deepseek.com` with the key in `keys/deepseek`; paste a
-`sk-…` key into the strip once to store it. The reply is compiled with Rhino, installed,
+`sk-…` key into the strip once to store it. The reply is compiled with V8, installed,
 and watched for 1.5 s. A compile error, a failed `onStart`, or an early runtime error goes
 back to the model; after three tries the previous script is put back. When the running
 script is one the harness wrote, the next sentence edits it instead of starting over.
@@ -92,3 +92,18 @@ the script. If the phone kills that process, an exact alarm starts the service
 again one second later, and `files/active.js` loads on the new process.
 
 Script hooks: `onStart`, `onStop`, optional `onFrame`, `onAction`, `onPointer`.
+Hooks are found on the global object, so declare them with `function`; a top-level
+`const onStart = …` is not seen.
+
+## Script engine
+
+V8 through Javet (`javet-v8-android`, arm64 only). Modern JS works; there are no
+timers, and host functions are synchronous. Each load gets a fresh runtime with only
+the host objects above, so scripts cannot reach Java. Pending promise callbacks run
+before a hook returns. Script code that runs 5 s without returning or calling a host
+function is terminated; time inside a host call, such as `http.request`, does not
+count. A host function that fails throws a JS `Error` with its message.
+The stripped V8 library is about 62 MB, stored uncompressed in the APK.
+
+Unit tests run the same container on the desktop JVM through
+`javet-v8-macos-arm64`, so they need an Apple Silicon Mac.

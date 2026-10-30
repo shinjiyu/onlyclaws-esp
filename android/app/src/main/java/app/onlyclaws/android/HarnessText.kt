@@ -1,7 +1,8 @@
 package app.onlyclaws.android
 
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.RhinoException
+import com.caoccao.javet.exceptions.BaseJavetScriptingException
+import com.caoccao.javet.interop.V8Host
+import com.caoccao.javet.interop.V8Runtime
 
 /** What the harness says to the model, and how it reads the reply. No Android here. */
 object HarnessText {
@@ -11,10 +12,10 @@ object HarnessText {
     val SYSTEM = """
 你在一台安卓手机上，把用户说的一句话做成一个马上能用的小程序。只回一段完整的 JavaScript，放在 ```js 代码块里，不写解释。
 
-运行环境是 Rhino，按 ES5 写：只用 var 和 function。不用 let、const、箭头函数、class、模板字符串、Promise、async、setTimeout。
+运行环境是 V8，可以用现代 JavaScript（let、const、箭头函数、class、模板字符串）。下面的全局函数都是同步的，没有 setTimeout、setInterval 和其它定时器。
 第一行写 `// 标题：` 加不超过 12 个字的名字。
 
-钩子：
+钩子必须写成 function onStart() {…} 这样的函数声明，写成 const onStart = … 不会被调用：
 - onStart()：装上时调用一次，在这里建界面。
 - onAction(e)：用户点了按钮。e.action 是按钮 action.event.name，e.context 是 event.context 里的值（路径已经取成值）。
 - onFrame(dt)：可选，每帧调用，dt 单位秒。不需要动画或计时就不要写。
@@ -50,9 +51,9 @@ object HarnessText {
 例子：
 ```js
 // 标题：待办
-var items = [];
+const items = [];
 function draw() {
-  var comps = [
+  const comps = [
     { id: "root", component: "Column", children: ["title", "input", "add", "list"] },
     { id: "title", component: "Text", text: "待办", variant: "h2" },
     { id: "input", component: "TextField", label: "要做什么", value: { path: "/draft" } },
@@ -60,11 +61,10 @@ function draw() {
     { id: "add", component: "Button", child: "addText", variant: "primary",
       action: { event: { name: "add", context: { text: { path: "/draft" } } } } }
   ];
-  var ids = [];
-  for (var i = 0; i < items.length; i++) {
-    ids.push("item" + i);
-    comps.push({ id: "item" + i, component: "Text", text: items[i] });
-  }
+  const ids = items.map((text, i) => {
+    comps.push({ id: "item" + i, component: "Text", text });
+    return "item" + i;
+  });
   comps.push({ id: "list", component: "Column", children: ids });
   a2ui.send({ version: "v0.9", updateComponents: { surfaceId: "main", components: comps } });
 }
@@ -74,7 +74,7 @@ function onStart() {
   draw();
 }
 function onAction(e) {
-  if (e.action === "add" && e.context && e.context.text) {
+  if (e.action === "add" && e.context?.text) {
     items.push(String(e.context.text));
     a2ui.send({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/draft", value: "" } });
     draw();
@@ -118,14 +118,12 @@ function onAction(e) {
 
     /** Empty when the script compiles and defines onStart. Same language level as the container. */
     fun check(code: String): String? {
-        val cx = JsContext.enter()
         try {
-            cx.optimizationLevel = -1
-            cx.compileString(code, "script.js", 1, null)
-        } catch (e: RhinoException) {
-            return "第 ${e.lineNumber()} 行语法错误：${e.details()}"
-        } finally {
-            JsContext.exit()
+            V8Host.getV8Instance().createV8Runtime<V8Runtime>().use { rt ->
+                rt.getExecutor(code).setResourceName("script.js").compileV8Script().close()
+            }
+        } catch (e: BaseJavetScriptingException) {
+            return "第 ${e.scriptingError.lineNumber} 行语法错误：${e.scriptingError.message}"
         }
         if (!ON_START.containsMatchIn(code)) return "没有 onStart"
         return null

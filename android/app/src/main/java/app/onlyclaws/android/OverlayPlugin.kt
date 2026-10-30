@@ -18,11 +18,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Undefined
 import kotlin.math.hypot
 
 /**
@@ -54,13 +49,23 @@ class OverlayPlugin(
         }
     }
 
-    override fun install(cx: JsContext, scope: Scriptable) {
-        val ui = UiApi({ screenDp() }, metrics)
-        ui.parentScope = scope
-        val page = web.api()
-        page.parentScope = scope
-        ScriptableObject.putProperty(scope, "ui", ui)
-        ScriptableObject.putProperty(scope, "web", page)
+    override fun install(scope: JsScope) {
+        scope.define("ui") {
+            getter("w") { screenDp().first }
+            getter("W") { screenDp().first }
+            getter("h") { screenDp().second }
+            getter("H") { screenDp().second }
+            getter("keyboard") { metrics.keyboard }
+            getter("safe") {
+                mapOf(
+                    "top" to metrics.top,
+                    "right" to metrics.right,
+                    "bottom" to metrics.bottom,
+                    "left" to metrics.left,
+                )
+            }
+        }
+        web.install(scope)
     }
 
     override fun beforeSwap() {
@@ -118,14 +123,7 @@ class OverlayPlugin(
     fun backPage(): Boolean = web.back()
 
     private fun stopPage() {
-        container.enter { cx, scope ->
-            val fn = scope.get("onAction", scope)
-            if (fn !is BaseFunction) return@enter
-            val event = cx.newObject(scope)
-            ScriptableObject.putProperty(event, "id", "stop")
-            ScriptableObject.putProperty(event, "action", "stop")
-            fn.call(cx, scope, scope, arrayOf(event))
-        }
+        container.fire("onAction", mapOf("id" to "stop", "action" to "stop"))
     }
 
     /** After the user grants overlay, load the saved script once. */
@@ -145,15 +143,7 @@ class OverlayPlugin(
     }
 
     private fun onPointer(action: String, x: Double, y: Double) {
-        container.enter { cx, scope ->
-            val fn = scope.get("onPointer", scope)
-            if (fn !is BaseFunction) return@enter
-            val event = cx.newObject(scope)
-            ScriptableObject.putProperty(event, "action", action)
-            ScriptableObject.putProperty(event, "x", x)
-            ScriptableObject.putProperty(event, "y", y)
-            fn.call(cx, scope, scope, arrayOf(event))
-        }
+        container.fire("onPointer", mapOf("action" to action, "x" to x, "y" to y))
     }
 }
 
@@ -271,124 +261,12 @@ private fun pxRect(l: Float, t: Float, r: Float, b: Float, density: Float): Rect
     return Rect(left, top, right, bottom)
 }
 
-private fun argb(n: Double): Int {
-    val bits = n.toLong() and 0xFFFFFFFFL
-    if (bits == 0L) return Color.TRANSPARENT
-    val color = if (bits <= 0xFFFFFFL) 0xFF000000L or bits else bits
-    return color.toInt()
-}
-
-private class GfxApi(
-    private val buffer: SceneBuffer,
-    private val allow: () -> Boolean,
-) : ScriptableObject() {
-    override fun getClassName(): String = "gfx"
-
-    override fun get(name: String, start: Scriptable?): Any = when (name) {
-        "clear" -> clearFn
-        "rect" -> rectFn
-        "line" -> lineFn
-        "circle" -> circleFn
-        "text" -> textFn
-        "text_width" -> widthFn
-        else -> NOT_FOUND
-    }
-
-    private val clearFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            val color = if (args.isNullOrEmpty()) 0.0 else JsContext.toNumber(args[0])
-            buffer.fill(argb(color))
-            return Undefined.instance
-        }
-    }
-
-    private val rectFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            need(args, 5, "gfx.rect(x, y, w, h, color)")
-            buffer.add(Op.Rect(num(args, 0), num(args, 1), num(args, 2), num(args, 3), argb(JsContext.toNumber(args!![4]))))
-            return Undefined.instance
-        }
-    }
-
-    private val lineFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            need(args, 5, "gfx.line(x1, y1, x2, y2, color)")
-            buffer.add(Op.Line(num(args, 0), num(args, 1), num(args, 2), num(args, 3), argb(JsContext.toNumber(args!![4]))))
-            return Undefined.instance
-        }
-    }
-
-    private val circleFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            need(args, 4, "gfx.circle(x, y, r, color)")
-            buffer.add(Op.Circle(num(args, 0), num(args, 1), num(args, 2), argb(JsContext.toNumber(args!![3]))))
-            return Undefined.instance
-        }
-    }
-
-    private val measure = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16f }
-
-    private val widthFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            val text = if (args.isNullOrEmpty()) "" else JsContext.toString(args[0])
-            return measure.measureText(text).toDouble()
-        }
-    }
-
-    private val textFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            need(args, 4, "gfx.text(x, y, text, color)")
-            buffer.add(Op.Text(num(args, 0), num(args, 1), JsContext.toString(args!![2]), argb(JsContext.toNumber(args[3]))))
-            return Undefined.instance
-        }
-    }
-
-    private fun need(args: Array<out Any>?, n: Int, sig: String) {
-        if (args == null || args.size < n) throw JsContext.reportRuntimeError(sig)
-    }
-
-    private fun num(args: Array<out Any>?, i: Int): Float = JsContext.toNumber(args!![i]).toFloat()
-}
-
 class ScreenMetrics {
     @Volatile var top = 0.0
     @Volatile var right = 0.0
     @Volatile var bottom = 0.0
     @Volatile var left = 0.0
     @Volatile var keyboard = 0.0
-}
-
-private class UiApi(
-    private val screen: () -> Pair<Double, Double>,
-    private val metrics: ScreenMetrics,
-) : ScriptableObject() {
-    override fun getClassName(): String = "ui"
-
-    override fun get(name: String, start: Scriptable?): Any {
-        val (w, h) = screen()
-        return when (name) {
-            "w", "W" -> w
-            "h", "H" -> h
-            "keyboard" -> metrics.keyboard
-            "safe" -> safeObject(start)
-            else -> NOT_FOUND
-        }
-    }
-
-    private fun safeObject(start: Scriptable?): Scriptable {
-        val cx = JsContext.getCurrentContext()
-        val obj = cx.newObject(start ?: this)
-        ScriptableObject.putProperty(obj, "top", metrics.top)
-        ScriptableObject.putProperty(obj, "right", metrics.right)
-        ScriptableObject.putProperty(obj, "bottom", metrics.bottom)
-        ScriptableObject.putProperty(obj, "left", metrics.left)
-        return obj
-    }
 }
 
 private class OverlayWindow(

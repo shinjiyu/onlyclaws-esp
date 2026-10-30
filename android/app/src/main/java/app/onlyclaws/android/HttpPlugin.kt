@@ -2,12 +2,6 @@ package app.onlyclaws.android
 
 import org.json.JSONArray
 import org.json.JSONObject
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.NativeJSON
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Undefined
 
 /**
  * Blocking request on the script thread.
@@ -21,63 +15,31 @@ import org.mozilla.javascript.Undefined
 class HttpPlugin : JsPlugin {
     private val call = HttpCall(HttpCall.client())
 
-    override fun install(cx: JsContext, scope: Scriptable) {
-        val api = Api()
-        api.parentScope = scope
-        ScriptableObject.putProperty(scope, "http", api)
+    override fun install(scope: JsScope) = scope.define("http") {
+        fn("request") { request(it.json(0)) }
     }
 
-    private fun request(cx: JsContext, scope: Scriptable, arg: Any?): Scriptable {
-        val spec = readSpec(cx, scope, arg)
+    private fun request(arg: String?): Map<String, Any> {
+        val spec = readSpec(arg)
         val outcome = if (spec.error.isNotEmpty()) {
             HttpOutcome(0, "", spec.error, emptyMap())
         } else {
             call.perform(spec.spec)
         }
-        return reply(cx, scope, outcome)
-    }
-
-    private fun reply(cx: JsContext, scope: Scriptable, outcome: HttpOutcome): Scriptable {
-        val obj = cx.newObject(scope)
-        ScriptableObject.putProperty(obj, "status", outcome.status)
-        ScriptableObject.putProperty(obj, "body", outcome.body)
-        ScriptableObject.putProperty(obj, "error", outcome.error)
-        val headers = cx.newObject(scope)
-        for ((name, value) in outcome.headers) {
-            ScriptableObject.putProperty(headers, name, value)
-        }
-        ScriptableObject.putProperty(obj, "headers", headers)
-        return obj
-    }
-
-    private inner class Api : ScriptableObject() {
-        override fun getClassName(): String = "http"
-
-        override fun get(name: String, start: Scriptable?): Any = when (name) {
-            "request" -> requestFn
-            else -> NOT_FOUND
-        }
-
-        private val requestFn = object : BaseFunction() {
-            override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-                return request(cx, scope, args?.firstOrNull())
-            }
-        }
+        return mapOf(
+            "status" to outcome.status,
+            "body" to outcome.body,
+            "error" to outcome.error,
+            "headers" to LinkedHashMap(outcome.headers),
+        )
     }
 }
 
 private data class SpecRead(val spec: HttpSpec, val error: String)
 
-private fun readSpec(cx: JsContext, scope: Scriptable, arg: Any?): SpecRead {
-    val json = when (arg) {
-        null, is Undefined -> null
-        is String -> runCatching { JSONObject(arg) }.getOrNull()
-        is JSONObject -> arg
-        else -> runCatching {
-            val text = NativeJSON.stringify(cx, scope, arg, null, null) as? String ?: return SpecRead(HttpSpec(""), "缺少 url")
-            JSONObject(text)
-        }.getOrNull()
-    } ?: return SpecRead(HttpSpec(""), "缺少 url")
+private fun readSpec(arg: String?): SpecRead {
+    val json = arg?.let { runCatching { JSONObject(it) }.getOrNull() }
+        ?: return SpecRead(HttpSpec(""), "缺少 url")
 
     val headers = LinkedHashMap<String, String>()
     when (val raw = json.opt("headers")) {
