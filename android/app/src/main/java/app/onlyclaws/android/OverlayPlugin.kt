@@ -22,8 +22,9 @@ import kotlin.math.hypot
 
 /**
  * Transparent overlay. A script that defines `onFrame` is pumped by this
- * plugin. The page itself is a WebView: `web.load` / `web.url` / `web.eval`.
- * Drawing is the page's own canvas and WebGL.
+ * plugin. Scripts draw with `gfx` into a system overlay. `onFrame` is
+ * pumped here. Pointer hits on drawn pixels call `onPointer`.
+ * The page (`web`) is a separate plugin.
  */
 class OverlayPlugin(
     private val app: Context,
@@ -34,7 +35,7 @@ class OverlayPlugin(
     val metrics = ScreenMetrics()
     private val buffer = SceneBuffer(onLog)
     private val window = OverlayWindow(app, onLog, ::onPointer)
-    private val web = WebOverlay(app, onLog, ::stopPage)
+    val web = WebOverlay(app, onLog, ::stopPage)
     private var saved = Frame.EMPTY
     private var pumping = false
     private var lastNanos = 0L
@@ -65,7 +66,67 @@ class OverlayPlugin(
                 )
             }
         }
-        web.install(scope)
+        val measure = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16f }
+        scope.define("gfx") {
+            fn("clear") { args ->
+                if (allowed()) buffer.fill(argb(args.number(0)))
+            }
+            fn("rect") { args ->
+                require(args.size >= 5) { "gfx.rect(x, y, w, h, color)" }
+                if (allowed()) {
+                    buffer.add(
+                        Op.Rect(
+                            args.number(0).toFloat(),
+                            args.number(1).toFloat(),
+                            args.number(2).toFloat(),
+                            args.number(3).toFloat(),
+                            argb(args.number(4)),
+                        ),
+                    )
+                }
+            }
+            fn("line") { args ->
+                require(args.size >= 5) { "gfx.line(x1, y1, x2, y2, color)" }
+                if (allowed()) {
+                    buffer.add(
+                        Op.Line(
+                            args.number(0).toFloat(),
+                            args.number(1).toFloat(),
+                            args.number(2).toFloat(),
+                            args.number(3).toFloat(),
+                            argb(args.number(4)),
+                        ),
+                    )
+                }
+            }
+            fn("circle") { args ->
+                require(args.size >= 4) { "gfx.circle(x, y, r, color)" }
+                if (allowed()) {
+                    buffer.add(
+                        Op.Circle(
+                            args.number(0).toFloat(),
+                            args.number(1).toFloat(),
+                            args.number(2).toFloat(),
+                            argb(args.number(3)),
+                        ),
+                    )
+                }
+            }
+            fn("text") { args ->
+                require(args.size >= 4) { "gfx.text(x, y, text, color)" }
+                if (allowed()) {
+                    buffer.add(
+                        Op.Text(
+                            args.number(0).toFloat(),
+                            args.number(1).toFloat(),
+                            args.string(2),
+                            argb(args.number(3)),
+                        ),
+                    )
+                }
+            }
+            fn("text_width") { args -> measure.measureText(args.string(0)).toDouble() }
+        }
     }
 
     override fun beforeSwap() {
@@ -306,6 +367,7 @@ private class OverlayWindow(
             try {
                 wm.addView(stage, params)
                 added = true
+                (app as? OcApp)?.chat?.raise()
             } catch (_: Throwable) {
                 if (!failed) {
                     failed = true
@@ -392,7 +454,10 @@ private class OverlayWindow(
             if (region.isEmpty) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0
         if (params.flags != flags) {
             params.flags = flags
-            if (added) wm.updateViewLayout(stage, params)
+            if (added) {
+                wm.updateViewLayout(stage, params)
+                (app as? OcApp)?.chat?.raise()
+            }
         }
         if (!ok && !region.isEmpty) {
             // keep receiving touches; onTouch still filters misses for gesture tracking
@@ -444,6 +509,14 @@ private class OverlayWindow(
             canvas.restore()
         }
     }
+}
+
+private fun argb(n: Double): Int {
+    if (n.isNaN()) return Color.TRANSPARENT
+    val bits = n.toLong() and 0xFFFFFFFFL
+    if (bits == 0L) return Color.TRANSPARENT
+    val color = if (bits <= 0xFFFFFFL) 0xFF000000L or bits else bits
+    return color.toInt()
 }
 
 private fun screenPx(wm: WindowManager): Pair<Int, Int> {

@@ -30,30 +30,38 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Login stays on screen. Every other page is loaded off to the side,
- * not touchable, so the phone can be used while the script browses.
+ * Login stays on screen. Browse URLs sit off-screen and muted.
+ * `web.float` puts a transparent WebView on the system overlay so a page
+ * (or a video) can play over other apps.
  *
  *   web.load("<html>…</html>")
+ *   web.float("<html>…</html>")  // or https://…
  *   web.url("https://…")
  *   web.eval("document.title")
+ *   web.touch(true)
  *   web.clear()
  *   web.loggedIn()
  *   web.showing()
  *
  * A Bilibili login URL stays up until SESSDATA is set, then the page is put away.
  * Leaving that login URL for the rest of Bilibili does not show the home page.
+ * Float needs overlay permission. It is not muted. Touches pass through until
+ * `web.touch(true)`.
  */
 @SuppressLint("SetJavaScriptEnabled")
 class WebOverlay(
     private val app: Context,
     private val onLog: (String) -> Unit,
     private val onStop: () -> Unit = {},
-) {
+) : JsPlugin {
     private val main = Handler(Looper.getMainLooper())
     private var host: ViewGroup? = null
     private var view: WebView? = null
     private var chrome: LinearLayout? = null
     private var quietRoot: FrameLayout? = null
+    private var floatRoot: FrameLayout? = null
+    private var floatParams: WindowManager.LayoutParams? = null
+    private var floatTouchable = false
     private val wanted = AtomicBoolean(false)
     private val shown = AtomicBoolean(false)
     private var closeWhenLoggedIn = false
@@ -93,6 +101,8 @@ class WebOverlay(
         closeWhenLoggedIn = false
         main.removeCallbacks(watchLogin)
         wanted.set(true)
+        releaseFloat()
+        releaseQuiet()
         val page = ensure()
         page.setBackgroundColor(Color.TRANSPARENT)
         page.loadDataWithBaseURL(ORIGIN, html, "text/html", "utf-8", null)
@@ -102,7 +112,11 @@ class WebOverlay(
 
     fun url(url: String) = main.post { open(url) }
 
+    /** Transparent page on the system overlay. HTML, or an http(s) URL. */
+    fun float(src: String) = main.post { openFloat(src) }
+
     private fun open(url: String) {
+        releaseFloat()
         val login = loginForm(url)
         if (login && hasSession()) {
             closeWhenLoggedIn = false
@@ -137,6 +151,33 @@ class WebOverlay(
         onLog("后台打开 $url")
     }
 
+    private fun openFloat(src: String) {
+        if (!Settings.canDrawOverlays(app)) {
+            onLog("浮层未授权")
+            return
+        }
+        closeWhenLoggedIn = false
+        main.removeCallbacks(watchLogin)
+        wanted.set(true)
+        hideChrome()
+        releaseQuiet()
+        val page = ensure()
+        page.setBackgroundColor(Color.TRANSPARENT)
+        page.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        page.settings.mediaPlaybackRequiresUserGesture = false
+        page.visibility = View.VISIBLE
+        holdFloat(page)
+        applyFloatInput()
+        if (src.startsWith("https://") || src.startsWith("http://")) {
+            page.loadUrl(src)
+        } else {
+            page.loadDataWithBaseURL(ORIGIN, src, "text/html", "utf-8", null)
+        }
+        shown.set(true)
+        OcService.updateNote(app, "浮层页面在播")
+        onLog("浮层页面已打开")
+    }
+
     /** Runs on the page and returns its result. Does not bring a closed page back. */
     fun eval(code: String): String {
         val latch = CountDownLatch(1)
@@ -165,26 +206,34 @@ class WebOverlay(
 
     fun showing(): Boolean = shown.get()
 
-    /** Kept so older scripts can call it. The page already receives touches. */
-    fun touch(@Suppress("UNUSED_PARAMETER") on: Boolean) = Unit
+    /** When floating, true takes touches; false lets them pass through to apps below. */
+    fun touch(on: Boolean) = main.post {
+        floatTouchable = on
+        applyFloatInput()
+    }
 
     fun clear() = main.post { dismiss() }
 
     private fun hideVisible() {
         shown.set(false)
         wanted.set(false)
+        hideChrome()
+        releaseFloat()
+    }
+
+    private fun hideChrome() {
         host?.visibility = View.GONE
         chrome?.let { (it.parent as? ViewGroup)?.removeView(it) }
     }
 
     private fun dismiss(reason: String = "页面已收起") {
-        val was = shown.getAndSet(false) || quietRoot != null
+        val was = shown.getAndSet(false) || quietRoot != null || floatRoot != null
         closeWhenLoggedIn = false
         main.removeCallbacks(watchLogin)
         wanted.set(false)
-        host?.visibility = View.GONE
-        chrome?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        hideChrome()
         releaseQuiet()
+        releaseFloat()
         view?.stopLoading()
         view?.loadUrl("about:blank")
         OcService.updateNote(app, app.getString(R.string.note))
@@ -248,6 +297,75 @@ class WebOverlay(
         val wm = app.getSystemService(WindowManager::class.java)
         runCatching { wm?.removeView(root) }
         quietRoot = null
+    }
+
+    private fun holdFloat(page: WebView) {
+        val root = ensureFloat() ?: return
+        if (page.parent != root) {
+            (page.parent as? ViewGroup)?.removeView(page)
+            root.addView(
+                page,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+            )
+        }
+    }
+
+    private fun ensureFloat(): FrameLayout? {
+        floatRoot?.let { if (it.isAttachedToWindow) return it }
+        if (!Settings.canDrawOverlays(app)) return null
+        val wm = app.getSystemService(WindowManager::class.java) ?: return null
+        val root = FrameLayout(app).apply { setBackgroundColor(Color.TRANSPARENT) }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            floatFlags(),
+            PixelFormat.TRANSLUCENT,
+        ).apply { gravity = Gravity.START or Gravity.TOP }
+        return try {
+            wm.addView(root, params)
+            floatRoot = root
+            floatParams = params
+            root
+        } catch (_: Throwable) {
+            onLog("浮层打不开")
+            null
+        }
+    }
+
+    private fun floatFlags(): Int {
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        if (!floatTouchable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        return flags
+    }
+
+    private fun applyFloatInput() {
+        val page = view
+        val focus = floatTouchable
+        page?.isFocusable = focus
+        page?.isFocusableInTouchMode = focus
+        val root = floatRoot ?: return
+        val params = floatParams ?: return
+        val next = floatFlags()
+        if (params.flags == next) return
+        params.flags = next
+        if (root.isAttachedToWindow) {
+            runCatching { app.getSystemService(WindowManager::class.java)?.updateViewLayout(root, params) }
+        }
+    }
+
+    private fun releaseFloat() {
+        val root = floatRoot ?: return
+        val page = view
+        if (page != null && page.parent == root) root.removeView(page)
+        val wm = app.getSystemService(WindowManager::class.java)
+        runCatching { wm?.removeView(root) }
+        floatRoot = null
+        floatParams = null
     }
 
     private fun mute(page: WebView) {
@@ -382,8 +500,9 @@ class WebOverlay(
         }
     }
 
-    fun install(scope: JsScope) = scope.define("web") {
+    override fun install(scope: JsScope) = scope.define("web") {
         fn("load") { load(it.string(0)); Unit }
+        fn("float") { float(it.string(0)); Unit }
         fn("url") { url(it.string(0)); Unit }
         fn("eval") { eval(it.string(0)) }
         fn("clear") { clear(); Unit }

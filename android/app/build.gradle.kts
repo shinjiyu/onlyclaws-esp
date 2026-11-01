@@ -12,8 +12,8 @@ android {
         applicationId = "app.onlyclaws.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.7.0"
+        versionCode = 8
+        versionName = "0.8.0"
         ndk { abiFilters += "arm64-v8a" }
     }
 

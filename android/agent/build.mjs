@@ -48,6 +48,48 @@ if (typeof globalThis.TextDecoder !== "function") {
     }
   };
 }
+if (typeof globalThis.structuredClone !== "function") {
+  globalThis.structuredClone = function structuredClone(value) {
+    var seen = typeof WeakMap === "function" ? new WeakMap() : null;
+    function clone(v) {
+      if (v === null || typeof v !== "object") {
+        if (typeof v === "function" || typeof v === "symbol") {
+          throw new TypeError("structuredClone: " + typeof v + " is not cloneable");
+        }
+        return v;
+      }
+      if (seen) {
+        if (seen.has(v)) throw new TypeError("structuredClone: circular");
+      }
+      if (v instanceof Date) return new Date(v.getTime());
+      if (v instanceof RegExp) return new RegExp(v.source, v.flags);
+      if (typeof ArrayBuffer !== "undefined" && v instanceof ArrayBuffer) return v.slice(0);
+      if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(v)) return new v.constructor(v);
+      if (typeof Map !== "undefined" && v instanceof Map) {
+        var m = new Map();
+        if (seen) seen.set(v, m);
+        v.forEach(function (val, key) { m.set(clone(key), clone(val)); });
+        return m;
+      }
+      if (typeof Set !== "undefined" && v instanceof Set) {
+        var s = new Set();
+        if (seen) seen.set(v, s);
+        v.forEach(function (val) { s.add(clone(val)); });
+        return s;
+      }
+      var out = Array.isArray(v) ? [] : {};
+      if (seen) seen.set(v, out);
+      if (Array.isArray(v)) {
+        for (var i = 0; i < v.length; i++) out[i] = clone(v[i]);
+        return out;
+      }
+      var keys = Object.keys(v);
+      for (var j = 0; j < keys.length; j++) out[keys[j]] = clone(v[keys[j]]);
+      return out;
+    }
+    return clone(value);
+  };
+}
 `,
   },
 });

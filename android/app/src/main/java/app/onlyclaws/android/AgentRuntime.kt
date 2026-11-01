@@ -12,7 +12,6 @@ import com.caoccao.javet.interop.callback.JavetCallbackContext
 import com.caoccao.javet.interop.callback.JavetCallbackType
 import com.caoccao.javet.values.V8Value
 import com.caoccao.javet.values.reference.V8ValueFunction
-import com.caoccao.javet.values.reference.V8ValuePromise
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -95,8 +94,14 @@ class AgentRuntime(private val app: OcApp) {
                 return@execute
             }
             runCatching {
-                fn.callVoid(rt.createV8ValueUndefined(), *arrayOf<V8Value>(rt.createV8ValueString(text)))
+                val result = fn.call<V8Value>(rt.createV8ValueUndefined(), *arrayOf<V8Value>(rt.createV8ValueString(text)))
+                try {
+                    pump(rt)
+                } finally {
+                    result.close()
+                }
             }.onFailure {
+                Log.e(TAG, "prompt", it)
                 emit(AgentEvent("error", JSONObject().put("text", it.message ?: "prompt 失败").toString()))
             }
         }
@@ -220,8 +225,11 @@ class AgentRuntime(private val app: OcApp) {
             fn("timerClear") { args ->
                 timers.remove(intOf(rt, args, 0))?.cancel(false)
             }
-            fn("fetchStart") { args -> fetchStart(rt, string(rt, args, 0), string(rt, args, 1)) }
-            fn("fetchRead") { args -> fetchRead(rt, intOf(rt, args, 0)) }
+            fn("fetchStart") { args -> fetchStart(string(rt, args, 0), string(rt, args, 1)) }
+            fn("fetchRead") { args ->
+                val id = intOf(rt, args, 0)
+                streams[id]?.read() ?: mapOf("done" to true)
+            }
             fn("fetchCancel") { args ->
                 streams.remove(intOf(rt, args, 0))?.close()
             }
@@ -232,75 +240,62 @@ class AgentRuntime(private val app: OcApp) {
             fn("event") { args ->
                 emit(AgentEvent(string(rt, args, 0), string(rt, args, 1)))
             }
+            fn("log") { args ->
+                val line = string(rt, args, 0)
+                Log.i(TAG, line)
+                app.append("agent：$line")
+            }
             rt.globalObject.set("OcaHost", obj)
         }
     }
 
-    private fun fetchStart(rt: V8Runtime, url: String, specJson: String): V8Value {
-        val promise = rt.createV8ValuePromise()
+    private fun fetchStart(url: String, specJson: String): Map<String, Any?> {
         val id = nextStream.getAndIncrement()
+        val spec = JSONObject(specJson)
+        val httpUrl = url.toHttpUrl()
+        if (httpUrl.scheme != "https") throw IllegalArgumentException("只接受 https")
+        val method = spec.optString("method", "GET").uppercase()
+        val builder = Request.Builder().url(httpUrl)
+        val headers = spec.optJSONObject("headers")
+        if (headers != null) {
+            val keys = headers.keys()
+            while (keys.hasNext()) {
+                val name = keys.next()
+                builder.header(name, headers.optString(name))
+            }
+        }
+        val body = spec.optString("body", "").takeIf { spec.has("body") && !spec.isNull("body") && it.isNotEmpty() }
+        if (body != null) {
+            val type = headers?.optString("Content-Type")?.toMediaTypeOrNull()
+            builder.method(method, body.toRequestBody(type))
+        } else {
+            builder.method(method, null)
+        }
+        val done = CountDownLatch(1)
+        var result: Map<String, Any?>? = null
+        var error: Throwable? = null
         io.execute {
             try {
-                val spec = JSONObject(specJson)
-                val httpUrl = url.toHttpUrl()
-                if (httpUrl.scheme != "https") throw IllegalArgumentException("只接受 https")
-                val method = spec.optString("method", "GET").uppercase()
-                val builder = Request.Builder().url(httpUrl)
-                val headers = spec.optJSONObject("headers")
-                if (headers != null) {
-                    val keys = headers.keys()
-                    while (keys.hasNext()) {
-                        val name = keys.next()
-                        builder.header(name, headers.optString(name))
-                    }
-                }
-                val body = spec.optString("body", "").takeIf { spec.has("body") && !spec.isNull("body") && it.isNotEmpty() }
-                if (body != null) {
-                    val type = headers?.optString("Content-Type")?.toMediaTypeOrNull()
-                    builder.method(method, body.toRequestBody(type))
-                } else {
-                    builder.method(method, null)
-                }
                 val response = http.newCall(builder.build()).execute()
                 val headerMap = linkedMapOf<String, String>()
                 for (name in response.headers.names()) {
                     headerMap[name] = response.headers.values(name).joinToString(", ")
                 }
-                val stream = Stream(response)
-                streams[id] = stream
-                thread.execute {
-                    val meta = mapOf("id" to id, "status" to response.code, "headers" to headerMap)
-                    promise.resolve(toV8(rt, meta))
-                    promise.close()
-                }
+                val bytes = response.body?.bytes() ?: ByteArray(0)
+                response.close()
+                streams[id] = Stream(bytes)
+                Log.i(TAG, "fetch $id ${response.code} ${bytes.size}b $url")
+                result = mapOf("id" to id, "status" to response.code, "headers" to headerMap)
             } catch (t: Throwable) {
-                thread.execute {
-                    promise.reject(rt.createV8ValueError(V8ValueErrorType.Error, t.message ?: "fetch"))
-                    promise.close()
-                }
+                Log.e(TAG, "fetch $url", t)
+                error = t
+            } finally {
+                done.countDown()
             }
         }
-        return promise
-    }
-
-    private fun fetchRead(rt: V8Runtime, id: Int): V8Value {
-        val promise = rt.createV8ValuePromise()
-        io.execute {
-            val stream = streams[id]
-            if (stream == null) {
-                thread.execute {
-                    promise.resolve(toV8(rt, mapOf("done" to true)))
-                    promise.close()
-                }
-                return@execute
-            }
-            val part = stream.read()
-            thread.execute {
-                promise.resolve(toV8(rt, part))
-                promise.close()
-            }
-        }
-        return promise
+        if (!done.await(180, TimeUnit.SECONDS)) throw IllegalStateException("fetch 超时")
+        error?.let { throw it }
+        return result ?: throw IllegalStateException("fetch 没有返回")
     }
 
     private fun fireTimer(id: Int) {
@@ -309,7 +304,13 @@ class AgentRuntime(private val app: OcApp) {
             rt.globalObject.get<com.caoccao.javet.values.reference.V8ValueObject>("OcaHost").use { host ->
                 host.invokeVoid("onTimer", id)
             }
+            pump(rt)
         }
+    }
+
+    /** Drain microtasks without waiting for pending host/timer promises. */
+    private fun pump(rt: V8Runtime) {
+        repeat(64) { runCatching { rt.getExecutor("void 0").executeVoid() } }
     }
 
     private fun emit(event: AgentEvent) {
@@ -335,25 +336,18 @@ class AgentRuntime(private val app: OcApp) {
         else -> rt.converter.toV8Value(rt, value)
     }
 
-    private class Stream(private val response: okhttp3.Response) {
-        private val source = response.body?.source()
+    private class Stream(bytes: ByteArray) {
+        private val data = bytes
+        private var offset = 0
         fun read(): Map<String, Any> {
-            val src = source ?: return mapOf("done" to true)
-            return try {
-                if (!src.request(1)) {
-                    close()
-                    mapOf("done" to true)
-                } else {
-                    val buf = src.readByteArray(minOf(8192L, src.buffer.size))
-                    mapOf("done" to false, "b64" to Base64.encodeToString(buf, Base64.NO_WRAP))
-                }
-            } catch (_: Throwable) {
-                close()
-                mapOf("done" to true)
-            }
+            if (offset >= data.size) return mapOf("done" to true)
+            val end = minOf(offset + 8192, data.size)
+            val buf = data.copyOfRange(offset, end)
+            offset = end
+            return mapOf("done" to false, "b64" to Base64.encodeToString(buf, Base64.NO_WRAP))
         }
         fun close() {
-            runCatching { response.close() }
+            offset = data.size
         }
     }
 

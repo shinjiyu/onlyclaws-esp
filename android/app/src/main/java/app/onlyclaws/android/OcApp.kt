@@ -27,18 +27,24 @@ class OcApp : Application() {
         overlay = OverlayPlugin(this, container) { line -> append(line) }
         a2ui = A2uiPlugin(this, container) { line -> append(line) }
         desk = DeskPlugin(container) { line -> append(line) }
-        tts = TtsPlugin(this, container) { line -> append(line) }
+        tts = TtsPlugin(this, container, asr) { line -> append(line) }
+        asr.onBargeIn = { tts.interrupt() }
         wallpaper = WallpaperPlugin(this) { line -> append(line) }
         http = HttpPlugin()
         keys = KeysPlugin(filesDir)
+        agent = AgentRuntime(this)
+        asrPlugin = AsrPlugin(asr, container) { line -> append(line) }
+        llm = LlmPlugin(agent.store)
         container.use(overlay)
+        container.use(overlay.web)
         container.use(a2ui)
         container.use(desk)
         container.use(tts)
         container.use(wallpaper)
         container.use(http)
         container.use(keys)
-        agent = AgentRuntime(this)
+        container.use(asrPlugin)
+        container.use(llm)
         chat = ChatOverlay(this)
         reloadScript()
         watchActiveFile()
@@ -53,11 +59,11 @@ class OcApp : Application() {
     @Volatile var lastScriptError: ScriptError? = null
         private set
 
-    /** Every script goes in here. Scripts the harness wrote get no keys, web page, or desk. */
+    /** Generated scripts get the host surface, not keys, web, or the desk. */
     fun load(source: String, done: (Result<Unit>) -> Unit) {
         val generated = source.startsWith(HarnessText.MARK)
         val allow: (JsPlugin) -> Boolean = if (generated) {
-            { it === a2ui || it === tts || it === http || it === wallpaper }
+            { it === overlay || it === a2ui || it === tts || it === http || it === wallpaper || it === asrPlugin || it === llm }
         } else {
             { true }
         }
@@ -80,6 +86,10 @@ class OcApp : Application() {
     lateinit var http: HttpPlugin
         private set
     lateinit var keys: KeysPlugin
+        private set
+    lateinit var asrPlugin: AsrPlugin
+        private set
+    lateinit var llm: LlmPlugin
         private set
 
     fun reloadScript() {

@@ -65,7 +65,10 @@ class OcService : Service() {
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(1, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            runCatching { startForeground(1, note, types) }
+                .onFailure { startForeground(1, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) }
         } else {
             startForeground(1, note)
         }

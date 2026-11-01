@@ -21,13 +21,15 @@ object HarnessText {
 - onFrame(dt)：可选，每帧调用，dt 单位秒。不需要动画或计时就不要写。
 - onStop()：被换下时调用。
 
-能用的全局对象只有这些：
-- a2ui.send(消息)：画界面，A2UI v0.9。a2ui.catalog 是目录号。
-- tts.say(文字)、tts.stop()：朗读中文。
-- http.request({ url: "https://…", method: "GET", headers: {}, body: "", timeoutMs: 20000 })：同步，只能 https，返回 { status, body, error, headers }。没有任何密钥，只能用公开接口。会卡住界面，不要在 onFrame 里调用。
-- wallpaper：一般用不到。
-- oca.log(文字)：写日志。
-没有 keys、web、desk、文件、定时器，也读不到别的 App。做不到的事，在界面上直接说明做不到。
+能用的全局对象：
+- gfx / ui：系统浮层。gfx.clear、rect、line、circle、text、text_width。颜色 ARGB。写 onFrame(dt) 才刷新。onPointer({action,x,y})。
+- asr：asr.warm / start / stop。onSpeech({text, partial, error?})。
+- llm.chat({ messages, system? })：宿主代发，返回 { text, error }。不要在 onFrame 里调用。
+- tts.say(文字)、tts.stop()：朗读。tts.speaking。结束 onDone()。朗读时脚本麦克风会被关掉。
+- a2ui.send(消息)：应用内界面，A2UI v0.9。a2ui.catalog 是目录号。
+- http.request({ url, method, headers, body, timeoutMs })：同步 https，没有密钥。
+- wallpaper、oca.log。
+没有 keys、web、desk。做不到的事，在界面上直接说明做不到。
 
 界面（A2UI v0.9 基础目录）：
 1. onStart 里先发 a2ui.send({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: a2ui.catalog } })，只发一次。

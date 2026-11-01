@@ -12,13 +12,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Speech is a call, not a frame. `tts.say(text)` returns immediately;
  * when the utterance ends the shell calls `onDone` on the container thread.
+ * While speaking, the script microphone is shut so the pet cannot hear itself.
  */
 class TtsPlugin(
     private val app: Context,
     private val container: JsContainer,
+    private val asr: LocalAsr,
     private val onLog: (String) -> Unit,
 ) : JsPlugin {
     private val ready = AtomicBoolean(false)
+    private val speaking = AtomicBoolean(false)
     private var engine: TextToSpeech? = null
     private var lastId = ""
     private val pending = ArrayDeque<String>()
@@ -75,14 +78,22 @@ class TtsPlugin(
             return
         }
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
+            override fun onStart(utteranceId: String?) {
+                if (utteranceId != lastId) return
+                speaking.set(true)
+                asr.hushScript()
+            }
             override fun onDone(utteranceId: String?) {
                 if (utteranceId != lastId) return
+                finished()
                 container.fire("onDone")
             }
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
+                if (utteranceId != lastId) return
+                finished()
                 onLog("朗读失败")
+                container.fire("onDone")
             }
         })
         ready.set(true)
@@ -90,6 +101,7 @@ class TtsPlugin(
     }
 
     override fun install(scope: JsScope) = scope.define("tts") {
+        getter("speaking") { speaking.get() }
         fn("say") { args ->
             val text = args.string(0)
             require(text.isNotEmpty()) { "tts.say(text)" }
@@ -101,6 +113,7 @@ class TtsPlugin(
     override fun beforeSwap() {
         engine?.stop()
         pending.clear()
+        finished(holdMs = 0)
     }
 
     fun release() {
@@ -123,11 +136,32 @@ class TtsPlugin(
     private fun sayNow(text: String) {
         val id = UUID.randomUUID().toString()
         lastId = id
+        speaking.set(true)
+        asr.hushScript()
         engine?.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), id)
+    }
+
+    fun interrupt() {
+        val was = speaking.get()
+        pending.clear()
+        engine?.stop()
+        finished(holdMs = BARGE_HOLD_MS)
+        if (was) container.fire("onDone")
     }
 
     private fun stop() {
         pending.clear()
         engine?.stop()
+        finished(holdMs = BARGE_HOLD_MS)
+    }
+
+    private fun finished(holdMs: Long = ECHO_HOLD_MS) {
+        speaking.set(false)
+        asr.echoHold(holdMs)
+    }
+
+    companion object {
+        private const val ECHO_HOLD_MS = 900L
+        private const val BARGE_HOLD_MS = 400L
     }
 }

@@ -20,6 +20,48 @@ if (typeof globalThis.TextDecoder !== "function") {
     }
   };
 }
+if (typeof globalThis.structuredClone !== "function") {
+  globalThis.structuredClone = function structuredClone(value) {
+    var seen = typeof WeakMap === "function" ? new WeakMap() : null;
+    function clone(v) {
+      if (v === null || typeof v !== "object") {
+        if (typeof v === "function" || typeof v === "symbol") {
+          throw new TypeError("structuredClone: " + typeof v + " is not cloneable");
+        }
+        return v;
+      }
+      if (seen) {
+        if (seen.has(v)) throw new TypeError("structuredClone: circular");
+      }
+      if (v instanceof Date) return new Date(v.getTime());
+      if (v instanceof RegExp) return new RegExp(v.source, v.flags);
+      if (typeof ArrayBuffer !== "undefined" && v instanceof ArrayBuffer) return v.slice(0);
+      if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(v)) return new v.constructor(v);
+      if (typeof Map !== "undefined" && v instanceof Map) {
+        var m = new Map();
+        if (seen) seen.set(v, m);
+        v.forEach(function (val, key) { m.set(clone(key), clone(val)); });
+        return m;
+      }
+      if (typeof Set !== "undefined" && v instanceof Set) {
+        var s = new Set();
+        if (seen) seen.set(v, s);
+        v.forEach(function (val) { s.add(clone(val)); });
+        return s;
+      }
+      var out = Array.isArray(v) ? [] : {};
+      if (seen) seen.set(v, out);
+      if (Array.isArray(v)) {
+        for (var i = 0; i < v.length; i++) out[i] = clone(v[i]);
+        return out;
+      }
+      var keys = Object.keys(v);
+      for (var j = 0; j < keys.length; j++) out[keys[j]] = clone(v[keys[j]]);
+      return out;
+    }
+    return clone(value);
+  };
+}
 
 (() => {
   var __create = Object.create;
@@ -76217,6 +76259,57 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
     if (typeof globalThis.process === "undefined") {
       globalThis.process = { env: {}, versions: {} };
     }
+    if (typeof globalThis.queueMicrotask !== "function") {
+      globalThis.queueMicrotask = (fn) => Promise.resolve().then(fn);
+    }
+    if (typeof globalThis.structuredClone !== "function") {
+      globalThis.structuredClone = function structuredClone2(value) {
+        const seen = /* @__PURE__ */ new WeakMap();
+        const clone = (v) => {
+          if (v === null || typeof v !== "object") {
+            if (typeof v === "function" || typeof v === "symbol") {
+              throw new TypeError("structuredClone: " + typeof v + " is not cloneable");
+            }
+            return v;
+          }
+          if (seen.has(v)) throw new TypeError("structuredClone: circular");
+          if (v instanceof Date) return new Date(v.getTime());
+          if (v instanceof RegExp) return new RegExp(v.source, v.flags);
+          if (typeof ArrayBuffer !== "undefined" && v instanceof ArrayBuffer) return v.slice(0);
+          if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(v)) return new v.constructor(v);
+          if (v instanceof Map) {
+            const out2 = /* @__PURE__ */ new Map();
+            seen.set(v, out2);
+            v.forEach((val, key) => out2.set(clone(key), clone(val)));
+            return out2;
+          }
+          if (v instanceof Set) {
+            const out2 = /* @__PURE__ */ new Set();
+            seen.set(v, out2);
+            v.forEach((val) => out2.add(clone(val)));
+            return out2;
+          }
+          const out = Array.isArray(v) ? [] : {};
+          seen.set(v, out);
+          if (Array.isArray(v)) {
+            for (let i = 0; i < v.length; i++) out[i] = clone(v[i]);
+            return out;
+          }
+          for (const k of Object.keys(v)) out[k] = clone(v[k]);
+          return out;
+        };
+        return clone(value);
+      };
+    }
+    if (typeof globalThis.performance !== "object" || typeof globalThis.performance.now !== "function") {
+      const origin = Date.now();
+      globalThis.performance = {
+        now() {
+          return Date.now() - origin;
+        },
+        timeOrigin: origin
+      };
+    }
     if (typeof globalThis.crypto === "undefined") {
       globalThis.crypto = {
         getRandomValues(arr) {
@@ -76266,6 +76359,7 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
       constructor() {
         this.aborted = false;
         this.reason = void 0;
+        this.onabort = null;
         this._listeners = [];
       }
       addEventListener(type, fn) {
@@ -76278,6 +76372,23 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
         if (this.aborted) throw this.reason || new Error("aborted");
       }
     }
+    AbortSignalPolyfill.timeout = function(ms) {
+      const c = new AbortControllerPolyfill();
+      setTimeout(() => c.abort(Object.assign(new Error("timeout"), { name: "TimeoutError" })), Math.max(0, Number(ms) || 0));
+      return c.signal;
+    };
+    AbortSignalPolyfill.any = function(signals) {
+      const c = new AbortControllerPolyfill();
+      for (const s of signals || []) {
+        if (!s) continue;
+        if (s.aborted) {
+          c.abort(s.reason);
+          break;
+        }
+        s.addEventListener("abort", () => c.abort(s.reason));
+      }
+      return c.signal;
+    };
     class AbortControllerPolyfill {
       constructor() {
         this.signal = new AbortSignalPolyfill();
@@ -76286,12 +76397,17 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
         if (this.signal.aborted) return;
         this.signal.aborted = true;
         this.signal.reason = reason || new Error("aborted");
-        for (const fn of this.signal._listeners) fn({ type: "abort" });
+        const ev = { type: "abort" };
+        if (typeof this.signal.onabort === "function") this.signal.onabort(ev);
+        for (const fn of this.signal._listeners) fn(ev);
       }
     }
     if (typeof globalThis.AbortController === "undefined") {
       globalThis.AbortController = AbortControllerPolyfill;
       globalThis.AbortSignal = AbortSignalPolyfill;
+    } else {
+      if (typeof AbortSignal.timeout !== "function") AbortSignal.timeout = AbortSignalPolyfill.timeout;
+      if (typeof AbortSignal.any !== "function") AbortSignal.any = AbortSignalPolyfill.any;
     }
     class HeadersPolyfill {
       constructor(init) {
@@ -76306,6 +76422,14 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
       set(k, v) {
         this._map.set(String(k).toLowerCase(), String(v));
       }
+      append(k, v) {
+        const key = String(k).toLowerCase();
+        const prev = this._map.get(key);
+        this._map.set(key, prev ? prev + ", " + String(v) : String(v));
+      }
+      delete(k) {
+        this._map.delete(String(k).toLowerCase());
+      }
       get(k) {
         return this._map.get(String(k).toLowerCase()) ?? null;
       }
@@ -76313,13 +76437,25 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
         return this._map.has(String(k).toLowerCase());
       }
       forEach(fn) {
-        for (const [k, v] of this._map) fn(v, k, this);
+        this._map.forEach((v, k) => fn(v, k, this));
+      }
+      keys() {
+        const out = [];
+        this._map.forEach((_, k) => out.push(k));
+        return out;
+      }
+      values() {
+        const out = [];
+        this._map.forEach((v) => out.push(v));
+        return out;
       }
       entries() {
-        return this._map.entries();
+        const out = [];
+        this._map.forEach((v, k) => out.push([k, v]));
+        return out;
       }
       [Symbol.iterator]() {
-        return this._map.entries();
+        return this.entries()[Symbol.iterator]();
       }
     }
     if (typeof globalThis.atob !== "function") {
@@ -76357,25 +76493,40 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
       return out;
     }
     class ResponsePolyfill {
-      constructor(id, status, headers) {
-        this._id = id;
-        this.status = status;
-        this.ok = status >= 200 && status < 300;
+      constructor(body, init) {
+        if (typeof init === "number") {
+          this._id = body;
+          this.status = init;
+          this.headers = new HeadersPolyfill(arguments[2]);
+          this.url = "";
+        } else {
+          init = init || {};
+          this._id = init._id;
+          this._inline = body;
+          this.status = init.status || 200;
+          this.headers = new HeadersPolyfill(init.headers);
+          this.url = init.url || "";
+        }
+        this.ok = this.status >= 200 && this.status < 300;
         this.statusText = "";
-        this.headers = new HeadersPolyfill(headers);
         const self = this;
         this.body = {
           getReader() {
             return {
               read() {
-                return host.fetchRead(self._id).then((part) => {
-                  if (part.done) return { done: true, value: void 0 };
-                  return { done: false, value: b64ToBytes(part.b64) };
-                });
+                const part = host.fetchRead(self._id);
+                const decode = (p) => {
+                  if (!p || p.done) return { done: true, value: void 0 };
+                  return { done: false, value: b64ToBytes(p.b64) };
+                };
+                if (part && typeof part.then === "function") return part.then(decode);
+                return Promise.resolve(decode(part));
               },
               cancel() {
                 host.fetchCancel(self._id);
                 return Promise.resolve();
+              },
+              releaseLock() {
               }
             };
           }
@@ -76408,23 +76559,230 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
         return this;
       }
     }
+    globalThis.URLSearchParams = class {
+      constructor(init) {
+        this._pairs = [];
+        if (typeof init === "string") {
+          const raw = init.startsWith("?") ? init.slice(1) : init;
+          for (const part of raw.split("&")) {
+            if (!part) continue;
+            const i = part.indexOf("=");
+            this.append(decodeURIComponent((i < 0 ? part : part.slice(0, i)).replace(/\+/g, " ")), decodeURIComponent((i < 0 ? "" : part.slice(i + 1)).replace(/\+/g, " ")));
+          }
+        } else if (Array.isArray(init)) {
+          for (const row of init) this.append(row[0], row[1]);
+        } else if (init && typeof init === "object") {
+          if (typeof init.forEach === "function") init.forEach((v, k) => this.append(k, v));
+          else for (const [k, v] of Object.entries(init)) this.append(k, v);
+        }
+      }
+      append(k, v) {
+        this._pairs.push([String(k), String(v)]);
+      }
+      set(k, v) {
+        this._pairs = this._pairs.filter((p) => p[0] !== String(k));
+        this.append(k, v);
+      }
+      get(k) {
+        const found = this._pairs.find((p) => p[0] === String(k));
+        return found ? found[1] : null;
+      }
+      forEach(fn) {
+        for (const [k, v] of this._pairs) fn(v, k, this);
+      }
+      entries() {
+        return this._pairs.slice();
+      }
+      keys() {
+        return this._pairs.map((p) => p[0]);
+      }
+      values() {
+        return this._pairs.map((p) => p[1]);
+      }
+      [Symbol.iterator]() {
+        return this._pairs[Symbol.iterator]();
+      }
+      toString() {
+        return this._pairs.map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&");
+      }
+    };
+    globalThis.URL = class {
+      constructor(input, base) {
+        let href = String(input || "");
+        if (base && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) {
+          const b = String(base);
+          if (href.startsWith("/")) {
+            const origin = b.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/]+/);
+            href = (origin ? origin[0] : b.replace(/\/+$/, "")) + href;
+          } else {
+            href = b.replace(/\/?$/, "/") + href.replace(/^\.\//, "");
+          }
+        }
+        this.href = href;
+        const m = href.match(/^([a-zA-Z][a-zA-Z0-9+.-]*:)\/\/([^/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/);
+        this.protocol = m ? m[1] : "";
+        this.host = m ? m[2] : "";
+        this.hostname = this.host.split(":")[0];
+        this.port = this.host.includes(":") ? this.host.split(":").slice(1).join(":") : "";
+        this.pathname = m && m[3] ? m[3] : "/";
+        this.search = m && m[4] ? m[4] : "";
+        this.hash = m && m[5] ? m[5] : "";
+        this.origin = this.protocol && this.host ? this.protocol + "//" + this.host : "";
+        this.searchParams = new URLSearchParams(this.search);
+      }
+      toString() {
+        return this.href;
+      }
+    };
     if (typeof globalThis.Headers === "undefined") globalThis.Headers = HeadersPolyfill;
+    if (typeof globalThis.FormData !== "function") {
+      globalThis.FormData = class FormData {
+        constructor() {
+          this._pairs = [];
+        }
+        append(k, v) {
+          this._pairs.push([String(k), v]);
+        }
+        set(k, v) {
+          this._pairs = this._pairs.filter((p) => p[0] !== String(k));
+          this.append(k, v);
+        }
+        get(k) {
+          const found = this._pairs.find((p) => p[0] === String(k));
+          return found ? found[1] : null;
+        }
+        has(k) {
+          return this._pairs.some((p) => p[0] === String(k));
+        }
+        forEach(fn) {
+          for (const [k, v] of this._pairs) fn(v, k, this);
+        }
+        entries() {
+          return this._pairs.slice();
+        }
+        [Symbol.iterator]() {
+          return this._pairs[Symbol.iterator]();
+        }
+      };
+    }
+    if (typeof globalThis.Blob !== "function") {
+      globalThis.Blob = class Blob {
+        constructor(parts, opts) {
+          this._parts = parts || [];
+          this.type = opts && opts.type || "";
+          this.size = 0;
+        }
+      };
+    }
+    if (typeof globalThis.File !== "function") {
+      globalThis.File = class File extends globalThis.Blob {
+        constructor(parts, name, opts) {
+          super(parts, opts);
+          this.name = name || "file";
+        }
+      };
+    }
+    function headersToObject(headers) {
+      const out = {};
+      if (!headers) return out;
+      const inner = headers.values && headers.nulls && typeof headers.values.forEach === "function" ? headers.values : headers;
+      if (typeof inner.forEach === "function") {
+        inner.forEach((v, k) => {
+          if (v != null) out[k] = String(v);
+        });
+        return out;
+      }
+      if (typeof inner.entries === "function") {
+        for (const [k, v] of inner.entries()) {
+          if (v != null) out[k] = String(v);
+        }
+        return out;
+      }
+      for (const [k, v] of Object.entries(inner)) {
+        if (v == null || typeof v === "object") continue;
+        out[k] = String(v);
+      }
+      return out;
+    }
+    function bodyToString(body) {
+      if (body == null) return null;
+      if (typeof body === "string") return body;
+      if (body instanceof Uint8Array) return new TextDecoder().decode(body);
+      if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
+      if (typeof body === "object" && typeof body.byteLength === "number") {
+        return new TextDecoder().decode(body);
+      }
+      return String(body);
+    }
     globalThis.fetch = function(input, init) {
-      const url = typeof input === "string" ? input : input && input.url;
+      const url = typeof input === "string" ? input : input && (input.url || input.href);
       const spec = {
         method: init && init.method || "GET",
         headers: {},
-        body: init && init.body != null ? String(init.body) : null
+        body: bodyToString(init && init.body)
       };
       const headers = init && init.headers;
-      if (headers) {
-        if (typeof headers.forEach === "function") headers.forEach((v, k) => spec.headers[k] = v);
-        else Object.assign(spec.headers, headers);
-      }
-      return host.fetchStart(url, JSON.stringify(spec)).then((meta) => {
-        return new ResponsePolyfill(meta.id, meta.status, meta.headers);
-      });
+      if (headers) Object.assign(spec.headers, headersToObject(headers));
+      host.log("fetch " + spec.method + " " + url);
+      const meta = host.fetchStart(url, JSON.stringify(spec));
+      return Promise.resolve(new ResponsePolyfill(null, { _id: meta.id, status: meta.status, headers: meta.headers, url }));
     };
+    if (typeof globalThis.Response !== "function") globalThis.Response = ResponsePolyfill;
+    if (typeof globalThis.Request !== "function") {
+      globalThis.Request = class {
+        constructor(input, init) {
+          init = init || {};
+          this.url = typeof input === "string" ? input : input && (input.url || input.href);
+          this.method = String(init.method || "GET").toUpperCase();
+          this.headers = new HeadersPolyfill(init.headers);
+          this.body = init.body;
+          this.signal = init.signal;
+        }
+      };
+    }
+    if (typeof globalThis.ReadableStream !== "function") {
+      globalThis.ReadableStream = class {
+        constructor(source) {
+          this._source = source || {};
+          this._queue = [];
+          this._closed = false;
+          this._booted = false;
+        }
+        getReader() {
+          const stream6 = this;
+          const ctrl = {
+            enqueue(v) {
+              stream6._queue.push(v);
+            },
+            close() {
+              stream6._closed = true;
+            },
+            error() {
+              stream6._closed = true;
+            }
+          };
+          if (!this._booted) {
+            this._booted = true;
+            try {
+              this._source.start && this._source.start(ctrl);
+            } catch (_) {
+            }
+          }
+          return {
+            async read() {
+              if (stream6._source.pull) await stream6._source.pull(ctrl);
+              if (stream6._queue.length) return { done: false, value: stream6._queue.shift() };
+              return { done: true, value: void 0 };
+            },
+            cancel() {
+              return Promise.resolve(stream6._source.cancel && stream6._source.cancel());
+            },
+            releaseLock() {
+            }
+          };
+        }
+      };
+    }
   }
 
   // src/entry.js
@@ -76435,16 +76793,27 @@ ${JSON.stringify(toolCall.arguments, null, 2)}`;
 \u4E0D\u8981\u9884\u88C5\u4EFB\u4F55\u5E94\u7528\u3002\u6CA1\u6709\u5728\u8DD1\u7684\u754C\u9762\u65F6\uFF0C\u4FDD\u6301\u7A7A\u767D\u3002
 
 apps_install \u4F1A\u628A\u4E00\u6BB5 JavaScript \u88C5\u8FDB\u672C\u673A\u811A\u672C\u5BB9\u5668\u3002\u811A\u672C\u73AF\u5883\u662F V8\uFF0Chost API \u662F\u540C\u6B65\u7684\uFF0C\u6CA1\u6709 setTimeout\u3002
-\u94A9\u5B50\u5FC5\u987B\u5199\u6210 function onStart() / onAction(e) / onFrame(dt) / onStop()\u3002
-\u751F\u6210\u811A\u672C\u53EF\u7528\uFF1Aa2ui\uFF08v0.9\uFF09\u3001tts\u3001http.request\uFF08\u540C\u6B65 https\uFF09\u3001wallpaper\u3001oca.log\u3002
+\u94A9\u5B50\u5FC5\u987B\u5199\u6210 function \u58F0\u660E\uFF1AonStart() / onStop() / onFrame(dt) / onAction(e) / onPointer(e) / onSpeech(e) / onDone()\u3002
+\u751F\u6210\u811A\u672C\u53EF\u7528\uFF1Aa2ui\u3001gfx\u3001ui\u3001tts\u3001asr\u3001llm\u3001http.request\uFF08\u540C\u6B65 https\uFF09\u3001wallpaper\u3001oca.log\u3002
 \u6CA1\u6709 keys\u3001web\u3001desk\u3002\u505A\u4E0D\u5230\u7684\u4E8B\u5148\u5728\u804A\u5929\u91CC\u8BF4\u3002
 
-\u754C\u9762\uFF08A2UI v0.9\uFF09\uFF1A
+\u6D6E\u5C42\uFF08\u76D6\u4F4F\u5176\u5B83 App\uFF0C\u8981\u7CFB\u7EDF\u300C\u663E\u793A\u5728\u5176\u4ED6\u5E94\u7528\u4E0A\u5C42\u300D\uFF09\uFF1A
+- ui.w / ui.h / ui.safe\uFF1A\u903B\u8F91\u50CF\u7D20\u3002
+- gfx.clear(color)\u3001gfx.rect(x,y,w,h,color)\u3001gfx.line\u3001gfx.circle(x,y,r,color)\u3001gfx.text(x,y,text,color)\u3001gfx.text_width(text)\u3002
+- \u989C\u8272\u662F ARGB \u6570\u5B57\uFF1B6 \u4F4D\u5F53\u4E0D\u900F\u660E\u3002clear(0) \u6E05\u7A7A\u3002\u6BCF\u5E27\u5148 clear \u518D\u753B\u3002
+- \u5199 function onFrame(dt) \u624D\u4F1A\u6BCF\u5E27\u5237\u65B0\u3002\u70B9\u5728\u753B\u51FA\u6765\u7684\u50CF\u7D20\u4E0A\u4F1A onPointer({ action, x, y })\uFF0Caction \u662F down/move/up/cancel\u3002
+
+\u8BED\u97F3\uFF1Aasr.warm()\uFF1Basr.ready / asr.hasModel / asr.listening / asr.deaf\u3002\u6309\u4F4F\u89D2\u8272 asr.start()\uFF0C\u677E\u5F00 asr.stop()\u3002\u53EA\u5728\u6309\u4F4F\u8BF4\u8BDD\u65F6 start\uFF0C\u4E0D\u8981\u5728\u62D6\u52A8\u65F6 start\u3002\u8BC6\u522B\u8D70 onSpeech({ text, partial, error? })\u3002partial \u4E3A false \u624D\u662F\u4E00\u53E5\u5B8C\u6574\u7684\u8BDD\u3002\u804A\u5929\u7403\u7684\u300C\u8BF4\u300D\u4F1A\u62A2\u8D70\u9EA6\u514B\u98CE\uFF0C\u8FD9\u65F6 asr.start \u5931\u8D25\uFF0ConSpeech \u5E26 error\u3002
+
+\u6A21\u578B\u51B3\u7B56\uFF1Allm.ready / llm.provider / llm.model\u3002llm.chat({ messages:[{role,content}], system? }) \u540C\u6B65\u8FD4\u56DE { text, error, provider, model }\u3002key \u7531\u5BBF\u4E3B\u4EE3\u53D1\uFF0C\u811A\u672C\u62FF\u4E0D\u5230\u3002\u53EA\u652F\u6301 OpenAI \u517C\u5BB9\u540E\u7AEF\u3002\u4E0D\u8981\u5728 onFrame \u91CC\u8C03\u7528\u3002tts.say(text) \u6717\u8BFB\uFF0Ctts.speaking \u4E3A\u771F\uFF1B\u7ED3\u675F onDone()\u3002\u6717\u8BFB\u65F6\u5BBF\u4E3B\u4F1A\u5173\u6389\u811A\u672C\u9EA6\u514B\u98CE\uFF0C\u64AD\u5B8C\u77ED\u65F6\u95F4 asr.deaf\uFF0C\u907F\u514D\u5B83\u542C\u89C1\u81EA\u5DF1\u3002\u4E0D\u8981\u5728 onDone \u91CC\u7ACB\u523B asr.start\u3002
+
+\u5E94\u7528\u5185\u754C\u9762\uFF08A2UI v0.9\uFF09\u4ECD\u53EF\u7528\uFF1A
 1. onStart \u91CC\u5148\u53D1 a2ui.send({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: a2ui.catalog } })\uFF0C\u53EA\u53D1\u4E00\u6B21\u3002
 2. \u6570\u636E\uFF1Aa2ui.send({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/", value: { draft: "" } } })\u3002
 3. \u7EC4\u4EF6\uFF1Aa2ui.send({ version: "v0.9", updateComponents: { surfaceId: "main", components: [...] } })\uFF0C\u5FC5\u987B\u6709 id \u4E3A root \u7684\u7EC4\u4EF6\u3002
+\u8981\u8DB4\u5728\u684C\u9762\u4E0A\u7684\u89D2\u8272\u3001\u684C\u5BA0\uFF0C\u7528 gfx + onFrame + asr + llm + tts\uFF0C\u4E0D\u8981\u53EA\u7528 A2UI\u3002
 
-\u88C5\u4E0A\u5931\u8D25\u65F6\uFF0C\u5DE5\u5177\u4F1A\u8FD4\u56DE\u62A5\u9519\u3001\u51FA\u9519\u7684\u90A3\u4E00\u884C\u548C\u8BD5\u88C5\u65E5\u5FD7\u3002\u6839\u636E\u8FD9\u4E9B\u81EA\u5DF1\u67E5\u539F\u56E0\u518D\u6539\uFF0C\u4E0D\u8981\u7528 try/catch \u628A\u9519\u8BEF\u541E\u6389\u3002`;
+\u88C5\u4E0A\u5931\u8D25\u65F6\uFF0C\u5DE5\u5177\u4F1A\u8FD4\u56DE\u62A5\u9519\u3001\u51FA\u9519\u7684\u90A3\u4E00\u884C\u548C\u8BD5\u88C5\u65E5\u5FD7\u3002\u6839\u636E\u8FD9\u4E9B\u81EA\u5DF1\u6539\u811A\u672C\u518D\u88C5\u3002\u4E0D\u8981\u7528 try/catch \u628A\u9519\u8BEF\u541E\u6389\u3002\u4E0D\u8981\u8BA9\u7528\u6237\u91CD\u542F App\uFF0C\u4E5F\u4E0D\u8981\u8BF4\u5BBF\u4E3B\u574F\u4E86\u3002`;
   function factories() {
     return [
       deepseekProvider,
@@ -76571,12 +76940,32 @@ apps_install \u4F1A\u628A\u4E00\u6BB5 JavaScript \u88C5\u8FDB\u672C\u673A\u811A\
         model: model2,
         tools: tools(host)
       },
-      streamFn: models.streamSimple.bind(models),
+      streamFn: (...args) => {
+        try {
+          return models.streamSimple(...args);
+        } catch (e) {
+          OcaHost.log("stream " + (e && e.stack ? e.stack : e));
+          throw e;
+        }
+      },
+      onPayload: (params) => {
+        try {
+          OcaHost.log("payload " + params.model + " msgs=" + (params.messages ? params.messages.length : 0));
+        } catch (e) {
+          OcaHost.log("payload " + e);
+        }
+        return params;
+      },
       getApiKey: (provider2) => host.getKey(provider2) || void 0,
       identity: { attribution: { name: "OnlyClaws", url: "https://onlyclaws.app" } }
     });
     agent.subscribe((event) => {
-      host.event(event.type, JSON.stringify(event));
+      try {
+        if (event.type !== "message_update") host.log(event.type);
+        host.event(event.type, slim(event));
+      } catch (e) {
+        host.log("event " + event.type + "\uFF1A" + (e && e.message ? e.message : e));
+      }
     });
     return JSON.stringify({
       provider: model2.provider,
@@ -76587,7 +76976,44 @@ apps_install \u4F1A\u628A\u4E00\u6BB5 JavaScript \u88C5\u8FDB\u672C\u673A\u811A\
   }
   async function prompt(text) {
     if (!agent) throw new Error("agent \u8FD8\u6CA1\u542F\u52A8");
-    await agent.prompt(String(text || ""));
+    try {
+      OcaHost.log("prompt " + String(text || "").slice(0, 80));
+      await agent.prompt(String(text || ""));
+      OcaHost.log("prompt done");
+    } catch (e) {
+      hostEvent("error", { text: String(e && e.message ? e.message : e) });
+    }
+  }
+  function hostEvent(type, payload) {
+    try {
+      OcaHost.event(type, JSON.stringify(payload));
+    } catch (e) {
+      OcaHost.log("host.event\uFF1A" + e);
+    }
+  }
+  function textOf(message) {
+    if (!message) return "";
+    if (typeof message.content === "string") return message.content;
+    const parts = message.content;
+    if (!Array.isArray(parts)) return "";
+    return parts.map((b) => b && b.type === "text" ? b.text : "").join("");
+  }
+  function slim(event) {
+    const out = { type: event.type };
+    if (event.message) {
+      out.role = event.message.role;
+      out.text = textOf(event.message);
+      if (event.message.errorMessage) out.error = event.message.errorMessage;
+      if (event.message.stopReason) out.stop = event.message.stopReason;
+    }
+    const ev = event.assistantMessageEvent;
+    if (ev) {
+      out.event = ev.type;
+      if (ev.type === "text_delta" && ev.delta) out.delta = ev.delta;
+    }
+    if (event.toolName) out.toolName = event.toolName;
+    if (event.errorMessage) out.error = event.errorMessage;
+    return JSON.stringify(out);
   }
   function abort() {
     agent?.abort();

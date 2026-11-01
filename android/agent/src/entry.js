@@ -23,16 +23,27 @@ const SYSTEM = `你在一台安卓手机上，是 OnlyClaws 的本地 agent。
 不要预装任何应用。没有在跑的界面时，保持空白。
 
 apps_install 会把一段 JavaScript 装进本机脚本容器。脚本环境是 V8，host API 是同步的，没有 setTimeout。
-钩子必须写成 function onStart() / onAction(e) / onFrame(dt) / onStop()。
-生成脚本可用：a2ui（v0.9）、tts、http.request（同步 https）、wallpaper、oca.log。
+钩子必须写成 function 声明：onStart() / onStop() / onFrame(dt) / onAction(e) / onPointer(e) / onSpeech(e) / onDone()。
+生成脚本可用：a2ui、gfx、ui、tts、asr、llm、http.request（同步 https）、wallpaper、oca.log。
 没有 keys、web、desk。做不到的事先在聊天里说。
 
-界面（A2UI v0.9）：
+浮层（盖住其它 App，要系统「显示在其他应用上层」）：
+- ui.w / ui.h / ui.safe：逻辑像素。
+- gfx.clear(color)、gfx.rect(x,y,w,h,color)、gfx.line、gfx.circle(x,y,r,color)、gfx.text(x,y,text,color)、gfx.text_width(text)。
+- 颜色是 ARGB 数字；6 位当不透明。clear(0) 清空。每帧先 clear 再画。
+- 写 function onFrame(dt) 才会每帧刷新。点在画出来的像素上会 onPointer({ action, x, y })，action 是 down/move/up/cancel。
+
+语音：asr.warm()；asr.ready / asr.hasModel / asr.listening / asr.deaf。按住角色 asr.start()，松开 asr.stop()。只在按住说话时 start，不要在拖动时 start。识别走 onSpeech({ text, partial, error? })。partial 为 false 才是一句完整的话。聊天球的「说」会抢走麦克风，这时 asr.start 失败，onSpeech 带 error。
+
+模型决策：llm.ready / llm.provider / llm.model。llm.chat({ messages:[{role,content}], system? }) 同步返回 { text, error, provider, model }。key 由宿主代发，脚本拿不到。只支持 OpenAI 兼容后端。不要在 onFrame 里调用。tts.say(text) 朗读，tts.speaking 为真；结束 onDone()。朗读时宿主会关掉脚本麦克风，播完短时间 asr.deaf，避免它听见自己。不要在 onDone 里立刻 asr.start。
+
+应用内界面（A2UI v0.9）仍可用：
 1. onStart 里先发 a2ui.send({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: a2ui.catalog } })，只发一次。
 2. 数据：a2ui.send({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/", value: { draft: "" } } })。
 3. 组件：a2ui.send({ version: "v0.9", updateComponents: { surfaceId: "main", components: [...] } })，必须有 id 为 root 的组件。
+要趴在桌面上的角色、桌宠，用 gfx + onFrame + asr + llm + tts，不要只用 A2UI。
 
-装上失败时，工具会返回报错、出错的那一行和试装日志。根据这些自己查原因再改，不要用 try/catch 把错误吞掉。`;
+装上失败时，工具会返回报错、出错的那一行和试装日志。根据这些自己改脚本再装。不要用 try/catch 把错误吞掉。不要让用户重启 App，也不要说宿主坏了。`;
 
 function factories() {
   return [
@@ -167,12 +178,32 @@ function start(host, settingsJson) {
       model,
       tools: tools(host),
     },
-    streamFn: models.streamSimple.bind(models),
+    streamFn: (...args) => {
+      try {
+        return models.streamSimple(...args);
+      } catch (e) {
+        OcaHost.log("stream " + (e && e.stack ? e.stack : e));
+        throw e;
+      }
+    },
+    onPayload: (params) => {
+      try {
+        OcaHost.log("payload " + params.model + " msgs=" + (params.messages ? params.messages.length : 0));
+      } catch (e) {
+        OcaHost.log("payload " + e);
+      }
+      return params;
+    },
     getApiKey: (provider) => host.getKey(provider) || undefined,
     identity: { attribution: { name: "OnlyClaws", url: "https://onlyclaws.app" } },
   });
   agent.subscribe((event) => {
-    host.event(event.type, JSON.stringify(event));
+    try {
+      if (event.type !== "message_update") host.log(event.type);
+      host.event(event.type, slim(event));
+    } catch (e) {
+      host.log("event " + event.type + "：" + (e && e.message ? e.message : e));
+    }
   });
   return JSON.stringify({
     provider: model.provider,
@@ -184,7 +215,47 @@ function start(host, settingsJson) {
 
 async function prompt(text) {
   if (!agent) throw new Error("agent 还没启动");
-  await agent.prompt(String(text || ""));
+  try {
+    OcaHost.log("prompt " + String(text || "").slice(0, 80));
+    await agent.prompt(String(text || ""));
+    OcaHost.log("prompt done");
+  } catch (e) {
+    hostEvent("error", { text: String(e && e.message ? e.message : e) });
+  }
+}
+
+function hostEvent(type, payload) {
+  try {
+    OcaHost.event(type, JSON.stringify(payload));
+  } catch (e) {
+    OcaHost.log("host.event：" + e);
+  }
+}
+
+function textOf(message) {
+  if (!message) return "";
+  if (typeof message.content === "string") return message.content;
+  const parts = message.content;
+  if (!Array.isArray(parts)) return "";
+  return parts.map((b) => (b && b.type === "text" ? b.text : "")).join("");
+}
+
+function slim(event) {
+  const out = { type: event.type };
+  if (event.message) {
+    out.role = event.message.role;
+    out.text = textOf(event.message);
+    if (event.message.errorMessage) out.error = event.message.errorMessage;
+    if (event.message.stopReason) out.stop = event.message.stopReason;
+  }
+  const ev = event.assistantMessageEvent;
+  if (ev) {
+    out.event = ev.type;
+    if (ev.type === "text_delta" && ev.delta) out.delta = ev.delta;
+  }
+  if (event.toolName) out.toolName = event.toolName;
+  if (event.errorMessage) out.error = event.errorMessage;
+  return JSON.stringify(out);
 }
 
 function abort() {

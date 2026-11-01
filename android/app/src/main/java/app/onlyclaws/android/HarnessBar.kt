@@ -89,10 +89,11 @@ class HarnessBar(
             return
         }
         val started = asr.start(
+            owner = AsrOwner.Chat,
             onPartial = { input.setText(it) },
             onFinal = { text ->
                 setListening(false)
-                if (FILLER.matches(text)) {
+                if (AsrText.filler(text)) {
                     input.setText("")
                     status.text = "没听清，再说一次"
                     return@start
@@ -110,7 +111,7 @@ class HarnessBar(
 
     private fun stopListening() {
         if (!listening) return
-        asr.stop()
+        asr.stop(AsrOwner.Chat)
         mic.setText(R.string.harness_mic)
         status.text = "识别中…"
     }
@@ -123,8 +124,5 @@ class HarnessBar(
 
     companion object {
         const val REQUEST_MIC = 2
-
-        /** Silence and room noise come back as punctuation or a lone 嗯/啊; do not send those. */
-        private val FILLER = Regex("[\\s\\p{P}嗯啊呃哦噢唔额哈嘿]*")
     }
 }
