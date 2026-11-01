@@ -17,68 +17,47 @@ object HarnessText {
 
 钩子必须写成 function onStart() {…} 这样的函数声明，写成 const onStart = … 不会被调用：
 - onStart()：装上时调用一次，在这里建界面。
-- onAction(e)：用户点了按钮。e.action 是按钮 action.event.name，e.context 是 event.context 里的值（路径已经取成值）。
+- onAction(e)：用户点了带 data-action 的元素。e.action 是动作名，e.context 是当时各 data-field 的值。
 - onFrame(dt)：可选，每帧调用，dt 单位秒。不需要动画或计时就不要写。
 - onStop()：被换下时调用。
 
+用户说出「壁纸」（含桌面背景、换壁纸、星空壁纸、去掉壁纸）时，脚本里只能调用 wallpaper.load 或 wallpaper.clear。禁止 gfx、screen、onFrame 画壁纸。
+- 纯色：wallpaper.load({ color: 0x05060e, text, textColor, size, x, y })。color 是 RGB 或 ARGB 数字。
+- 会动的预设只有 wallpaper.load({ scene: "crash" })。
+- 去掉：wallpaper.clear()。
+星空、银河、夜空也用 wallpaper.load({ color: 0x05060e })。没有逐颗画星星的接口。做不到的部分用界面上的文字说明，不要改用 gfx.circle。
+
 能用的全局对象：
-- gfx / ui：系统浮层。gfx.clear、rect、line、circle、text、text_width。颜色 ARGB。写 onFrame(dt) 才刷新。onPointer({action,x,y})。
+- gfx / ui：系统浮层，盖在图标上面，不是壁纸。gfx.clear、rect、line、circle、text、text_width。颜色 ARGB。写 onFrame(dt) 才刷新。onPointer 只落在较小的图形上。铺满屏幕的底色、横条和大圆不吃触摸。用户提到壁纸时不要用 gfx。
 - asr：asr.warm / start / stop。onSpeech({text, partial, error?})。
 - llm.chat({ messages, system? })：宿主代发，返回 { text, error }。不要在 onFrame 里调用。
 - tts.say(文字)、tts.stop()：朗读。tts.speaking。结束 onDone()。朗读时脚本麦克风会被关掉。
-- a2ui.send(消息)：应用内界面，A2UI v0.9。a2ui.catalog 是目录号。
-- http.request({ url, method, headers, body, timeoutMs })：同步 https，没有密钥。
-- wallpaper、oca.log。
+- screen.show(html) / screen.clear()：应用主界面。一段内嵌 HTML，可以用 SVG 和 CSS。没有 a2ui。可点处写 data-action，输入框写 data-field。点击调用 onAction({ action, context })。不能打开链接，不能加载网络资源。
+- http.request({ url, method, headers, body, timeoutMs }) 和 fetch(url, init)：同步 https，没有密钥。http.request 返回 { status, body, error, headers }。fetch 另外有 ok、text()、json()。脚本可以上网，不要写成做不到。
+- socket.open({ host, port, timeoutMs }) → { id, error }。socket.send(id, { text } 或 { b64 })。socket.recv(id, { maxBytes, timeoutMs }) → { text, b64, n, eof, error }。socket.close(id)。只能连出去，不能监听。
+- ssh.exec({ host, port, user, password 或 privateKey, command, timeoutMs }) → { code, stdout, stderr, error, fingerprint }。一条命令后断开。主机指纹变了会拒绝。密码不要画出来。不要在 onFrame 里调用 socket 或 ssh。
+- wallpaper：见上面的壁纸规则。只有 load 和 clear。壁纸在图标后面，不接管滑动。
+- oca.log。
 没有 keys、web、desk。做不到的事，在界面上直接说明做不到。
 
-界面（A2UI v0.9 基础目录）：
-1. onStart 里先发 a2ui.send({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: a2ui.catalog } })，只发一次。
-2. 输入框的值放在数据模型里：a2ui.send({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/", value: { draft: "" } } })。
-3. 组件平铺成数组发出：a2ui.send({ version: "v0.9", updateComponents: { surfaceId: "main", components: [...] } })。必须有一个 id 为 "root" 的组件，子组件用 id 引用，id 不能重复。
-组件（component 字段）和常用属性：
-- Text：text，variant（h1 h2 h3 h4 h5 body caption）
-- Image：url，fit（contain cover fill），variant
-- Row、Column：children（id 数组），justify（start center end spaceBetween spaceAround spaceEvenly stretch），align（start center end stretch）
-- List：children，direction（vertical horizontal）
-- Card：child
-- Divider
-- Button：child（一个 Text 的 id），variant（primary default borderless），action：{ event: { name: "动作名", context: { 键: 值或 { path: "/路径" } } } }
-- TextField：label，value：{ path: "/路径" }，variant（shortText longText number obscured）
-- CheckBox：label，value
-- Slider：label，min，max，value
-- ChoicePicker：options，value，variant（mutuallyExclusive multipleSelection）
-文字属性可以是字符串，也可以是 { path: "/路径" }。按钮要拿到输入框里的字，就在 event.context 里写 { path: "/路径" }。
-界面要变时，在 JS 里重新生成整个组件数组再发一次 updateComponents；列表项用 "item0"、"item1" 这样的 id 逐个生成。不要再发 createSurface。
+界面要变时，重新拼好整段 HTML，再调用一次 screen.show。不要用 gfx 画主界面。桌宠才用 gfx。
 
 例子：
 ```js
 // 标题：待办
 const items = [];
 function draw() {
-  const comps = [
-    { id: "root", component: "Column", children: ["title", "input", "add", "list"] },
-    { id: "title", component: "Text", text: "待办", variant: "h2" },
-    { id: "input", component: "TextField", label: "要做什么", value: { path: "/draft" } },
-    { id: "addText", component: "Text", text: "添加" },
-    { id: "add", component: "Button", child: "addText", variant: "primary",
-      action: { event: { name: "add", context: { text: { path: "/draft" } } } } }
-  ];
-  const ids = items.map((text, i) => {
-    comps.push({ id: "item" + i, component: "Text", text });
-    return "item" + i;
-  });
-  comps.push({ id: "list", component: "Column", children: ids });
-  a2ui.send({ version: "v0.9", updateComponents: { surfaceId: "main", components: comps } });
+  const list = items.map((text) => "<p>" + String(text).replace(/[&<>]/g, "") + "</p>").join("");
+  screen.show(
+    "<h2>待办</h2><input data-field=\"draft\"><button data-action=\"add\">添加</button>" + list
+  );
 }
 function onStart() {
-  a2ui.send({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: a2ui.catalog } });
-  a2ui.send({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/", value: { draft: "" } } });
   draw();
 }
 function onAction(e) {
-  if (e.action === "add" && e.context?.text) {
-    items.push(String(e.context.text));
-    a2ui.send({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/draft", value: "" } });
+  if (e.action === "add" && e.context && e.context.draft) {
+    items.push(String(e.context.draft));
     draw();
   }
 }

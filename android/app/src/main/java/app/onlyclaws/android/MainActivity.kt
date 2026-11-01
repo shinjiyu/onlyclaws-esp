@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         val app = application as OcApp
         findViewById<View>(R.id.harness_bar).visibility = View.GONE
-        app.a2ui.attach(
+        app.screen.attach(
             findViewById(R.id.a2ui_host),
             findViewById(R.id.log_pane),
             findViewById(R.id.wallpaper),
@@ -119,7 +119,7 @@ class MainActivity : AppCompatActivity() {
         app.overlay.detachPage()
         app.desk.unwatchLogs(app)
         app.desk.detach()
-        app.a2ui.detach()
+        app.screen.detach()
         super.onDestroy()
     }
 

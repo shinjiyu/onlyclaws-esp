@@ -132,6 +132,23 @@ class JsContainerTest {
     }
 
     @Test
+    fun fetchUsesTheHttpPlugin() {
+        val done = CompletableFuture<Result<Unit>>()
+        JsContainer({ logs += it }, stuckMs = 300).apply { use(HttpFake()) }
+            .load(
+                """
+                function onStart() {
+                  const r = fetch("https://example.com/x", { method: "POST", body: "hi" });
+                  oca.log(r.ok + " " + r.status + " " + r.text());
+                }
+                """.trimIndent(),
+            ) { done.complete(it) }
+        done.get(5, TimeUnit.SECONDS).getOrThrow()
+        expectLog("true 200 pong")
+        assertTrue(seenHttp, seenHttp.contains("\"method\":\"POST\"") && seenHttp.contains("\"body\":\"hi\""))
+    }
+
+    @Test
     fun scriptsSeeNoJava() {
         load("function onStart() { oca.log([typeof java, typeof Packages, typeof require].join(',')); }").getOrThrow()
         expectLog("undefined,undefined,undefined")
@@ -152,6 +169,22 @@ class JsContainerTest {
             seen += line
         }
         assertEquals(expected, seen.joinToString("\n"))
+    }
+
+    private var seenHttp = ""
+
+    private inner class HttpFake : JsPlugin {
+        override fun install(scope: JsScope) = scope.define("http") {
+            fn("request") {
+                seenHttp = it.json(0).orEmpty()
+                mapOf(
+                    "status" to 200,
+                    "body" to "pong",
+                    "error" to "",
+                    "headers" to emptyMap<String, String>(),
+                )
+            }
+        }
     }
 
     private class TestPlugin : JsPlugin {

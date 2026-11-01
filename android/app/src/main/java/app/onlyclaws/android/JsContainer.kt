@@ -15,6 +15,7 @@ import com.caoccao.javet.values.primitive.V8ValueNull
 import com.caoccao.javet.values.primitive.V8ValueString
 import com.caoccao.javet.values.primitive.V8ValueUndefined
 import com.caoccao.javet.values.reference.V8ValueFunction
+import com.caoccao.javet.values.reference.V8ValueObject
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -117,7 +118,10 @@ class JsContainer(
                 }
             }
             plugins.filter(allow).forEach { it.install(scope) }
-            script(fresh) { fresh.getExecutor(source).setResourceName(RESOURCE).executeVoid() }
+            script(fresh) {
+                if (hasObject(fresh, "http")) fresh.getExecutor(FETCH).executeVoid()
+                fresh.getExecutor(source).setResourceName(RESOURCE).executeVoid()
+            }
             callHook(fresh, "onStart")
             val pumps = hasFunction(fresh, "onFrame")
             val previous = runtime
@@ -153,6 +157,9 @@ class JsContainer(
 
     private fun hasFunction(rt: V8Runtime, name: String): Boolean =
         rt.globalObject.get<V8Value>(name).use { it is V8ValueFunction }
+
+    private fun hasObject(rt: V8Runtime, name: String): Boolean =
+        rt.globalObject.get<V8Value>(name).use { it is V8ValueObject }
 
     /** Script code is running from here until it calls back into the host or returns. */
     private inline fun <T> script(rt: V8Runtime, block: () -> T): T {
@@ -304,6 +311,29 @@ class JsContainer(
         const val STUCK_MS = 5_000L
         private const val WATCH_MS = 100L
         private const val RESOURCE = "script.js"
+
+        /** Same call as http.request. Models write fetch(); without this they report that scripts have no network. */
+        private val FETCH = """
+            function fetch(url, init) {
+              var spec = { url: String(url == null ? "" : url) };
+              if (init && typeof init === "object") {
+                if (init.method) spec.method = init.method;
+                if (init.headers) spec.headers = init.headers;
+                if (init.body != null) spec.body = typeof init.body === "string" ? init.body : JSON.stringify(init.body);
+                if (init.timeoutMs != null) spec.timeoutMs = init.timeoutMs;
+              }
+              var res = http.request(spec);
+              return {
+                ok: res.status >= 200 && res.status < 300,
+                status: res.status,
+                headers: res.headers || {},
+                body: res.body || "",
+                error: res.error || "",
+                text: function () { return res.body || ""; },
+                json: function () { return JSON.parse(res.body || ""); },
+              };
+            }
+        """.trimIndent()
     }
 }
 

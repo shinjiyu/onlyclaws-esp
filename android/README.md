@@ -5,7 +5,7 @@ A2UI, transparent WebView overlay, TTS, live wallpaper). Behavior lives in a
 downloaded script (`files/active.js`), pushed over the device session as a `js`
 tool — same control plane as the boards.
 
-Package: `app.onlyclaws.android` · firmware string: `oca-0.8.0` · capability: `container`
+Package: `app.onlyclaws.android` · firmware string: `oca-0.8.5` · capability: `container`
 
 ## Build
 
@@ -71,30 +71,31 @@ back to the model; after three tries the previous script is put back. When the r
 script is one the harness wrote, the next sentence edits it instead of starting over.
 
 Scripts the harness writes start with `// oca:generated`. `OcApp.load` gives them
-`overlay` (`gfx`, `ui`, `onFrame`, `onPointer`), `a2ui`, `tts`, `asr`, `llm`, `http`,
-`wallpaper`, and `oca` — not `keys`, `web`, or `desk` — on every load, including after
+`overlay` (`gfx`, `ui`, `onFrame`, `onPointer`), `screen`, `tts`, `asr`, `llm`, `http`,
+`socket`, `ssh`, `wallpaper`, and `oca` — not `keys`, `web`, or `desk` — on every load, including after
 a restart. Scripts from the console keep every plugin. `llm.chat` uses the same
 AgentStore key the agent uses; the script never sees the key.
 
-Button actions pass bound values as `e.context` (for example a `TextField` path), so a
-generated screen can read what was typed.
+A click on `data-action` calls `onAction` with `e.context` filled from `data-field` inputs.
 
 ## JS surface (host objects)
 
 | Object | Role |
 |--------|------|
 | `oca.log` | log line |
-| `a2ui` | Basic Catalog v0.9 (`send`/`push`, `clear`, `catalog`) |
+| `screen` | Main UI inside the app. `show(html)` / `clear()`. Inline HTML and SVG only. `data-action` clicks call `onAction`. No navigation and no network loads. Separate from `web`. |
 | `web` | `load` / `float` / `url` / `eval` / `touch` / `clear` / `loggedIn` / `showing`. `load` is in-app HTML. `float` puts a transparent WebView on the system overlay (HTML or http(s)); it is not muted; `touch(true)` takes input, default is pass-through. A login URL is shown in the app and closes once `SESSDATA` is set. Any other `url` is loaded off-screen, muted, and does not take touches. |
 | `desk` | three screens: 运行, 配置, 日志. `desk.show({ title, status, login, running, keyReady, error, checking, open, tokens, gap, gapMin, gapMax, gapStep, prompts, prompt, custom, rows, stats, events })`. `tokens` is the running total. `open` is `运行` / `配置` / `日志` when the script wants to change screen. 开始 calls `start` after the script checks the saved key against the model. A failed check sets `error`. The gap slider reports `gap`. A preset reports its id. Custom text reports `promptText`. |
 | `keys` | `get` / `set` / `has` for one private file per name, such as `deepseek`. The value is not drawn on the screen. |
-| `gfx` | System overlay: `clear` / `rect` / `line` / `circle` / `text` / `text_width`. ARGB; 6-digit is opaque. `clear(0)` empties the window. Needs overlay permission. |
+| `gfx` | System overlay: `clear` / `rect` / `line` / `circle` / `text` / `text_width`. ARGB; 6-digit is opaque. `clear(0)` empties the window. A full-screen wash does not take touches, so the launcher can still change pages. Needs overlay permission. |
 | `asr` | Same on-device SenseVoice as the chat ball: `warm` / `start` / `stop`, getters `ready` / `hasModel` / `listening`. `onSpeech({ text, partial, error? })`. One mic: script and chat cannot listen together. |
 | `llm` | `ready` / `provider` / `model`; `chat({ messages, system? })` → `{ text, error, provider, model }`. Host sends the key. OpenAI-compatible backends only. |
 | `tts` | `say` / `stop` + `onDone` |
-| `wallpaper` | preset load/clear (`scene: "crash"` or flat color) |
+| `wallpaper` | The word 壁纸 maps only here. `load({ color, text })` or `load({ scene: "crash" })`, `clear()`. A star field is the flat color `0x05060e`; there is no per-star wallpaper API. Does not take launcher swipes. |
 | `ui` | `w`/`h`, `safe`, `keyboard` (dp) |
-| `http` | `request({ url, method, headers, body, timeoutMs })` → `{ status, body, error, headers }` |
+| `http` / `fetch` | `http.request({ url, method, headers, body, timeoutMs })` and `fetch(url, init)` → `{ ok, status, body, error, headers }`. `fetch` also has `text()` / `json()`. Sync, https only. |
+| `socket` | Outbound TCP. `open({ host, port, timeoutMs })` → `{ id, error }`. `send(id, { text } or { b64 })`. `recv(id, { maxBytes, timeoutMs })` → `{ text, b64, n, eof, error }`. `close(id)`. No listen. |
+| `ssh` | `exec({ host, port, user, password` or `privateKey, command, timeoutMs, fingerprint })` → `{ code, stdout, stderr, error, fingerprint }`. One command, then the connection closes. The first host key is remembered; a change is refused unless `fingerprint` pins the new one. |
 
 `http.request` blocks the script thread until the response or the timeout. Only `https`.
 Connect timeout is 20s. `timeoutMs` defaults to 60000 and is clamped to 1000..120000.

@@ -86,16 +86,23 @@ class OcWallpaperService : WallpaperService() {
 
     private inner class Stage : Engine() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val main = Handler(Looper.getMainLooper())
+        private val drawLater = Runnable { sync() }
         private val onChange = { sync() }
         private var visible = false
         private var crash: CrashScene? = null
 
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
             super.onCreate(surfaceHolder)
+            // Page swipes belong to the launcher. Taking offset or touch here,
+            // or drawing before this callback returns, freezes screen changes.
+            setTouchEventsEnabled(false)
+            setOffsetNotificationsEnabled(false)
             PresetStore.watch(onChange)
         }
 
         override fun onDestroy() {
+            main.removeCallbacks(drawLater)
             PresetStore.unwatch(onChange)
             stopCrash()
             super.onDestroy()
@@ -104,18 +111,23 @@ class OcWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             this.visible = visible
             crash?.visible = visible
-            if (visible) sync()
+            if (visible) postDraw()
         }
 
         override fun onSurfaceChanged(holder: SurfaceHolder?, format: Int, width: Int, height: Int) {
             super.onSurfaceChanged(holder, format, width, height)
-            stopCrash()
-            sync()
+            if (crash == null) postDraw()
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder?) {
+            main.removeCallbacks(drawLater)
             stopCrash()
             super.onSurfaceDestroyed(holder)
+        }
+
+        private fun postDraw() {
+            main.removeCallbacks(drawLater)
+            main.post(drawLater)
         }
 
         private fun sceneName(): String =
@@ -134,8 +146,27 @@ class OcWallpaperService : WallpaperService() {
                 }
                 return
             }
-            stopCrash()
+            val dying = crash
+            if (dying != null) {
+                dying.shutdown()
+                crash = null
+                waitThenDraw(dying)
+                return
+            }
             drawFlat()
+        }
+
+        private fun waitThenDraw(dying: CrashScene) {
+            main.post(object : Runnable {
+                override fun run() {
+                    if (sceneName() == "crash") return
+                    if (dying.isAlive) {
+                        main.postDelayed(this, 16)
+                        return
+                    }
+                    drawFlat()
+                }
+            })
         }
 
         private fun stopCrash() {
@@ -146,6 +177,7 @@ class OcWallpaperService : WallpaperService() {
         private fun drawFlat() {
             if (!visible) return
             val holder = surfaceHolder ?: return
+            if (holder.surface?.isValid != true) return
             val canvas: Canvas = try {
                 holder.lockCanvas() ?: return
             } catch (_: Throwable) {

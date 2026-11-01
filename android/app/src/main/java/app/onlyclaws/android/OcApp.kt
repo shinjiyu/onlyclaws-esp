@@ -25,23 +25,27 @@ class OcApp : Application() {
         container = JsContainer(onLog = { line -> append(line) })
         container.onError = { lastScriptError = ScriptError(it, System.currentTimeMillis()) }
         overlay = OverlayPlugin(this, container) { line -> append(line) }
-        a2ui = A2uiPlugin(this, container) { line -> append(line) }
+        screen = ScreenPlugin(this, container) { line -> append(line) }
         desk = DeskPlugin(container) { line -> append(line) }
         tts = TtsPlugin(this, container, asr) { line -> append(line) }
         asr.onBargeIn = { tts.interrupt() }
         wallpaper = WallpaperPlugin(this) { line -> append(line) }
         http = HttpPlugin()
+        sockets = SocketPlugin()
+        ssh = SshPlugin(File(filesDir, "ssh-known.txt"))
         keys = KeysPlugin(filesDir)
         agent = AgentRuntime(this)
         asrPlugin = AsrPlugin(asr, container) { line -> append(line) }
         llm = LlmPlugin(agent.store)
         container.use(overlay)
         container.use(overlay.web)
-        container.use(a2ui)
+        container.use(screen)
         container.use(desk)
         container.use(tts)
         container.use(wallpaper)
         container.use(http)
+        container.use(sockets)
+        container.use(ssh)
         container.use(keys)
         container.use(asrPlugin)
         container.use(llm)
@@ -63,7 +67,7 @@ class OcApp : Application() {
     fun load(source: String, done: (Result<Unit>) -> Unit) {
         val generated = source.startsWith(HarnessText.MARK)
         val allow: (JsPlugin) -> Boolean = if (generated) {
-            { it === overlay || it === a2ui || it === tts || it === http || it === wallpaper || it === asrPlugin || it === llm }
+            { it === overlay || it === screen || it === tts || it === http || it === sockets || it === ssh || it === wallpaper || it === asrPlugin || it === llm }
         } else {
             { true }
         }
@@ -75,7 +79,7 @@ class OcApp : Application() {
 
     lateinit var overlay: OverlayPlugin
         private set
-    lateinit var a2ui: A2uiPlugin
+    lateinit var screen: ScreenPlugin
         private set
     lateinit var desk: DeskPlugin
         private set
@@ -84,6 +88,10 @@ class OcApp : Application() {
     lateinit var wallpaper: WallpaperPlugin
         private set
     lateinit var http: HttpPlugin
+        private set
+    lateinit var sockets: SocketPlugin
+        private set
+    lateinit var ssh: SshPlugin
         private set
     lateinit var keys: KeysPlugin
         private set

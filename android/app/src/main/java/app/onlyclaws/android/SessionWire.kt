@@ -188,7 +188,7 @@ class SessionWire(
 
     companion object {
         private const val TAG = "OcaSession"
-        const val FW = "oca-0.8.0"
+        const val FW = "oca-0.8.5"
 
         fun jsSource(body: String): String? {
             val tools = try {

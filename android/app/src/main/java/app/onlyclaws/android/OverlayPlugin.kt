@@ -211,11 +211,12 @@ class OverlayPlugin(
 private data class Frame(val ops: List<Op>, val backdrop: Int) {
     val empty: Boolean get() = ops.isEmpty() && Color.alpha(backdrop) == 0
 
-    fun hits(x: Double, y: Double): Boolean {
-        if (Color.alpha(backdrop) > 0) return true
+    fun hits(x: Double, y: Double, screenW: Float, screenH: Float): Boolean {
+        val keep = chooseTouchBoxes(ops.map { it.span() }, screenW, screenH)
         val px = x.toFloat()
         val py = y.toFloat()
         for (i in ops.indices.reversed()) {
+            if (!keep[i]) continue
             if (ops[i].contains(px, py)) return true
         }
         return false
@@ -231,6 +232,36 @@ private sealed class Op {
     data class Line(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val color: Int) : Op()
     data class Circle(val x: Float, val y: Float, val r: Float, val color: Int) : Op()
     data class Text(val x: Float, val y: Float, val text: String, val color: Int) : Op()
+}
+
+private fun Op.span(): TouchBox = when (this) {
+    is Op.Rect -> TouchBox(w, h)
+    is Op.Line -> TouchBox(kotlin.math.abs(x2 - x1), kotlin.math.abs(y2 - y1))
+    is Op.Circle -> TouchBox(r * 2f, r * 2f)
+    is Op.Text -> TouchBox(16f, 16f)
+}
+
+/**
+ * A wash that covers the screen is paint. Touches on it belong to the launcher,
+ * otherwise a wallpaper drawn with gfx.clear and full-width bands cannot be swiped.
+ * A few controls that together stay under half the screen keep their own hits.
+ */
+internal data class TouchBox(val w: Float, val h: Float)
+
+internal fun chooseTouchBoxes(boxes: List<TouchBox>, screenW: Float, screenH: Float): BooleanArray {
+    val keep = BooleanArray(boxes.size) { true }
+    if (screenW <= 0f || screenH <= 0f) return keep
+    val screen = screenW * screenH
+    val cover = boxes.sumOf { (it.w.coerceAtLeast(0f) * it.h.coerceAtLeast(0f)).toDouble() }
+    if (cover < screen * 0.45) return keep
+    for (i in boxes.indices) {
+        val box = boxes[i]
+        val wide = box.w >= screenW * 0.8f
+        val tall = box.h >= screenH * 0.8f
+        val bulky = box.w * box.h >= screen * 0.06f
+        keep[i] = !wide && !tall && !bulky
+    }
+    return keep
 }
 
 private class SceneBuffer(private val onLog: (String) -> Unit) {
@@ -399,7 +430,8 @@ private class OverlayWindow(
         val y = event.rawY / density.toDouble()
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                tracking = stage.frame.hits(x, y)
+                val (sw, sh) = screenPx(wm)
+                tracking = stage.frame.hits(x, y, sw / density, sh / density)
                 if (!tracking) return false
                 pointer("down", x, y)
             }
@@ -424,14 +456,15 @@ private class OverlayWindow(
 
     private fun applyTouchable(frame: Frame) {
         val (sw, sh) = screenPx(wm)
+        val screenW = sw / density
+        val screenH = sh / density
+        val opaque = frame.ops.filter { Color.alpha(it.color()) > 0 }
+        val keep = chooseTouchBoxes(opaque.map { it.span() }, screenW, screenH)
+        val washed = opaque.indices.any { !keep[it] } || Color.alpha(frame.backdrop) > 0 && opaque.isEmpty()
         val region = android.graphics.Region()
-        if (Color.alpha(frame.backdrop) > 0) {
-            region.set(0, 0, sw, sh)
-        } else {
-            for (op in frame.ops) {
-                if (Color.alpha(op.color()) == 0) continue
-                region.op(op.boundsPx(density), android.graphics.Region.Op.UNION)
-            }
+        for (i in opaque.indices) {
+            if (!keep[i]) continue
+            region.op(opaque[i].boundsPx(density), android.graphics.Region.Op.UNION)
         }
         val ok = runCatching {
             val getRoot = View::class.java.getDeclaredMethod("getViewRootImpl")
@@ -445,13 +478,14 @@ private class OverlayWindow(
             method.invoke(root, region)
             true
         }.getOrDefault(false)
-        // Empty scene: ignore all touches. Region ok: only ball pixels. Region fail: whole screen.
+        // Empty or a failed hole-punch on a full-screen wash: let the launcher swipe.
+        val pass = region.isEmpty || (!ok && washed)
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
-            if (region.isEmpty) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0
+            if (pass) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0
         if (params.flags != flags) {
             params.flags = flags
             if (added) {
