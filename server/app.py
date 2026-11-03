@@ -840,12 +840,12 @@ async def flash_page() -> FileResponse:
 
 @app.get("/presets")
 async def presets_redirect() -> RedirectResponse:
-    return RedirectResponse(url="presets/esp32/", status_code=301)
+    return RedirectResponse(url="presets/oca/", status_code=301)
 
 
 @app.get("/presets/")
 async def presets_index_redirect() -> RedirectResponse:
-    return RedirectResponse(url="esp32/", status_code=302)
+    return RedirectResponse(url="oca/", status_code=302)
 
 
 @app.get("/presets/{kind}")
