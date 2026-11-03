@@ -28,10 +28,41 @@ class LlmChatTest {
     }
 
     @Test
+    fun parseAttachesAUserImage() {
+        val messages = LlmChat.parse(
+            """{"messages":[{"role":"user","content":"看","image":"abcd"}]}""",
+        )!!
+        val content = messages.getJSONObject(0).getJSONArray("content")
+        assertEquals("text", content.getJSONObject(0).getString("type"))
+        assertEquals("看", content.getJSONObject(0).getString("text"))
+        assertEquals(
+            "data:image/jpeg;base64,abcd",
+            content.getJSONObject(1).getJSONObject("image_url").getString("url"),
+        )
+    }
+
+    @Test
+    fun parseKeepsADataUrlAndRejectsJunk() {
+        val messages = LlmChat.parse(
+            """{"messages":[{"role":"user","image":"data:image/png;base64,aaaa"}]}""",
+        )!!
+        val content = messages.getJSONObject(0).getJSONArray("content")
+        assertEquals("看这张图", content.getJSONObject(0).getString("text"))
+        assertEquals(
+            "data:image/png;base64,aaaa",
+            content.getJSONObject(1).getJSONObject("image_url").getString("url"),
+        )
+        assertNull(LlmChat.parse("""{"messages":[{"role":"user","content":"看","image":"not an image"}]}"""))
+        assertEquals("图片太大或不是 base64", LlmChat.explain("""{"messages":[{"role":"user","content":"看","image":"***"}]}"""))
+    }
+
+    @Test
     fun readOpenAiMessage() {
         val body = """{"choices":[{"message":{"role":"assistant","content":"  汪  "}}]}"""
         assertEquals("汪", LlmChat.readText(body))
         assertNull(LlmChat.readText("{}"))
+        val parts = """{"choices":[{"message":{"content":[{"type":"text","text":"好"},{"type":"text","text":"的"}]}}]}"""
+        assertEquals("好的", LlmChat.readText(parts))
     }
 
     @Test

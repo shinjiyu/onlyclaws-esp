@@ -1,7 +1,12 @@
 package app.onlyclaws.android
 
 import android.annotation.SuppressLint
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
+import android.app.AlertDialog
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -10,15 +15,22 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.WindowManager
+import android.view.animation.OvershootInterpolator
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.widget.ImageView
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.util.Log
 import android.widget.ArrayAdapter
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -36,7 +48,7 @@ class ChatOverlay(private val app: OcApp) {
     private val main = Handler(Looper.getMainLooper())
     private val wm = app.getSystemService(WindowManager::class.java)
     private val density = app.resources.displayMetrics.density
-    private val ball = TextView(app)
+    private val ball = ImageView(app)
     private val panel = LinearLayout(app)
     private val messages = LinearLayout(app)
     private val scroll = ScrollView(app)
@@ -46,8 +58,13 @@ class ChatOverlay(private val app: OcApp) {
     private val tabSettings = TextView(app)
     private val input = EditText(app)
     private val status = TextView(app)
+    private val picture = TextView(app)
+    private val preview = ImageView(app)
     private val talk = TextView(app)
     private val send = TextView(app)
+    private var pendingJpeg: ByteArray? = null
+    private var concealed = false
+    private var picking = false
     private val keyFields = LinkedHashMap<String, EditText>()
     private var providerSpin: Spinner? = null
     private var modelSpin: Spinner? = null
@@ -55,6 +72,8 @@ class ChatOverlay(private val app: OcApp) {
     private var customUrl: EditText? = null
     private var customModel: EditText? = null
     private var customKey: EditText? = null
+    private var wallFpsSpin: Spinner? = null
+    private var wallPowerSave: CheckBox? = null
     private var onChat = true
     private var added = false
     private var open = false
@@ -63,6 +82,12 @@ class ChatOverlay(private val app: OcApp) {
     private var listening = false
     private var ballX = 0
     private var ballY = 0
+    private var ballSize = 0
+    /** Stuck to left (−1) or right (+1) edge; 0 = free in the middle. */
+    private var dockSide = 0
+    private var anim: ValueAnimator? = null
+    private var animToken = 0
+    private val idle = Runnable { stickToEdge(fromIdle = true) }
 
     fun attach() {
         if (!Settings.canDrawOverlays(app)) {
@@ -71,29 +96,34 @@ class ChatOverlay(private val app: OcApp) {
         }
         if (added) return
         build()
+        added = true
         addBall()
         app.agent.watch(::onEvent)
         if (app.agent.ready && app.agent.info.isNotBlank()) {
             status.text = readyLabel(app.agent.info)
         }
-        added = true
     }
 
     fun detach() {
         if (!added) return
         app.agent.unwatch(::onEvent)
+        main.removeCallbacks(idle)
+        stopAnim()
         runCatching { wm.removeView(if (open) panel else ball) }
         added = false
         open = false
+        dockSide = 0
     }
 
     private fun build() {
-        ball.text = "爪"
-        ball.textSize = 18f
-        ball.setTextColor(Color.WHITE)
-        ball.gravity = Gravity.CENTER
-        ball.typeface = Typeface.DEFAULT_BOLD
-        ball.background = round(ACCENT, 28)
+        ball.setImageResource(R.drawable.ic_launcher_foreground)
+        ball.scaleType = ImageView.ScaleType.CENTER_CROP
+        ball.clipToOutline = true
+        ball.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setOval(0, 0, view.width, view.height)
+            }
+        }
         ball.setOnTouchListener(ballTouch())
 
         panel.orientation = LinearLayout.VERTICAL
@@ -142,6 +172,17 @@ class ChatOverlay(private val app: OcApp) {
                 true
             } else false
         }
+        preview.visibility = View.GONE
+        preview.adjustViewBounds = true
+        preview.scaleType = ImageView.ScaleType.CENTER_CROP
+        preview.setOnClickListener { clearPending() }
+        row.addView(preview, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(6) })
+        picture.text = "图"
+        picture.setTextColor(INK)
+        picture.gravity = Gravity.CENTER
+        picture.setPadding(dp(10), dp(8), dp(10), dp(8))
+        picture.setOnClickListener { pickImage() }
+        row.addView(picture)
         row.addView(input, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         talk.text = "说"
         talk.setTextColor(INK)
@@ -261,6 +302,25 @@ class ChatOverlay(private val app: OcApp) {
         root.addView(customUrl)
         root.addView(customModel)
         root.addView(customKey)
+        root.addView(settingLabel("壁纸功耗"))
+        root.addView(hint("跟 Wallpaper Engine 一样：限帧，系统省电时暂停。"))
+        val fpsLabels = WallpaperPower.FPS_CHOICES.map { WallpaperPower.fpsLabel(it) }
+        val fpsSpin = Spinner(app).apply {
+            adapter = ArrayAdapter(app, android.R.layout.simple_spinner_dropdown_item, fpsLabels)
+            val cur = WallpaperPower.fps(app)
+            val i = WallpaperPower.FPS_CHOICES.indexOf(cur).let { if (it >= 0) it else 1 }
+            setSelection(i)
+        }
+        wallFpsSpin = fpsSpin
+        root.addView(settingLabel("动画帧率"))
+        root.addView(fpsSpin)
+        val powerBox = CheckBox(app).apply {
+            text = "系统省电模式时暂停壁纸"
+            isChecked = WallpaperPower.pauseOnPowerSave(app)
+            setTextColor(INK)
+        }
+        wallPowerSave = powerBox
+        root.addView(powerBox)
         val save = TextView(app).apply {
             text = "保存并重载"
             setTextColor(Color.WHITE)
@@ -272,7 +332,35 @@ class ChatOverlay(private val app: OcApp) {
         root.addView(save, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(12)
         })
+        root.addView(settingLabel("退出"))
+        root.addView(hint("关掉悬浮球和前台服务，并取消 OnlyClaws 动态壁纸。再从桌面图标打开即可重新启动。"))
+        val quit = TextView(app).apply {
+            text = "退出 OnlyClaws"
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = round(0xffc45c26.toInt(), 8)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setOnClickListener { confirmExit() }
+        }
+        root.addView(quit, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(8)
+            bottomMargin = dp(8)
+        })
         return root
+    }
+
+    private fun confirmExit() {
+        val themed = ContextThemeWrapper(app, R.style.Theme_Oca)
+        AlertDialog.Builder(themed)
+            .setTitle("退出 OnlyClaws")
+            .setMessage("会关掉悬浮球、前台服务，并取消当前动态壁纸。进程不再自动拉起。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("退出") { _, _ -> OcLifecycle.exit(app) }
+            .show()
+            .window?.setType(
+                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
+            )
     }
 
     private fun saveSettings() {
@@ -287,6 +375,10 @@ class ChatOverlay(private val app: OcApp) {
         } else null
         store.writeKey(next?.id ?: "custom", customKey?.text?.toString()?.trim().orEmpty())
         store.writeSettings(AgentStore.Settings(provider, model, next))
+        val fpsIndex = wallFpsSpin?.selectedItemPosition ?: 1
+        WallpaperPower.setFps(app, WallpaperPower.FPS_CHOICES.getOrElse(fpsIndex) { 30 })
+        WallpaperPower.setPauseOnPowerSave(app, wallPowerSave?.isChecked != false)
+        app.wallpaper.applyPowerPrefs()
         app.agent.reload()
         status.text = "已保存，正在重载 pi"
         showTab(true)
@@ -335,20 +427,36 @@ class ChatOverlay(private val app: OcApp) {
     private fun ballTouch() = View.OnTouchListener { v, e ->
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                v.tag = floatArrayOf(e.rawX, e.rawY, ballX.toFloat(), ballY.toFloat(), 0f)
+                stopAnim()
+                main.removeCallbacks(idle)
+                ball.scaleX = 1f
+                ball.scaleY = 1f
+                v.tag = floatArrayOf(e.rawX, e.rawY, ballX.toFloat(), ballY.toFloat(), 0f, dockSide.toFloat())
+                if (dockSide != 0) {
+                    // Pull off the sticky edge a little so the drag feels unstuck.
+                    dockSide = 0
+                }
             }
             MotionEvent.ACTION_MOVE -> {
                 val t = v.tag as FloatArray
                 val dx = e.rawX - t[0]
                 val dy = e.rawY - t[1]
                 if (dx * dx + dy * dy > 36) t[4] = 1f
+                ballSize = dp(FULL)
                 ballX = (t[2] + dx).toInt()
                 ballY = (t[3] + dy).toInt()
+                clampBall()
+                // Near an edge while dragging: nudge toward it for a sticky feel.
+                val magnet = magneticPullX(ballX)
+                if (magnet != ballX) {
+                    ballX = (ballX * 0.65f + magnet * 0.35f).toInt()
+                }
                 updateBall()
             }
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 val dragged = (v.tag as? FloatArray)?.get(4) == 1f
                 if (!dragged) expand()
+                else stickToEdge(fromIdle = false)
             }
         }
         true
@@ -356,25 +464,168 @@ class ChatOverlay(private val app: OcApp) {
 
     private fun addBall() {
         val dm = app.resources.displayMetrics
+        ballSize = dp(FULL)
         ballX = dm.widthPixels - dp(72)
         ballY = dm.heightPixels - dp(160)
+        dockSide = 0
         wm.addView(ball, ballParams())
+        stickToEdge(fromIdle = false)
     }
 
     private fun expand() {
         if (open) return
+        main.removeCallbacks(idle)
+        stopAnim()
+        dockSide = 0
+        ballSize = dp(FULL)
+        ball.scaleX = 1f
+        ball.scaleY = 1f
         runCatching { wm.removeView(ball) }
         wm.addView(panel, panelParams())
         open = true
         asrWarm()
     }
 
+    /** Types [text] into the input one character at a time, like a person would. */
+    fun draft(text: String) {
+        if (!added) return
+        expand()
+        showTab(true)
+        main.removeCallbacks(typing)
+        typed = 0
+        typingText = text
+        input.setText("")
+        main.post(typing)
+    }
+
+    private var typingText = ""
+    private var typed = 0
+    private val typing = object : Runnable {
+        override fun run() {
+            if (typed >= typingText.length) return
+            typed++
+            input.setText(typingText.substring(0, typed))
+            input.setSelection(typed)
+            main.postDelayed(this, 90L + (Math.random() * 70).toLong())
+        }
+    }
+
     private fun collapse() {
         if (!open) return
         hideKeyboard()
+        ballSize = dp(FULL)
+        dockSide = 0
+        ball.scaleX = 1f
+        ball.scaleY = 1f
         runCatching { wm.removeView(panel) }
         wm.addView(ball, ballParams())
         open = false
+        stickToEdge(fromIdle = false)
+    }
+
+    private fun bumpIdle() {
+        main.removeCallbacks(idle)
+        if (!added || open || dockSide != 0) return
+        main.postDelayed(idle, IDLE_MS)
+    }
+
+    /** Snap the full-size ball to the nearer side with a springy overshoot. */
+    private fun stickToEdge(fromIdle: Boolean) {
+        if (!added || open || ball.parent == null) return
+        ballSize = dp(FULL)
+        clampBall()
+        val dm = app.resources.displayMetrics
+        val margin = dp(EDGE)
+        val leftX = margin
+        val rightX = dm.widthPixels - ballSize - margin
+        val toRight = ballX + ballSize / 2f >= dm.widthPixels / 2f
+        val targetX = if (toRight) rightX else leftX
+        val targetY = ballY
+        val side = if (toRight) 1 else -1
+        if (fromIdle && dockSide == side && kotlin.math.abs(ballX - targetX) < dp(2)) {
+            dockSide = side
+            return
+        }
+        animateStick(ballX, ballY, targetX, targetY, side)
+    }
+
+    private fun magneticPullX(x: Int): Int {
+        val dm = app.resources.displayMetrics
+        val margin = dp(EDGE)
+        val size = dp(FULL)
+        val leftX = margin
+        val rightX = dm.widthPixels - size - margin
+        val zone = dp(MAGNET)
+        return when {
+            kotlin.math.abs(x - leftX) < zone -> leftX
+            kotlin.math.abs(x - rightX) < zone -> rightX
+            else -> x
+        }
+    }
+
+    private fun clampBall() {
+        val dm = app.resources.displayMetrics
+        val size = ballSize.coerceAtLeast(1)
+        ballX = ballX.coerceIn(-size / 2, dm.widthPixels - size / 2)
+        ballY = ballY.coerceIn(dp(8), dm.heightPixels - size - dp(8))
+    }
+
+    private fun animateStick(fromX: Int, fromY: Int, toX: Int, toY: Int, side: Int) {
+        stopAnim()
+        val token = ++animToken
+        val animator = ValueAnimator.ofFloat(0f, 1f)
+        anim = animator
+        animator.duration = 420
+        animator.interpolator = OvershootInterpolator(1.35f)
+        animator.addUpdateListener {
+            val t = it.animatedValue as Float
+            ballX = (fromX + (toX - fromX) * t).toInt()
+            ballY = (fromY + (toY - fromY) * t).toInt()
+            ballSize = dp(FULL)
+            val pulse = 1f + 0.07f * overshootBump(t)
+            ball.scaleX = pulse
+            ball.scaleY = pulse
+            updateBall()
+        }
+        animator.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                if (token != animToken) return
+                ballX = toX
+                ballY = toY
+                ballSize = dp(FULL)
+                ball.scaleX = 1f
+                ball.scaleY = 1f
+                dockSide = side
+                updateBall()
+            }
+        })
+        animator.start()
+    }
+
+    /** 0 at start/end, peaks near the overshoot. */
+    private fun overshootBump(t: Float): Float {
+        val x = (t - 0.72f).coerceIn(0f, 1f)
+        return if (x <= 0f) 0f else (1f - x) * 4f * x
+    }
+
+    private fun stopAnim() {
+        animToken++
+        anim?.cancel()
+        anim = null
+    }
+
+    /** Hide the ball or panel so a screen capture does not photograph the chat itself. */
+    fun conceal(): Boolean {
+        if (!added || concealed) return false
+        (if (open) panel else ball).visibility = View.INVISIBLE
+        concealed = true
+        return true
+    }
+
+    fun reveal() {
+        if (!concealed) return
+        concealed = false
+        (if (open) panel else ball).visibility = View.VISIBLE
     }
 
     /** Keep the chat window above the gfx overlay after that overlay is added. */
@@ -392,14 +643,67 @@ class ChatOverlay(private val app: OcApp) {
         }
     }
 
+    private fun pickImage() {
+        ChatImages.onPicked = pick@{ bytes ->
+            showAfterPick()
+            if (bytes == null || bytes.isEmpty()) return@pick
+            pendingJpeg = bytes
+            preview.setImageBitmap(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+            preview.visibility = View.VISIBLE
+        }
+        hideForPick()
+        runCatching {
+            app.startActivity(
+                Intent(app, ImagePickActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure {
+            ChatImages.onPicked = null
+            showAfterPick()
+        }
+    }
+
+    /** Take the overlay off the screen so the system picker can be used. */
+    private fun hideForPick() {
+        if (!added || picking) return
+        picking = true
+        hideKeyboard()
+        main.removeCallbacks(idle)
+        stopAnim()
+        runCatching { wm.removeView(if (open) panel else ball) }
+    }
+
+    private fun showAfterPick() {
+        if (!picking) return
+        picking = false
+        if (!added) return
+        concealed = false
+        if (open) {
+            panel.visibility = View.VISIBLE
+            if (panel.parent == null) runCatching { wm.addView(panel, panelParams()) }
+        } else {
+            ball.visibility = View.VISIBLE
+            if (ball.parent == null) runCatching { wm.addView(ball, ballParams()) }
+            bumpIdle()
+        }
+    }
+
+    private fun clearPending() {
+        pendingJpeg = null
+        preview.setImageDrawable(null)
+        preview.visibility = View.GONE
+    }
+
     private fun submit() {
         val text = input.text.toString().trim()
-        if (text.isEmpty()) return
+        val jpeg = pendingJpeg
+        if (text.isEmpty() && jpeg == null) return
+        val say = text.ifBlank { "看这张图" }
         input.setText("")
+        clearPending()
         hideKeyboard()
-        addBubble(text, mine = true)
+        addMine(say, jpeg)
         status.text = "在想…"
-        app.agent.prompt(text)
+        app.agent.prompt(say, jpeg)
     }
 
     private fun startTalk() {
@@ -469,7 +773,8 @@ class ChatOverlay(private val app: OcApp) {
                 val delta = delta(event.payload)
                 if (delta != null) {
                     streamText += delta
-                    (streaming ?: addBubble("", mine = false).also { streaming = it }).text = streamText
+                    (streaming ?: addBubble("", mine = false).also { streaming = it }).text =
+                        ChatChoices.displayWhileStreaming(streamText)
                     scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
                 }
             }
@@ -480,7 +785,8 @@ class ChatOverlay(private val app: OcApp) {
                 val shown = text ?: err
                 if (!shown.isNullOrBlank()) {
                     streamText = shown
-                    (streaming ?: addBubble("", mine = false).also { streaming = it }).text = shown
+                    val bubble = streaming ?: addBubble("", mine = false).also { streaming = it }
+                    finishAssistant(bubble, shown)
                     if (err != null) status.text = err
                 }
                 streaming = null
@@ -492,7 +798,136 @@ class ChatOverlay(private val app: OcApp) {
         }
     }
 
+    private fun addMine(text: String, jpeg: ByteArray?) {
+        if (jpeg == null) {
+            addBubble(text, mine = true)
+            return
+        }
+        val box = LinearLayout(app).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+        }
+        val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+        if (bitmap != null) {
+            val image = ImageView(app).apply {
+                setImageBitmap(bitmap)
+                adjustViewBounds = true
+            }
+            box.addView(
+                image,
+                LinearLayout.LayoutParams(dp(160), LinearLayout.LayoutParams.WRAP_CONTENT),
+            )
+        }
+        if (text.isNotBlank()) {
+            box.addView(
+                TextView(app).apply {
+                    this.text = text
+                    textSize = 15f
+                    setTextColor(Color.WHITE)
+                    background = round(ACCENT, 10)
+                    setPadding(dp(10), dp(8), dp(10), dp(8))
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(4) },
+            )
+        }
+        messages.addView(
+            box,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                gravity = Gravity.END
+                topMargin = dp(8)
+                leftMargin = dp(36)
+            },
+        )
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun finishAssistant(bubble: TextView, raw: String) {
+        val parsed = ChatChoices.parse(raw)
+        bubble.text = parsed.text.ifBlank { raw.trim() }
+        val index = messages.indexOfChild(bubble)
+        if (index >= 0) {
+            // Drop a previous choice row attached to this bubble, if any.
+            val next = messages.getChildAt(index + 1)
+            if (next?.tag == CHOICE_ROW) messages.removeViewAt(index + 1)
+        }
+        if (parsed.choices.isEmpty()) {
+            scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+            return
+        }
+        val row = LinearLayout(app).apply {
+            orientation = LinearLayout.VERTICAL
+            tag = CHOICE_ROW
+        }
+        for (choice in parsed.choices) {
+            val chip = TextView(app).apply {
+                text = choice
+                textSize = 14f
+                setTextColor(ACCENT)
+                background = GradientDrawable().apply {
+                    setColor(0xFFFFF4EC.toInt())
+                    setStroke(dp(1), ACCENT)
+                    cornerRadius = dp(10).toFloat()
+                }
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                setOnClickListener {
+                    if (tag == DISABLED) return@setOnClickListener
+                    disableChoiceRows()
+                    pickChoice(choice)
+                }
+            }
+            row.addView(
+                chip,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(6) },
+            )
+        }
+        val at = if (index >= 0) index + 1 else messages.childCount
+        messages.addView(
+            row,
+            at,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                gravity = Gravity.START
+                rightMargin = dp(36)
+                bottomMargin = dp(4)
+            },
+        )
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun pickChoice(choice: String) {
+        hideKeyboard()
+        addMine(choice, null)
+        status.text = "在想…"
+        app.agent.prompt(choice, null)
+    }
+
+    private fun disableChoiceRows() {
+        for (i in 0 until messages.childCount) {
+            val row = messages.getChildAt(i) ?: continue
+            if (row.tag != CHOICE_ROW || row !is LinearLayout) continue
+            row.tag = DISABLED
+            for (j in 0 until row.childCount) {
+                val chip = row.getChildAt(j) as? TextView ?: continue
+                chip.tag = DISABLED
+                chip.alpha = 0.45f
+                chip.isClickable = false
+            }
+        }
+    }
+
     private fun addBubble(text: String, mine: Boolean): TextView {
+        if (mine) disableChoiceRows()
         val view = TextView(app).apply {
             this.text = text
             textSize = 15f
@@ -522,7 +957,7 @@ class ChatOverlay(private val app: OcApp) {
     }
 
     private fun ballParams() = WindowManager.LayoutParams(
-        dp(56), dp(56),
+        ballSize.coerceAtLeast(1), ballSize.coerceAtLeast(1),
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -570,9 +1005,15 @@ class ChatOverlay(private val app: OcApp) {
     private fun dp(v: Int) = (v * density).toInt()
 
     companion object {
+        private const val FULL = 56
+        private const val EDGE = 6
+        private const val MAGNET = 36
+        private const val IDLE_MS = 15_000L
         private const val ACCENT = 0xFFE85D04.toInt()
         private const val INK = 0xFF191919.toInt()
         private const val MUTED = 0xFF8C8C8C.toInt()
+        private const val CHOICE_ROW = "oca-choice-row"
+        private const val DISABLED = "oca-choice-disabled"
 
         private fun jsonText(payload: String) =
             runCatching { JSONObject(payload).optString("text").ifBlank { null } }.getOrNull()

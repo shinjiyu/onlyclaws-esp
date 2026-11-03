@@ -36,6 +36,7 @@ class JsContainer(
     }
     private val plugins = mutableListOf<JsPlugin>()
     private val frameBusy = AtomicBoolean(false)
+    private val wallBusy = AtomicBoolean(false)
     private var runtime: V8Runtime? = null
     private var lastError = ""
     private var lastErrorAt = 0L
@@ -63,8 +64,14 @@ class JsContainer(
         thread.execute {
             plugins.forEach { it.beforeSwap() }
             var pumps = false
-            val result = runCatching { pumps = swap(source, allow) }
+            var wallpaper = false
+            val result = runCatching {
+                val hooks = swap(source, allow)
+                pumps = hooks.first
+                wallpaper = hooks.second
+            }
             plugins.forEach { it.afterSwap(result.isSuccess, pumps) }
+            if (result.isSuccess) plugins.forEach { it.wallpaperHook(wallpaper) }
             plugins.forEach { it.afterTurn() }
             done(result)
         }
@@ -76,6 +83,27 @@ class JsContainer(
             val current = runtime ?: return@execute
             runCatching { callHook(current, hook, args) }.onFailure(::noteError)
             plugins.forEach { it.afterTurn() }
+        }
+    }
+
+    /**
+     * One wallpaper vsync. The wallpaper engine calls this while its surface is showing.
+     * Dropped when the previous wallpaper frame is still on the script thread.
+     */
+    fun enterWallpaper(dt: Double) {
+        if (!wallBusy.compareAndSet(false, true)) return
+        thread.execute {
+            try {
+                val current = runtime ?: return@execute
+                plugins.forEach { it.beforeWallpaper() }
+                try {
+                    runCatching { callHook(current, "onWallpaper", arrayOf(dt)) }.onFailure(::noteError)
+                } finally {
+                    plugins.forEach { it.afterWallpaper() }
+                }
+            } finally {
+                wallBusy.set(false)
+            }
         }
     }
 
@@ -107,7 +135,7 @@ class JsContainer(
         thread.execute { noteError(message) }
     }
 
-    private fun swap(source: String, allow: (JsPlugin) -> Boolean): Boolean {
+    private fun swap(source: String, allow: (JsPlugin) -> Boolean): Pair<Boolean, Boolean> {
         val fresh = V8Host.getV8Instance().createV8Runtime<V8Runtime>()
         try {
             val scope = Scope(fresh)
@@ -124,6 +152,7 @@ class JsContainer(
             }
             callHook(fresh, "onStart")
             val pumps = hasFunction(fresh, "onFrame")
+            val wallpaper = hasFunction(fresh, "onWallpaper")
             val previous = runtime
             runtime = fresh
             plugins.forEach { it.setDrawing(false) }
@@ -133,7 +162,7 @@ class JsContainer(
                 plugins.forEach { it.setDrawing(true) }
                 previous?.let(::close)
             }
-            return pumps
+            return pumps to wallpaper
         } catch (t: Throwable) {
             if (runtime !== fresh) close(fresh)
             throw ScriptException(describe(t), t)
@@ -344,6 +373,13 @@ interface JsPlugin {
     fun afterSwap(ok: Boolean, pumpsFrames: Boolean) {}
     fun afterTurn() {}
     fun setDrawing(enabled: Boolean) {}
+
+    /** True when the running script declares `onWallpaper`. A failed load does not call this. */
+    fun wallpaperHook(enabled: Boolean) {}
+
+    /** Bookends one [JsContainer.enterWallpaper] call. Default no-op. */
+    fun beforeWallpaper() {}
+    fun afterWallpaper() {}
 }
 
 /** Where plugins hang their globals. Engine types stay inside [JsContainer]. */

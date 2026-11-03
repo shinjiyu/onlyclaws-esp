@@ -29,7 +29,7 @@ class OcApp : Application() {
         desk = DeskPlugin(container) { line -> append(line) }
         tts = TtsPlugin(this, container, asr) { line -> append(line) }
         asr.onBargeIn = { tts.interrupt() }
-        wallpaper = WallpaperPlugin(this) { line -> append(line) }
+        wallpaper = WallpaperPlugin(this, container) { line -> append(line) }
         http = HttpPlugin()
         sockets = SocketPlugin()
         ssh = SshPlugin(File(filesDir, "ssh-known.txt"))
@@ -37,6 +37,7 @@ class OcApp : Application() {
         agent = AgentRuntime(this)
         asrPlugin = AsrPlugin(asr, container) { line -> append(line) }
         llm = LlmPlugin(agent.store)
+        shot = ShotPlugin()
         container.use(overlay)
         container.use(overlay.web)
         container.use(screen)
@@ -49,6 +50,7 @@ class OcApp : Application() {
         container.use(keys)
         container.use(asrPlugin)
         container.use(llm)
+        container.use(shot)
         chat = ChatOverlay(this)
         reloadScript()
         watchActiveFile()
@@ -67,7 +69,7 @@ class OcApp : Application() {
     fun load(source: String, done: (Result<Unit>) -> Unit) {
         val generated = source.startsWith(HarnessText.MARK)
         val allow: (JsPlugin) -> Boolean = if (generated) {
-            { it === overlay || it === screen || it === tts || it === http || it === sockets || it === ssh || it === wallpaper || it === asrPlugin || it === llm }
+            { it === overlay || it === screen || it === tts || it === http || it === sockets || it === ssh || it === wallpaper || it === asrPlugin || it === llm || it === shot }
         } else {
             { true }
         }
@@ -99,6 +101,8 @@ class OcApp : Application() {
         private set
     lateinit var llm: LlmPlugin
         private set
+    lateinit var shot: ShotPlugin
+        private set
 
     fun reloadScript() {
         val boot = assets.open("boot.js").bufferedReader().readText()
@@ -124,6 +128,11 @@ class OcApp : Application() {
         val mask = FileObserver.CLOSE_WRITE or FileObserver.MODIFY or FileObserver.MOVED_TO or FileObserver.CREATE
         watcher = object : FileObserver(filesDir.absolutePath, mask) {
             override fun onEvent(event: Int, path: String?) {
+                if (path == DRAFT_FILE) {
+                    main.removeCallbacks(draftRunnable)
+                    main.postDelayed(draftRunnable, 250)
+                    return
+                }
                 if (path != null && path != "active.js") return
                 main.removeCallbacks(reloadRunnable)
                 main.postDelayed(reloadRunnable, 250)
@@ -132,6 +141,15 @@ class OcApp : Application() {
     }
 
     private val reloadRunnable = Runnable { reloadScript() }
+
+    /** `files/draft.txt` (written via adb run-as) opens the chat panel with that text in the input. */
+    private val draftRunnable = Runnable {
+        val file = java.io.File(filesDir, DRAFT_FILE)
+        if (!file.exists()) return@Runnable
+        val text = runCatching { file.readText() }.getOrDefault("").trim()
+        file.delete()
+        if (text.isNotEmpty()) chat.draft(text)
+    }
 
     /** [tap] sees every log line as it is written, on the writer's thread. */
     fun tap(tap: (String) -> Unit) {
@@ -166,6 +184,7 @@ class OcApp : Application() {
 
     companion object {
         private const val TAG = "OCA"
+        private const val DRAFT_FILE = "draft.txt"
         lateinit var instance: OcApp
     }
 }

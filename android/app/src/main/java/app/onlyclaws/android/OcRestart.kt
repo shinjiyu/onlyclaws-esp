@@ -15,10 +15,11 @@ import androidx.core.content.ContextCompat
  * An exact alarm is what Android 12+ allows to start a foreground service from the background.
  */
 fun scheduleOcRestart(context: Context) {
+    if (OcLifecycle.stayDown(context)) return
     val alarm = context.getSystemService(AlarmManager::class.java) ?: return
     val pending = PendingIntent.getBroadcast(
         context,
-        RESTART_REQUEST,
+        OC_RESTART_REQUEST,
         Intent(context, OcRestart::class.java),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
@@ -38,11 +39,12 @@ fun scheduleOcRestart(context: Context) {
 
 class OcRestart : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
+        if (OcLifecycle.stayDown(context)) return
         runCatching {
             ContextCompat.startForegroundService(context, Intent(context, OcService::class.java))
         }
     }
 }
 
-private const val RESTART_REQUEST = 0x0CA
+internal const val OC_RESTART_REQUEST = 0x0CA
 private const val RESTART_DELAY_MS = 1_000L

@@ -81,7 +81,7 @@ class AgentRuntime(private val app: OcApp) {
         }
     }
 
-    fun prompt(text: String) {
+    fun prompt(text: String, imageJpeg: ByteArray? = null) {
         thread.execute {
             val fn = promptFn
             val rt = runtime
@@ -93,8 +93,13 @@ class AgentRuntime(private val app: OcApp) {
                 emit(AgentEvent("error", """{"text":"先在设置里配一家后端的 API key"}"""))
                 return@execute
             }
+            val args = mutableListOf<V8Value>(rt.createV8ValueString(text))
+            if (imageJpeg != null && imageJpeg.isNotEmpty()) {
+                val b64 = android.util.Base64.encodeToString(imageJpeg, android.util.Base64.NO_WRAP)
+                args += rt.createV8ValueString("""[{"data":"$b64","mimeType":"image/jpeg"}]""")
+            }
             runCatching {
-                val result = fn.call<V8Value>(rt.createV8ValueUndefined(), *arrayOf<V8Value>(rt.createV8ValueString(text)))
+                val result = fn.call<V8Value>(rt.createV8ValueUndefined(), *args.toTypedArray())
                 try {
                     pump(rt)
                 } finally {
@@ -104,6 +109,7 @@ class AgentRuntime(private val app: OcApp) {
                 Log.e(TAG, "prompt", it)
                 emit(AgentEvent("error", JSONObject().put("text", it.message ?: "prompt 失败").toString()))
             }
+            args.forEach { runCatching { it.close() } }
         }
     }
 
@@ -237,6 +243,11 @@ class AgentRuntime(private val app: OcApp) {
             fn("readApp") { app.container.readActive(app) ?: "" }
             fn("unloadApp") { unload() }
             fn("readLogs") { app.lines.joinToString("\n") }
+            fn("screenShot") { ScreenGrab.capture() }
+            fn("browserOpen") { args -> app.overlay.web.browse(string(rt, args, 0)) }
+            fn("browserRead") { app.overlay.web.readPage() }
+            fn("browserAct") { args -> app.overlay.web.act(string(rt, args, 0)) }
+            fn("browserRun") { args -> app.overlay.web.run(string(rt, args, 0)) }
             fn("event") { args ->
                 emit(AgentEvent(string(rt, args, 0), string(rt, args, 1)))
             }

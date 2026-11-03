@@ -5,7 +5,7 @@ A2UI, transparent WebView overlay, TTS, live wallpaper). Behavior lives in a
 downloaded script (`files/active.js`), pushed over the device session as a `js`
 tool — same control plane as the boards.
 
-Package: `app.onlyclaws.android` · firmware string: `oca-0.8.5` · capability: `container`
+Package: `app.onlyclaws.android` · firmware string: `oca-0.8.25` · capability: `container`
 
 ## Build
 
@@ -89,9 +89,10 @@ A click on `data-action` calls `onAction` with `e.context` filled from `data-fie
 | `keys` | `get` / `set` / `has` for one private file per name, such as `deepseek`. The value is not drawn on the screen. |
 | `gfx` | System overlay: `clear` / `rect` / `line` / `circle` / `text` / `text_width`. ARGB; 6-digit is opaque. `clear(0)` empties the window. A full-screen wash does not take touches, so the launcher can still change pages. Needs overlay permission. |
 | `asr` | Same on-device SenseVoice as the chat ball: `warm` / `start` / `stop`, getters `ready` / `hasModel` / `listening`. `onSpeech({ text, partial, error? })`. One mic: script and chat cannot listen together. |
-| `llm` | `ready` / `provider` / `model`; `chat({ messages, system? })` → `{ text, error, provider, model }`. Host sends the key. OpenAI-compatible backends only. |
+| `llm` | `ready` / `provider` / `model`; `chat({ messages, system? })` → `{ text, error, provider, model }`. A user message may include `image` as base64. Host sends the key. OpenAI-compatible backends only. |
+| `shot` | `take()` → `{ b64, mime, w, h, error }`. JPEG of the whole display, including icons and the foreground app. One system capture consent, then reuse until the user stops it. No accessibility service. |
 | `tts` | `say` / `stop` + `onDone` |
-| `wallpaper` | The word 壁纸 maps only here. `load({ color, text })` or `load({ scene: "crash" })`, `clear()`. A star field is the flat color `0x05060e`; there is no per-star wallpaper API. Does not take launcher swipes. |
+| `wallpaper` | The word 壁纸 maps only here. `load({ color, text })`, `load({ scene: "crash" })`, `load({ scene: "castle" })` (the bundled Infinity Castle fall), `load({ html })`, or `load({ url })` (remote page as wallpaper: https, or http on localhost/LAN). Inline HTML and remote pages run behind the icons with JavaScript and WebGL. `OcaWallpaper.tiltX/Y` and `gyroX/Y/Z` are radians. `onWallpaper(dt)` is the flat path: `clear` / `rect` / `line` / `circle` / `tri` / `text`. No touches, no launcher swipes. |
 | `ui` | `w`/`h`, `safe`, `keyboard` (dp) |
 | `http` / `fetch` | `http.request({ url, method, headers, body, timeoutMs })` and `fetch(url, init)` → `{ ok, status, body, error, headers }`. `fetch` also has `text()` / `json()`. Sync, https only. |
 | `socket` | Outbound TCP. `open({ host, port, timeoutMs })` → `{ id, error }`. `send(id, { text } or { b64 })`. `recv(id, { maxBytes, timeoutMs })` → `{ text, b64, n, eof, error }`. `close(id)`. No listen. |

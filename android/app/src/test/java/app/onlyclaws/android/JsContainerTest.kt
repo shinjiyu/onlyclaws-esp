@@ -149,6 +149,29 @@ class JsContainerTest {
     }
 
     @Test
+    fun wallpaperHookTracksTheRunningScript() {
+        var flag = false
+        container.use(object : JsPlugin {
+            override fun install(scope: JsScope) {}
+            override fun wallpaperHook(enabled: Boolean) { flag = enabled }
+        })
+        load("function onStart() {}\nfunction onWallpaper(dt) {}").getOrThrow()
+        assertTrue(flag)
+        load("function onStart() {}").getOrThrow()
+        assertTrue(!flag)
+        val failed = load("function onStart() { throw new Error('nope'); }\nfunction onWallpaper(dt) {}")
+        assertTrue(failed.isFailure)
+        assertTrue(!flag)
+    }
+
+    @Test
+    fun onWallpaperReceivesTheFrame() {
+        load("function onWallpaper(dt) { oca.log('wall ' + (dt > 0)); }").getOrThrow()
+        container.enterWallpaper(0.016)
+        expectLog("wall true")
+    }
+
+    @Test
     fun scriptsSeeNoJava() {
         load("function onStart() { oca.log([typeof java, typeof Packages, typeof require].join(',')); }").getOrThrow()
         expectLog("undefined,undefined,undefined")

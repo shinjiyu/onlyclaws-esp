@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
             app.overlay.metrics.keyboard = ime.bottom / density
             insets
         }
+        OcLifecycle.clearStayDown(this)
         ContextCompat.startForegroundService(this, Intent(this, OcService::class.java))
         maybeReload(intent)
     }

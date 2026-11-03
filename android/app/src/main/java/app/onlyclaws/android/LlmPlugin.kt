@@ -4,7 +4,7 @@ package app.onlyclaws.android
  * Script-side chat. Uses the same [AgentStore] key the agent uses.
  *
  *   llm.ready / llm.provider / llm.model
- *   llm.chat({ messages: [{ role, content }], system? })
+ *   llm.chat({ messages: [{ role, content, image? }], system? })
  *     → { text, error, provider, model }
  */
 class LlmPlugin(

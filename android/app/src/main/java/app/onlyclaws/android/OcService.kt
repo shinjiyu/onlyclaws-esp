@@ -16,6 +16,10 @@ class OcService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (OcLifecycle.stayDown(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startInForeground()
         if (wire == null) {
             val app = application as OcApp
@@ -41,7 +45,7 @@ class OcService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        scheduleOcRestart(this)
+        if (!OcLifecycle.stayDown(this)) scheduleOcRestart(this)
         super.onTaskRemoved(rootIntent)
     }
 

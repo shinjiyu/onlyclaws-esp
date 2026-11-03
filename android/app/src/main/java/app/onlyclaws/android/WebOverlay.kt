@@ -7,6 +7,9 @@ import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -24,13 +27,17 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import android.content.Intent
+import org.json.JSONObject
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Login stays on screen. Browse URLs sit off-screen and muted.
+ * Login stays on screen. Scripted web.url calls sit off-screen and muted.
+ * The agent browser shows the page and reads its text.
  * `web.float` puts a transparent WebView on the system overlay so a page
  * (or a video) can play over other apps.
  *
@@ -65,6 +72,11 @@ class WebOverlay(
     private val wanted = AtomicBoolean(false)
     private val shown = AtomicBoolean(false)
     private var closeWhenLoggedIn = false
+    private var loadToken = 0
+    private var pending: Pair<Int, CompletableFuture<String>>? = null
+    private var afterAction: CompletableFuture<String>? = null
+    private var afterNote = ""
+    private var pageLoading = false
 
     private val watchLogin = object : Runnable {
         override fun run() {
@@ -112,8 +124,251 @@ class WebOverlay(
 
     fun url(url: String) = main.post { open(url) }
 
+    /** Open an https page on screen and return its title plus visible text. */
+    fun browse(raw: String): String {
+        val url = https(raw) ?: return "只打开 https 网址"
+        val done = CompletableFuture<String>()
+        main.post { begin(url, done) }
+        return runCatching { done.get(20, TimeUnit.SECONDS) }.getOrElse { "页面打开超时" }
+    }
+
+    /** Click, type, scroll, press a key, pick an option, or go back. Returns the page afterwards. */
+    fun act(specJson: String): String {
+        val spec = runCatching { JSONObject(specJson) }.getOrElse { return "操作格式不对" }
+        val done = CompletableFuture<String>()
+        main.post { perform(spec, done) }
+        return runCatching { done.get(15, TimeUnit.SECONDS) }.getOrElse { "操作超时" }
+    }
+
+    /** Read the page already open. Does not navigate. */
+    fun readPage(): String {
+        val done = CompletableFuture<String>()
+        main.post {
+            val page = view
+            val current = page?.url.orEmpty()
+            if (page == null || current.isBlank() || current == "about:blank" || !shown.get()) {
+                done.complete("浏览器关着")
+                return@post
+            }
+            snapshot(page, done)
+        }
+        return runCatching { done.get(8, TimeUnit.SECONDS) }.getOrElse { "读不到页面" }
+    }
+
+    /** Run a script in the open page and return its value. The page stays on screen. */
+    fun run(code: String): String {
+        val trimmed = code.trim()
+        if (trimmed.isEmpty()) return "没有脚本"
+        if (trimmed.length > 20_000) return "脚本太长"
+        val lower = trimmed.lowercase()
+        if (lower.contains("document.cookie") || lower.contains("localstorage") || lower.contains("sessionstorage")) {
+            return "不要用脚本读取登录凭证"
+        }
+        val done = CompletableFuture<String>()
+        main.post {
+            val page = view
+            val current = page?.url.orEmpty()
+            if (page == null || current.isBlank() || current == "about:blank" || !shown.get()) {
+                done.complete("浏览器关着")
+                return@post
+            }
+            bringPage()
+            page.evaluateJavascript("(function(code){$RUN})(${JSONObject.quote(trimmed)})") { value ->
+                val text = unwrap(value)
+                done.complete(if (text.length > 8000) text.take(8000) + "\n…" else text)
+            }
+        }
+        return runCatching { done.get(15, TimeUnit.SECONDS) }.getOrElse { "脚本超时" }
+    }
+
     /** Transparent page on the system overlay. HTML, or an http(s) URL. */
     fun float(src: String) = main.post { openFloat(src) }
+
+    private fun begin(url: String, done: CompletableFuture<String>) {
+        closeWhenLoggedIn = false
+        main.removeCallbacks(watchLogin)
+        releaseFloat()
+        releaseQuiet()
+        val page = ensure()
+        page.setBackgroundColor(Color.WHITE)
+        wanted.set(true)
+        pending?.second?.complete("被新的页面打断")
+        val token = ++loadToken
+        pending = token to done
+        present(page)
+        page.stopLoading()
+        if (page.url == url) page.reload() else page.loadUrl(url)
+        main.post { if (wanted.get()) present(page) }
+        onLog("打开 $url")
+    }
+
+    private fun perform(spec: JSONObject, done: CompletableFuture<String>) {
+        val page = view
+        val current = page?.url.orEmpty()
+        if (page == null || current.isBlank() || current == "about:blank" || !shown.get()) {
+            done.complete("浏览器关着")
+            return
+        }
+        bringPage()
+        val action = spec.optString("action").trim().lowercase()
+        if (action == "back") {
+            if (!page.canGoBack()) {
+                done.complete("没有上一页")
+                return
+            }
+            page.goBack()
+            onLog("网页返回")
+            settle(page, "已返回上一页", done, 2500)
+            return
+        }
+        page.evaluateJavascript(actionScript(spec)) { raw ->
+            val payload = unwrap(raw)
+            val result = runCatching { JSONObject(payload) }.getOrNull()
+            if (result == null || !result.optBoolean("ok")) {
+                val err = result?.optString("error").orEmpty().ifBlank { "没点到" }
+                done.complete(err)
+                return@evaluateJavascript
+            }
+            when (action) {
+                "click" -> {
+                    tap(page, result)
+                    val label = result.optString("label").ifBlank { spec.optString("target") }
+                    onLog("点击 $label")
+                    settle(page, "已点击「$label」", done, 2200)
+                }
+                "type" -> {
+                    tap(page, result)
+                    val text = spec.optString("text")
+                    main.postDelayed({
+                        page.evaluateJavascript(typeScript(text)) {
+                            onLog("输入")
+                            settle(page, "已输入", done, 800)
+                        }
+                    }, 180)
+                }
+                "key" -> {
+                    val name = spec.optString("key").ifBlank { spec.optString("text") }
+                    if (!press(page, name)) {
+                        done.complete("不认识这个键")
+                        return@evaluateJavascript
+                    }
+                    onLog("按键 $name")
+                    settle(page, "已按 $name", done, 1500)
+                }
+                "scroll" -> settle(page, "已滚动", done, 500)
+                "select" -> {
+                    val label = result.optString("label").ifBlank { spec.optString("text") }
+                    onLog("选择 $label")
+                    settle(page, "已选择「$label」", done, 800)
+                }
+                else -> done.complete("不认识的操作")
+            }
+        }
+    }
+
+    private fun bringPage() {
+        val page = view ?: return
+        wanted.set(true)
+        present(page)
+    }
+
+    /** Put the page back on screen. A closed WebView still has a document, so this must run before any read. */
+    private fun present(page: WebView) {
+        page.onResume()
+        page.resumeTimers()
+        bringActivity()
+        if (host != null) place(page)
+    }
+
+    private fun bringActivity() {
+        runCatching {
+            app.startActivity(
+                Intent(app, MainActivity::class.java)
+                    .addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+                    ),
+            )
+        }
+    }
+
+    private fun settle(page: WebView, note: String, done: CompletableFuture<String>, delayMs: Long) {
+        afterNote = note
+        afterAction = done
+        main.postDelayed({
+            if (afterAction !== done || done.isDone || pageLoading) return@postDelayed
+            afterAction = null
+            snapshot(page, done, note)
+        }, delayMs)
+        main.postDelayed({
+            if (afterAction !== done || done.isDone) return@postDelayed
+            afterAction = null
+            snapshot(page, done, note)
+        }, 12000)
+    }
+
+    private fun tap(page: WebView, result: JSONObject) {
+        if (!result.has("x") || !result.has("y")) return
+        val density = page.resources.displayMetrics.density
+        val scale = result.optDouble("scale", 1.0).toFloat().coerceAtLeast(0.1f)
+        val x = result.optDouble("x").toFloat() * scale * density
+        val y = result.optDouble("y").toFloat() * scale * density
+        val now = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0)
+        val up = MotionEvent.obtain(now, now + 60, MotionEvent.ACTION_UP, x, y, 0)
+        page.dispatchTouchEvent(down)
+        page.dispatchTouchEvent(up)
+        down.recycle()
+        up.recycle()
+    }
+
+    private fun press(page: WebView, name: String): Boolean {
+        val code = when (name.trim().lowercase()) {
+            "enter", "return" -> KeyEvent.KEYCODE_ENTER
+            "tab" -> KeyEvent.KEYCODE_TAB
+            "escape", "esc" -> KeyEvent.KEYCODE_ESCAPE
+            "backspace", "delete" -> KeyEvent.KEYCODE_DEL
+            "arrowdown", "down" -> KeyEvent.KEYCODE_DPAD_DOWN
+            "arrowup", "up" -> KeyEvent.KEYCODE_DPAD_UP
+            else -> return false
+        }
+        val now = SystemClock.uptimeMillis()
+        page.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0))
+        page.dispatchKeyEvent(KeyEvent(now, now + 30, KeyEvent.ACTION_UP, code, 0))
+        return true
+    }
+
+    private fun actionScript(spec: JSONObject): String = "(function(spec){$ACT})(${spec})"
+
+    private fun typeScript(text: String): String = "(function(text){$TYPE})(${JSONObject.quote(text)})"
+
+    private fun snapshot(page: WebView, done: CompletableFuture<String>, note: String = "") {
+        if (done.isDone) return
+        page.evaluateJavascript(SNAPSHOT) { value ->
+            if (done.isDone) return@evaluateJavascript
+            val body = unwrap(value)
+            done.complete(if (note.isBlank()) body else "$note\n\n$body")
+        }
+    }
+
+    private fun https(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+        if (trimmed.startsWith("http://")) return null
+        val url = if (trimmed.startsWith("https://")) trimmed else "https://$trimmed"
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
+        if (uri.scheme != "https" || uri.host.isNullOrBlank()) return null
+        return url
+    }
+
+    private fun unwrap(value: String?): String {
+        if (value.isNullOrBlank() || value == "null") return "页面是空的"
+        return runCatching {
+            val text = org.json.JSONArray("[$value]").getString(0)
+            text.ifBlank { "页面是空的" }
+        }.getOrElse { value.trim('"').ifBlank { "页面是空的" } }
+    }
 
     private fun open(url: String) {
         releaseFloat()
@@ -235,6 +490,7 @@ class WebOverlay(
         releaseQuiet()
         releaseFloat()
         view?.stopLoading()
+        view?.onPause()
         view?.loadUrl("about:blank")
         OcService.updateNote(app, app.getString(R.string.note))
         if (was) onLog(reason)
@@ -399,8 +655,47 @@ class WebOverlay(
                     return false
                 }
 
+                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                    pageLoading = true
+                }
+
                 override fun onPageFinished(view: WebView, url: String) {
+                    pageLoading = false
+                    if (url == "about:blank") return
                     if (quietRoot != null && view.parent == quietRoot) mute(view)
+                    val token = ++loadToken
+                    val waiting = pending
+                    if (waiting != null) {
+                        main.postDelayed({
+                            val current = pending
+                            if (current == null || current.first != waiting.first || loadToken != token) return@postDelayed
+                            if (!shown.get() || !view.isAttachedToWindow) {
+                                if (wanted.get()) place(view)
+                                main.postDelayed({
+                                    val again = pending
+                                    if (again == null || again.first != waiting.first) return@postDelayed
+                                    pending = null
+                                    if (!shown.get() || !view.isAttachedToWindow) {
+                                        again.second.complete("页面没有显示出来")
+                                    } else {
+                                        snapshot(view, again.second)
+                                    }
+                                }, 400)
+                                return@postDelayed
+                            }
+                            pending = null
+                            snapshot(view, current.second)
+                        }, 700)
+                    }
+                    val actionWait = afterAction
+                    val note = afterNote
+                    if (actionWait != null && !actionWait.isDone) {
+                        main.postDelayed({
+                            if (afterAction !== actionWait || actionWait.isDone) return@postDelayed
+                            afterAction = null
+                            snapshot(view, actionWait, note)
+                        }, 700)
+                    }
                 }
             }
             webChromeClient = object : WebChromeClient() {
@@ -513,6 +808,186 @@ class WebOverlay(
 
     companion object {
         private const val ORIGIN = "https://onlyclaws.local/"
+        private const val ACT = """
+          function textOf(el) {
+            if (!el) return "";
+            var raw = el.innerText || el.value || "";
+            var aria = el.getAttribute ? (el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.getAttribute("title") || "") : "";
+            return String(raw || aria).replace(/\s+/g, " ").trim();
+          }
+          function visible(el) {
+            if (!el || !el.getBoundingClientRect) return false;
+            var r = el.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1) return false;
+            var st = el.ownerDocument.defaultView.getComputedStyle(el);
+            return st.visibility !== "hidden" && st.display !== "none";
+          }
+          function docs(root) {
+            var out = [root];
+            var frames = root.querySelectorAll ? root.querySelectorAll("iframe") : [];
+            for (var i = 0; i < frames.length; i++) {
+              try { if (frames[i].contentDocument) out = out.concat(docs(frames[i].contentDocument)); } catch (e) {}
+            }
+            return out;
+          }
+          function point(el) {
+            el.scrollIntoView({ block: "center", inline: "center" });
+            var r = el.getBoundingClientRect();
+            var x = r.left + r.width / 2;
+            var y = r.top + r.height / 2;
+            var win = el.ownerDocument.defaultView;
+            while (win && win.frameElement) {
+              var fr = win.frameElement.getBoundingClientRect();
+              x += fr.left;
+              y += fr.top;
+              win = win.frameElement.ownerDocument.defaultView;
+            }
+            var scale = window.visualViewport ? window.visualViewport.scale : 1;
+            var pages = docs(document);
+            for (var i = 0; i < pages.length; i++) {
+              var marked = pages[i].querySelectorAll("[data-oca-focus]");
+              for (var j = 0; j < marked.length; j++) marked[j].removeAttribute("data-oca-focus");
+            }
+            el.setAttribute("data-oca-focus", "1");
+            return { ok: true, x: x, y: y, scale: scale, label: textOf(el).slice(0, 80) };
+          }
+          function find(target) {
+            target = String(target || "").trim();
+            if (!target) return null;
+            var pages = docs(document);
+            var sel = null;
+            if (/^[#.[]/.test(target) || /^[a-zA-Z][\w-]*[\[.#\s:>]/.test(target)) {
+              for (var i = 0; i < pages.length && !sel; i++) {
+                try { sel = pages[i].querySelector(target); } catch (e) {}
+              }
+            }
+            if (sel) return sel;
+            var want = target.replace(/\s+/g, " ").toLowerCase();
+            var loose = null;
+            for (var p = 0; p < pages.length; p++) {
+              var nodes = pages[p].querySelectorAll("a,button,input,textarea,select,label,summary,[role=button],[role=link],[role=tab],[role=menuitem]");
+              for (var n = 0; n < nodes.length; n++) {
+                var el = nodes[n];
+                var label = textOf(el).toLowerCase();
+                if (!label || !visible(el)) continue;
+                if (label === want) return el;
+                if (!loose && label.indexOf(want) >= 0) loose = el;
+              }
+            }
+            return loose;
+          }
+          if (spec.action === "scroll") {
+            var dy = Number(spec.dy || 640);
+            var box = spec.target ? find(spec.target) : null;
+            if (box && box.scrollHeight > box.clientHeight + 8) box.scrollBy(0, dy);
+            else window.scrollBy(0, dy);
+            return JSON.stringify({ ok: true, scrolled: dy });
+          }
+          if (spec.action === "select") {
+            var menu = find(spec.target || "");
+            if (!menu || !menu.options) return JSON.stringify({ ok: false, error: "找不到下拉框" });
+            var want = String(spec.text || "").replace(/\s+/g, " ").trim().toLowerCase();
+            var chosen = "";
+            for (var i = 0; i < menu.options.length; i++) {
+              var opt = menu.options[i];
+              var name = String(opt.text || opt.value || "").replace(/\s+/g, " ").trim().toLowerCase();
+              if (name === want || name.indexOf(want) >= 0) {
+                menu.value = opt.value;
+                chosen = opt.text || opt.value;
+                break;
+              }
+            }
+            if (!chosen) return JSON.stringify({ ok: false, error: "没有这个选项" });
+            menu.dispatchEvent(new Event("input", { bubbles: true }));
+            menu.dispatchEvent(new Event("change", { bubbles: true }));
+            return JSON.stringify({ ok: true, label: chosen });
+          }
+          if (spec.action === "key") return JSON.stringify({ ok: true });
+          var hit = find(spec.target || "");
+          if (!hit) return JSON.stringify({ ok: false, error: "找不到「" + (spec.target || "") + "」" });
+          return JSON.stringify(point(hit));
+        """
+
+        private const val TYPE = """
+          function marked(root) {
+            var hit = root.querySelector ? root.querySelector("[data-oca-focus='1']") : null;
+            if (hit) return hit;
+            var frames = root.querySelectorAll ? root.querySelectorAll("iframe") : [];
+            for (var i = 0; i < frames.length; i++) {
+              try {
+                if (frames[i].contentDocument) {
+                  var inner = marked(frames[i].contentDocument);
+                  if (inner) return inner;
+                }
+              } catch (e) {}
+            }
+            return null;
+          }
+          var el = marked(document) || document.activeElement;
+          if (!el || el === document.body || el === document.documentElement) return "找不到输入框";
+          if (el.removeAttribute) el.removeAttribute("data-oca-focus");
+          el.focus();
+          if (el.isContentEditable) {
+            document.execCommand("selectAll", false, null);
+            document.execCommand("insertText", false, text);
+            return "已输入";
+          }
+          var proto = window.HTMLTextAreaElement && el instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+          var desc = Object.getOwnPropertyDescriptor(proto, "value");
+          if (desc && desc.set) desc.set.call(el, text);
+          else el.value = text;
+          try {
+            el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+          } catch (e) {
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          return "已输入";
+        """
+
+        private const val RUN = """
+          try {
+            var value = (0, eval)(code);
+            if (typeof value === "undefined") return "完成";
+            if (typeof value === "string") return value;
+            return JSON.stringify(value);
+          } catch (e) {
+            return "脚本出错：" + (e && e.message ? e.message : String(e));
+          }
+        """
+
+        private const val SNAPSHOT = """
+            (function(){
+              function label(el) {
+                return String(el.innerText || el.value || el.getAttribute("aria-label") || el.getAttribute("placeholder") || "")
+                  .replace(/\s+/g, " ").trim().slice(0, 40);
+              }
+              function sel(el) {
+                var tag = el.tagName.toLowerCase();
+                if (el.id) return "#" + el.id;
+                var name = el.getAttribute("name");
+                if (name) return tag + "[name='" + name.replace(/'/g, "\\'") + "']";
+                return "";
+              }
+              var title = document.title || "";
+              var text = (document.body && document.body.innerText) || "";
+              text = text.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+              if (text.length > 4000) text = text.slice(0, 4000) + "\n…";
+              var lines = [];
+              var nodes = document.querySelectorAll("a,button,input,textarea,select,[role=button],[role=link]");
+              for (var i = 0; i < nodes.length && lines.length < 40; i++) {
+                var el = nodes[i];
+                var r = el.getBoundingClientRect();
+                if (r.width < 1 || r.height < 1) continue;
+                var tag = el.tagName.toLowerCase();
+                var kind = tag === "input" && el.type ? tag + ":" + el.type : tag;
+                lines.push(kind + " 「" + label(el) + "」 " + sel(el));
+              }
+              return "网址 " + location.href + "\n标题 " + title + "\n\n" + text + "\n\n可操作\n" + lines.join("\n");
+            })()
+        """
 
         fun hasSession(): Boolean {
             val jar = CookieManager.getInstance().getCookie("https://www.bilibili.com") ?: return false

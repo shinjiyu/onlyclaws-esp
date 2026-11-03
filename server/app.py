@@ -283,6 +283,12 @@ app = FastAPI(
 )
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 app.mount("/firmware", StaticFiles(directory=FIRMWARE_DIR), name="firmware")
+_castle_dir = STATIC_DIR / "castle"
+if _castle_dir.is_dir():
+    app.mount("/castle", StaticFiles(directory=_castle_dir, html=True), name="castle")
+_live2d_dir = STATIC_DIR / "live2d"
+if _live2d_dir.is_dir():
+    app.mount("/live2d", StaticFiles(directory=_live2d_dir, html=True), name="live2d")
 app.include_router(snake_ctrl.router)
 app.include_router(live_comments.router)
 

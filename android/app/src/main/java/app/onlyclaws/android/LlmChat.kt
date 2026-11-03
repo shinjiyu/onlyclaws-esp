@@ -6,6 +6,7 @@ import org.json.JSONObject
 /**
  * OpenAI-compatible chat for scripts. The key stays in [AgentStore];
  * the script only sees `{ text, error, provider, model }`.
+ * A user message may carry `image` as raw base64 or a data URL.
  */
 class LlmChat(private val call: HttpCall = HttpCall(HttpCall.client())) {
     fun complete(store: AgentStore, specJson: String?): Map<String, Any> {
@@ -29,12 +30,15 @@ class LlmChat(private val call: HttpCall = HttpCall(HttpCall.client())) {
         if (key.isEmpty()) {
             return result("", "还没有这个后端的 API key", provider, model)
         }
-        val parsed = parse(specJson) ?: return result("", "llm.chat({ messages })", provider, model)
+        val parsed = parse(specJson) ?: return result("", explain(specJson), provider, model)
         val body = JSONObject()
             .put("model", model)
             .put("messages", parsed)
             .put("stream", false)
             .toString()
+        if (body.toByteArray(Charsets.UTF_8).size > 1_800_000) {
+            return result("", "图片太大", provider, model)
+        }
         val outcome = call.perform(
             HttpSpec(
                 url = url,
@@ -59,6 +63,7 @@ class LlmChat(private val call: HttpCall = HttpCall(HttpCall.client())) {
     companion object {
         private const val MAX_MESSAGES = 40
         private const val MAX_CHARS = 8000
+        private const val MAX_IMAGE = 1_200_000
 
         fun parse(specJson: String?): JSONArray? {
             val obj = specJson?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
@@ -73,18 +78,64 @@ class LlmChat(private val call: HttpCall = HttpCall(HttpCall.client())) {
                 val item = raw.optJSONObject(i) ?: return null
                 val role = item.optString("role").ifBlank { "user" }
                 if (role !in ROLES) return null
-                val content = item.optString("content").trim()
-                if (content.isEmpty()) return null
-                out.put(JSONObject().put("role", role).put("content", content.take(MAX_CHARS)))
+                val built = message(role, item) ?: return null
+                out.put(built)
             }
             return if (out.length() == 0) null else out
         }
 
+        /** Why [parse] rejected the spec. Used when the script needs a specific reason. */
+        fun explain(specJson: String?): String {
+            val obj = specJson?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return "llm.chat({ messages })"
+            val raw = obj.optJSONArray("messages") ?: return "llm.chat({ messages })"
+            for (i in 0 until minOf(raw.length(), MAX_MESSAGES)) {
+                val item = raw.optJSONObject(i) ?: continue
+                val image = item.optString("image").trim()
+                if (image.isNotEmpty() && dataUrl(image) == null) return "图片太大或不是 base64"
+            }
+            return "llm.chat({ messages })"
+        }
+
+        private fun message(role: String, item: JSONObject): JSONObject? {
+            val text = item.optString("content").trim()
+            val image = if (role == "user") item.optString("image").trim() else ""
+            if (image.isEmpty()) {
+                if (text.isEmpty()) return null
+                return JSONObject().put("role", role).put("content", text.take(MAX_CHARS))
+            }
+            val url = dataUrl(image) ?: return null
+            val parts = JSONArray()
+                .put(JSONObject().put("type", "text").put("text", text.ifBlank { "看这张图" }.take(MAX_CHARS)))
+                .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url)))
+            return JSONObject().put("role", role).put("content", parts)
+        }
+
+        private fun dataUrl(raw: String): String? {
+            if (raw.startsWith("data:image/") && raw.contains(";base64,")) {
+                val payload = raw.substringAfter(";base64,")
+                if (payload.length > MAX_IMAGE || payload.isEmpty()) return null
+                return raw
+            }
+            if (raw.length > MAX_IMAGE || raw.isEmpty()) return null
+            if (!raw.matches(BASE64)) return null
+            return "data:image/jpeg;base64,$raw"
+        }
+
         fun readText(body: String): String? =
             runCatching {
-                JSONObject(body).getJSONArray("choices").getJSONObject(0)
-                    .getJSONObject("message").getString("content")
-            }.getOrNull()?.trim()
+                val content = JSONObject(body).getJSONArray("choices").getJSONObject(0)
+                    .getJSONObject("message").get("content")
+                when (content) {
+                    is String -> content
+                    is JSONArray -> buildString {
+                        for (i in 0 until content.length()) {
+                            val part = content.optJSONObject(i) ?: continue
+                            if (part.optString("type") == "text") append(part.optString("text"))
+                        }
+                    }
+                    else -> null
+                }
+            }.getOrNull()?.trim()?.ifBlank { null }
 
         private fun apiError(body: String): String =
             runCatching { JSONObject(body).getJSONObject("error").getString("message") }.getOrDefault("").take(120)
@@ -97,6 +148,7 @@ class LlmChat(private val call: HttpCall = HttpCall(HttpCall.client())) {
         )
 
         private val ROLES = setOf("system", "user", "assistant")
+        private val BASE64 = Regex("^[A-Za-z0-9+/=]+$")
     }
 }
 
