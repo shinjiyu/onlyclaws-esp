@@ -1,4 +1,7 @@
-"""Mirror firmware capabilityAllowsTool — keep in sync with rlcd/src/capability.cpp."""
+"""Mirror firmware capabilityAllowsTool — keep in sync with rlcd/src/capability.cpp.
+
+`js` / `container` exist only on OnlyClaws Android (android/), not in ESP firmware.
+"""
 
 from __future__ import annotations
 
@@ -19,4 +22,6 @@ def tool_allowed_for_caps(tool: str, caps: list[str]) -> bool:
         return "panel" in caps
     if name == "arm" or name.startswith("arm."):
         return "arm" in caps
+    if name == "js":
+        return "container" in caps
     return False

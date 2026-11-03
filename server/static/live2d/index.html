@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>忧郁摩亞 Live2D</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #12081c;
+      touch-action: none;
+    }
+    #glcanvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #boot {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255, 220, 255, 0.55);
+      font: 14px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+      pointer-events: none;
+      z-index: 2;
+      transition: opacity .4s ease;
+    }
+    #boot.hide { opacity: 0; }
+  </style>
+  <script src="src/lib/live2d.min.js"></script>
+  <script src="src/framework/Live2DFramework.js"></script>
+  <script src="src/utils/MatrixStack.js"></script>
+  <script src="src/utils/ModelSettingJson.js"></script>
+  <script src="src/PlatformManager.js"></script>
+  <script src="src/LAppDefine.js"></script>
+  <script src="src/LAppModel.js"></script>
+  <script src="src/LAppLive2DManager.js"></script>
+  <script src="wall.js"></script>
+</head>
+<body onload="startWallpaper('m077_10')">
+  <div id="boot">忧郁摩亞加载中…</div>
+  <canvas id="glcanvas"></canvas>
+</body>
+</html>

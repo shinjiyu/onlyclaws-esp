@@ -16,13 +16,17 @@ class OcService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (OcLifecycle.stayDown(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startInForeground()
         if (wire == null) {
             val app = application as OcApp
             val session = SessionWire(
                 this,
                 onScript = { source, reply ->
-                    app.container.load(source) { result ->
+                    app.load(source) { result ->
                         result.onSuccess {
                             app.container.writeActive(this, source)
                             app.append("脚本已换上")
@@ -36,7 +40,13 @@ class OcService : Service() {
             wire = session
             session.start()
         }
+        (application as OcApp).chat.attach()
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (!OcLifecycle.stayDown(this)) scheduleOcRestart(this)
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
@@ -59,7 +69,10 @@ class OcService : Service() {
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(1, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            runCatching { startForeground(1, note, types) }
+                .onFailure { startForeground(1, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) }
         } else {
             startForeground(1, note)
         }
@@ -67,5 +80,17 @@ class OcService : Service() {
 
     companion object {
         private const val CHANNEL = "oca"
+
+        fun updateNote(context: android.content.Context, text: String) {
+            val manager = context.getSystemService(NotificationManager::class.java) ?: return
+            if (manager.getNotificationChannel(CHANNEL) == null) return
+            val note = NotificationCompat.Builder(context, CHANNEL)
+                .setSmallIcon(R.drawable.ic_oca)
+                .setContentTitle(context.getString(R.string.app_name))
+                .setContentText(text)
+                .setOngoing(true)
+                .build()
+            manager.notify(1, note)
+        }
     }
 }

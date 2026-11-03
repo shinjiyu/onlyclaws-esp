@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Presets · OnlyClaws</title>
+  <meta name="theme-color" content="#f3f0e8" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23e5482d' d='M2 3h2v6H2zM7 1h2v8H7zM12 3h2v6h-2zM2 9h12v2H2zM4 11h8v4H4z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="../../assets/oc.css" />
+  <style>
+    main.wrap { padding-top: 32px; padding-bottom: 64px; }
+    .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+    .head h1 { margin: 0; font-size: 1.6rem; letter-spacing: -.01em; }
+    .head p { margin: 6px 0 0; color: var(--muted); font-size: .92rem; max-width: 640px; }
+    .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; padding: 2px; background: var(--card); }
+    .seg a { font-size: .86rem; text-decoration: none; padding: 6px 14px; border-radius: 6px; color: var(--ink-2); }
+    .seg a.on { background: var(--ink); color: var(--paper); }
+    .how ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.8; font-size: .9rem; color: var(--ink-2); }
+    .target { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .target select { width: auto; min-width: 220px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+    .grid .card { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+    .preset .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .preset h3 { margin: 0; }
+    .preset .sum { margin: 0; font-size: .88rem; color: var(--ink-2); line-height: 1.6; flex: 1; }
+    .preset .meta { font-size: .76rem; color: var(--muted); font-family: var(--mono); }
+    .preset .act { display: flex; gap: 8px; flex-wrap: wrap; }
+    .preset .note { margin-top: 0; }
+    .preset pre.codeblock { max-height: 360px; font-size: .74rem; white-space: pre; }
+    .grid .card.wide { grid-column: 1 / -1; }
+  </style>
+</head>
+<body data-title-key="p.doc_title">
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="../../">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="#e5482d" d="M2 3h2v6H2zM7 1h2v8H7zM12 3h2v6h-2zM2 9h12v2H2zM4 11h8v4H4z"/></svg>
+        OnlyClaws <small data-i18n="p.badge">预置脚本</small>
+      </a>
+      <nav class="nav-links">
+        <a href="../esp32/" data-i18n="p.tab.esp32">ESP32 板子</a>
+        <a href="../oca/" data-i18n="p.tab.oca">OCA 手机</a>
+        <a href="../../flash/" data-i18n="p.nav.flash">烧录</a>
+        <a href="../../api/agent/skill.md" target="_blank" rel="noopener" data-i18n="p.nav.docs">Agent 文档</a>
+      </nav>
+      <span class="spacer"></span>
+      <button class="lang-btn" data-lang-toggle type="button">EN</button>
+      <a class="btn sm ghost" href="../../console/" data-i18n="p.nav.console">控制台</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="head">
+      <div>
+        <h1 id="pTitle"></h1>
+        <p id="pSub"></p>
+      </div>
+      <div class="seg">
+        <a href="../esp32/" data-kind="esp32" data-i18n="p.tab.esp32">ESP32 板子</a>
+        <a href="../oca/" data-kind="oca" data-i18n="p.tab.oca">OCA 手机</a>
+      </div>
+    </div>
+
+    <div class="card how">
+      <h3 data-i18n="p.how">怎么用</h3>
+      <ol id="howList"></ol>
+    </div>
+
+    <div class="card">
+      <div class="target" id="target"></div>
+    </div>
+
+    <div class="grid" id="list"></div>
+  </main>
+
+  <script src="../../assets/oc.js"></script>
+  <script>
+    OC.addStrings({
+      zh: {
+        "p.doc_title": "预置脚本 · OnlyClaws", "p.badge": "预置脚本",
+        "p.tab.esp32": "ESP32 板子", "p.tab.oca": "OCA 手机",
+        "p.nav.flash": "烧录", "p.nav.docs": "Agent 文档", "p.nav.console": "控制台",
+        "p.how": "怎么用",
+        "p.esp32.title": "ESP32 预置脚本",
+        "p.esp32.sub": "现成的 Lua 应用。固件只烧一次，脚本随时换，不用重新烧录。",
+        "p.esp32.how": "<li>板子先烧好 OnlyClaws 固件并登记到你的账号（<a href=\"../../flash/\">Web 烧录</a>会自动登记）。</li><li>登录后在下面选一块板子，点「部署」。脚本签名后下发，几秒内开始运行，重启后也会继续跑。</li><li>不登录也能下载 .lua，粘贴到控制台「脚本」页，或交给你的 Agent 部署。</li>",
+        "p.oca.title": "OCA 预置脚本",
+        "p.oca.sub": "跑在 OnlyClaws Android 上的 JS 应用。手机装一次 App，脚本从这里换。",
+        "p.oca.how": "<li>在控制台 <a href=\"../../console/#oca\">OCA 手机</a> 创建手机，下载它的专属安装包装到手机上。</li><li>登录后在下面选这台手机，点「发送到手机」。手机在线时几秒内换成这个脚本，并记住它；离线的话等它下次连上再送达。</li><li>也可以下载 .js 自己改，再让 Agent 用 <code>POST /api/invoke</code>（<code>tool: \"js\"</code>）发过去。</li>",
+        "p.target": "部署到",
+        "p.login": "<a href=\"../../console/\">登录控制台</a>后可以直接部署到你的设备；不登录也能下载源码。",
+        "p.nodev.esp32": "你的账号下还没有 ESP32 板子。先 <a href=\"../../flash/\">Web 烧录</a> 或在 <a href=\"../../console/#devices\">控制台</a> 登记。",
+        "p.nodev.oca": "你的账号下还没有 OCA 手机。去 <a href=\"../../console/#oca\">控制台 → OCA 手机</a> 创建一台。",
+        "p.download": "下载", "p.view": "查看源码", "p.hide": "收起源码",
+        "p.deploy.esp32": "部署", "p.deploy.oca": "发送到手机",
+        "p.ok.esp32": "已部署到 {name}，板子拉取后开始运行（通常几秒）。",
+        "p.ok.oca": "已发送到 {name}。手机在线时几秒内切换；离线的话等它下次连上。",
+        "p.err.missing": "这台设备没有 {m}，跑不了这个脚本。",
+        "p.loop": "{mode} · 每 {ms} ms",
+        "p.empty": "这里还没有脚本。",
+        "need.panel": "屏幕", "need.ml": "ML 模型", "need.arm": "机械臂", "need.audio": "喇叭", "need.sensors": "传感器",
+        "st.online": "在线", "st.offline": "离线",
+      },
+      en: {
+        "p.doc_title": "Presets · OnlyClaws", "p.badge": "Presets",
+        "p.tab.esp32": "ESP32 boards", "p.tab.oca": "OCA phones",
+        "p.nav.flash": "Flash", "p.nav.docs": "Agent docs", "p.nav.console": "Console",
+        "p.how": "How to use",
+        "p.esp32.title": "ESP32 presets",
+        "p.esp32.sub": "Ready-made Lua apps. Flash the firmware once, then swap scripts without reflashing.",
+        "p.esp32.how": "<li>Flash OnlyClaws firmware and bind the board to your account (<a href=\"../../flash/\">Web flash</a> does both).</li><li>Sign in, pick a board below and click Deploy. The script is signed, delivered and starts within seconds; it keeps running after a reboot.</li><li>Without signing in you can still download the .lua and paste it into the console's Scripts tab, or hand it to your agent.</li>",
+        "p.oca.title": "OCA presets",
+        "p.oca.sub": "JS apps for OnlyClaws Android. Install the app once; swap scripts from here.",
+        "p.oca.how": "<li>Create a phone under <a href=\"../../console/#oca\">Console → OCA phones</a> and install its own package on the phone.</li><li>Sign in, pick the phone below and click Send to phone. An online phone switches within seconds and remembers the script; an offline one gets it the next time it connects.</li><li>You can also download the .js, edit it, and have your agent send it with <code>POST /api/invoke</code> (<code>tool: \"js\"</code>).</li>",
+        "p.target": "Deploy to",
+        "p.login": "<a href=\"../../console/\">Sign in to the console</a> to deploy straight to your devices. Downloads work without signing in.",
+        "p.nodev.esp32": "No ESP32 boards on your account yet. Use <a href=\"../../flash/\">Web flash</a> or register one in the <a href=\"../../console/#devices\">console</a>.",
+        "p.nodev.oca": "No OCA phones on your account yet. Create one under <a href=\"../../console/#oca\">Console → OCA phones</a>.",
+        "p.download": "Download", "p.view": "View source", "p.hide": "Hide source",
+        "p.deploy.esp32": "Deploy", "p.deploy.oca": "Send to phone",
+        "p.ok.esp32": "Deployed to {name}. It starts once the board picks it up (usually a few seconds).",
+        "p.ok.oca": "Sent to {name}. An online phone switches within seconds; an offline one gets it when it next connects.",
+        "p.err.missing": "This device has no {m}, so it can't run this script.",
+        "p.loop": "{mode} · every {ms} ms",
+        "p.empty": "No scripts here yet.",
+        "need.panel": "screen", "need.ml": "ML model", "need.arm": "arm", "need.audio": "speaker", "need.sensors": "sensors",
+        "st.online": "online", "st.offline": "offline",
+      },
+    });
+
+    const { $, $$, t, api } = OC;
+    const h = OC.escapeHtml;
+    const KIND = (location.pathname.match(/\/presets\/(esp32|oca)\/?$/) || [])[1] || "esp32";
+    const DEVICE_KEY = "epd_device_id";
+    const state = { presets: [], devices: null, deviceId: "" };
+
+    function note(el, kind, html) {
+      el.className = "note " + kind;
+      el.innerHTML = html;
+    }
+
+    function renderHead() {
+      $("#pTitle").textContent = t(`p.${KIND}.title`);
+      $("#pSub").textContent = t(`p.${KIND}.sub`);
+      $("#howList").innerHTML = t(`p.${KIND}.how`);
+      $$("[data-kind]").forEach((a) => a.classList.toggle("on", a.dataset.kind === KIND));
+    }
+
+    function renderTarget() {
+      const box = $("#target");
+      if (state.devices === null) { box.innerHTML = `<span class="muted small">${t("p.login")}</span>`; return; }
+      if (!state.devices.length) { box.innerHTML = `<span class="muted small">${t("p.nodev." + KIND)}</span>`; return; }
+      box.innerHTML = `<label for="dev" class="small" style="font-weight:600">${h(t("p.target"))}</label>
+        <select id="dev">${state.devices.map((d) =>
+          `<option value="${h(d.id)}">${h((d.online ? "● " : "○ ") + (d.name || d.id) + " · " + d.id)}</option>`).join("")}</select>`;
+      const sel = $("#dev");
+      sel.value = state.deviceId;
+      sel.addEventListener("change", () => {
+        state.deviceId = sel.value;
+        localStorage.setItem(DEVICE_KEY, state.deviceId);
+      });
+    }
+
+    function sizeText(n) { return n >= 1024 ? (n / 1024).toFixed(1) + " KB" : n + " B"; }
+
+    function renderList() {
+      const box = $("#list");
+      if (!state.presets.length) { box.innerHTML = `<div class="card wide"><div class="empty">${h(t("p.empty"))}</div></div>`; return; }
+      const canDeploy = !!(state.devices && state.devices.length);
+      const lang = OC.lang === "en" ? "en" : "zh";
+      box.innerHTML = state.presets.map((p) => {
+        const needs = KIND === "esp32" ? (p.needs || []).map((n) => `<span class="tag">${h(t("need." + n))}</span>`).join(" ") : "";
+        const run = p.mode ? t("p.loop", { mode: p.mode, ms: p.every_ms }) : "";
+        return `<div class="card preset" data-id="${h(p.id)}">
+          <div class="top"><h3>${h(p.title[lang] || p.title.zh)}</h3><span class="tag">${h(p.language.toUpperCase())}</span></div>
+          <p class="sum">${h(p.summary[lang] || p.summary.zh)}</p>
+          ${needs ? `<div class="row" style="gap:6px">${needs}</div>` : ""}
+          <div class="meta">${h([p.filename, sizeText(p.bytes), run].filter(Boolean).join(" · "))}</div>
+          <div class="act">
+            <a class="btn sm ghost" href="${h(OC.BASE + "/api/presets/" + encodeURIComponent(p.id) + "/source")}" download="${h(p.filename)}">${h(t("p.download"))}</a>
+            <button class="btn sm ghost" type="button" data-view>${h(t("p.view"))}</button>
+            ${canDeploy ? `<button class="btn sm accent" type="button" data-deploy>${h(t("p.deploy." + KIND))}</button>` : ""}
+          </div>
+          <div class="note hidden" data-msg></div>
+          <pre class="codeblock hidden" data-src></pre>
+        </div>`;
+      }).join("");
+      $$(".preset", box).forEach((card) => {
+        const id = card.dataset.id;
+        $("[data-view]", card).addEventListener("click", (e) => toggleSource(card, id, e.currentTarget));
+        const dep = $("[data-deploy]", card);
+        if (dep) dep.addEventListener("click", () => deploy(card, id, dep));
+      });
+    }
+
+    async function toggleSource(card, id, btn) {
+      const pre = $("[data-src]", card);
+      if (!pre.classList.contains("hidden")) {
+        pre.classList.add("hidden");
+        card.classList.remove("wide");
+        btn.textContent = t("p.view");
+        return;
+      }
+      if (!pre.dataset.loaded) {
+        const r = await fetch(OC.BASE + "/api/presets/" + encodeURIComponent(id) + "/source?inline=1");
+        pre.textContent = r.ok ? await r.text() : "HTTP " + r.status;
+        pre.dataset.loaded = "1";
+      }
+      pre.classList.remove("hidden");
+      card.classList.add("wide");
+      btn.textContent = t("p.hide");
+    }
+
+    async function deploy(card, id, btn) {
+      const msg = $("[data-msg]", card);
+      const dev = state.devices.find((d) => d.id === state.deviceId);
+      if (!dev) return;
+      btn.disabled = true;
+      try {
+        await api("/api/presets/" + encodeURIComponent(id) + "/deploy", { method: "POST", body: { device_id: dev.id } });
+        note(msg, "ok", h(t("p.ok." + KIND, { name: dev.name || dev.id })));
+      } catch (ex) {
+        const missing = ex.detail && ex.detail.missing;
+        note(msg, "err", h(missing ? t("p.err.missing", { m: missing.map((n) => t("need." + n)).join(", ") }) : ex.message));
+      } finally { btn.disabled = false; }
+    }
+
+    async function loadDevices() {
+      try {
+        await api("/api/auth/me");
+      } catch (_) { state.devices = null; return; }
+      try {
+        const data = await api("/api/devices");
+        state.devices = (data.devices || []).filter((d) => d.kind === KIND);
+      } catch (_) { state.devices = null; return; }
+      const saved = localStorage.getItem(DEVICE_KEY) || "";
+      const pick = state.devices.find((d) => d.id === saved) || state.devices.find((d) => d.online) || state.devices[0];
+      state.deviceId = pick ? pick.id : "";
+    }
+
+    function renderAll() {
+      OC.apply();
+      renderHead();
+      renderTarget();
+      renderList();
+    }
+
+    document.addEventListener("oc:lang", renderAll);
+
+    (async function boot() {
+      renderHead();
+      const [list] = await Promise.all([
+        api("/api/presets?kind=" + KIND).catch(() => ({ presets: [] })),
+        loadDevices(),
+      ]);
+      state.presets = list.presets || [];
+      renderAll();
+    })();
+  </script>
+</body>
+</html>

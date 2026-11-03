@@ -24,13 +24,11 @@ class CrashScene(private val surface: Surface) : Thread("oca-wallpaper-gl") {
     @Volatile
     private var running = true
 
+    /** Ask the GL thread to exit. Do not join: the caller is often the wallpaper
+     *  binder thread, and waiting on eglSwapBuffers deadlocks a screen change. */
     fun shutdown() {
         running = false
         interrupt()
-        try {
-            join(1500)
-        } catch (_: InterruptedException) {
-        }
     }
 
     override fun run() {
@@ -49,21 +47,32 @@ class CrashScene(private val surface: Surface) : Thread("oca-wallpaper-gl") {
         try {
             while (running) {
                 if (!visible) {
-                    sleep(40)
+                    try {
+                        sleep(40)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
                     continue
                 }
                 egl.eglQuerySurface(display, window, EGL10.EGL_WIDTH, width)
                 egl.eglQuerySurface(display, window, EGL10.EGL_HEIGHT, height)
                 if (width[0] <= 0 || height[0] <= 0) {
-                    sleep(30)
+                    try {
+                        sleep(30)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
                     continue
                 }
                 val t = ((System.nanoTime() - started) / 1_000_000_000.0) % LOOP
                 gl.draw(t.toFloat(), width[0], height[0])
-                egl.eglSwapBuffers(display, window)
-                sleep(12)
+                if (!egl.eglSwapBuffers(display, window)) break
+                try {
+                    sleep(12)
+                } catch (_: InterruptedException) {
+                    break
+                }
             }
-        } catch (_: InterruptedException) {
         } finally {
             egl.eglMakeCurrent(display, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT)
             egl.eglDestroySurface(display, window)

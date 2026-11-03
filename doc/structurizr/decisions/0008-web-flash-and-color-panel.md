@@ -6,7 +6,7 @@ Operators still flash with PlatformIO / esptool. A cheap Waveshare round AMOLED 
 
 ## Decision
 
-1. **Web flash** is a first-class control-plane surface: `/flash` uses ESP Web Tools (Web Serial) against signed-off product binaries under `server/firmware/<product>/`, listed by `GET /api/firmware`. Packaging is a host script from PlatformIO build dirs; bins are not committed.
+1. **Web flash** is a first-class control-plane surface: `/flash` uses Web Serial against signed-off product binaries under `server/firmware/<product>/`, listed by `GET /api/firmware` (**login required**). `POST /api/firmware/provision` claims the chip MAC for the signed-in user, mints a `device_token`, and returns an NVS image (cloud host/prefix/id/token, optional Wi‑Fi) flashed at `0x9000` in the same session. Packaging is a host script from PlatformIO build dirs; bins are not committed.
 2. **AMOLED 1.75C** gets a documented Lua contract ([AMOLED-175C-PRODUCT.md](../AMOLED-175C-PRODUCT.md)) before the CO5300 driver: same `gfx.*` names, `gfx.color` / `gfx.bpp` / round helpers, and `input.touch` behind capability `touch`. No arm plugin on that product.
 
 ## Consequences

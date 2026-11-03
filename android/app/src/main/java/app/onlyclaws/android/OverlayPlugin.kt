@@ -16,18 +16,15 @@ import android.view.Choreographer
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context as JsContext
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Undefined
 import kotlin.math.hypot
 
 /**
  * Transparent overlay. A script that defines `onFrame` is pumped by this
- * plugin. The page itself is a WebView: `web.load` / `web.url` / `web.eval`.
- * Drawing is the page's own canvas and WebGL.
+ * plugin. Scripts draw with `gfx` into a system overlay. `onFrame` is
+ * pumped here. Pointer hits on drawn pixels call `onPointer`.
+ * The page (`web`) is a separate plugin.
  */
 class OverlayPlugin(
     private val app: Context,
@@ -38,7 +35,7 @@ class OverlayPlugin(
     val metrics = ScreenMetrics()
     private val buffer = SceneBuffer(onLog)
     private val window = OverlayWindow(app, onLog, ::onPointer)
-    private val web = WebOverlay(app, onLog, ::allowed)
+    val web = WebOverlay(app, onLog, ::stopPage)
     private var saved = Frame.EMPTY
     private var pumping = false
     private var lastNanos = 0L
@@ -53,13 +50,83 @@ class OverlayPlugin(
         }
     }
 
-    override fun install(cx: JsContext, scope: Scriptable) {
-        val ui = UiApi({ screenDp() }, metrics)
-        ui.parentScope = scope
-        val page = web.api()
-        page.parentScope = scope
-        ScriptableObject.putProperty(scope, "ui", ui)
-        ScriptableObject.putProperty(scope, "web", page)
+    override fun install(scope: JsScope) {
+        scope.define("ui") {
+            getter("w") { screenDp().first }
+            getter("W") { screenDp().first }
+            getter("h") { screenDp().second }
+            getter("H") { screenDp().second }
+            getter("keyboard") { metrics.keyboard }
+            getter("safe") {
+                mapOf(
+                    "top" to metrics.top,
+                    "right" to metrics.right,
+                    "bottom" to metrics.bottom,
+                    "left" to metrics.left,
+                )
+            }
+        }
+        val measure = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16f }
+        scope.define("gfx") {
+            fn("clear") { args ->
+                if (allowed()) buffer.fill(argb(args.number(0)))
+            }
+            fn("rect") { args ->
+                require(args.size >= 5) { "gfx.rect(x, y, w, h, color)" }
+                if (allowed()) {
+                    buffer.add(
+                        Op.Rect(
+                            args.number(0).toFloat(),
+                            args.number(1).toFloat(),
+                            args.number(2).toFloat(),
+                            args.number(3).toFloat(),
+                            argb(args.number(4)),
+                        ),
+                    )
+                }
+            }
+            fn("line") { args ->
+                require(args.size >= 5) { "gfx.line(x1, y1, x2, y2, color)" }
+                if (allowed()) {
+                    buffer.add(
+                        Op.Line(
+                            args.number(0).toFloat(),
+                            args.number(1).toFloat(),
+                            args.number(2).toFloat(),
+                            args.number(3).toFloat(),
+                            argb(args.number(4)),
+                        ),
+                    )
+                }
+            }
+            fn("circle") { args ->
+                require(args.size >= 4) { "gfx.circle(x, y, r, color)" }
+                if (allowed()) {
+                    buffer.add(
+                        Op.Circle(
+                            args.number(0).toFloat(),
+                            args.number(1).toFloat(),
+                            args.number(2).toFloat(),
+                            argb(args.number(3)),
+                        ),
+                    )
+                }
+            }
+            fn("text") { args ->
+                require(args.size >= 4) { "gfx.text(x, y, text, color)" }
+                if (allowed()) {
+                    buffer.add(
+                        Op.Text(
+                            args.number(0).toFloat(),
+                            args.number(1).toFloat(),
+                            args.string(2),
+                            argb(args.number(3)),
+                        ),
+                    )
+                }
+            }
+            fn("text_width") { args -> measure.measureText(args.string(0)).toDouble() }
+        }
     }
 
     override fun beforeSwap() {
@@ -110,6 +177,16 @@ class OverlayPlugin(
         return false
     }
 
+    fun attachPage(host: ViewGroup) = web.attach(host)
+
+    fun detachPage() = web.detach()
+
+    fun backPage(): Boolean = web.back()
+
+    private fun stopPage() {
+        container.fire("onAction", mapOf("id" to "stop", "action" to "stop"))
+    }
+
     /** After the user grants overlay, load the saved script once. */
     fun resumeIfNeeded() {
         if (!denied || !Settings.canDrawOverlays(app)) return
@@ -127,26 +204,19 @@ class OverlayPlugin(
     }
 
     private fun onPointer(action: String, x: Double, y: Double) {
-        container.enter { cx, scope ->
-            val fn = scope.get("onPointer", scope)
-            if (fn !is BaseFunction) return@enter
-            val event = cx.newObject(scope)
-            ScriptableObject.putProperty(event, "action", action)
-            ScriptableObject.putProperty(event, "x", x)
-            ScriptableObject.putProperty(event, "y", y)
-            fn.call(cx, scope, scope, arrayOf(event))
-        }
+        container.fire("onPointer", mapOf("action" to action, "x" to x, "y" to y))
     }
 }
 
 private data class Frame(val ops: List<Op>, val backdrop: Int) {
     val empty: Boolean get() = ops.isEmpty() && Color.alpha(backdrop) == 0
 
-    fun hits(x: Double, y: Double): Boolean {
-        if (Color.alpha(backdrop) > 0) return true
+    fun hits(x: Double, y: Double, screenW: Float, screenH: Float): Boolean {
+        val keep = chooseTouchBoxes(ops.map { it.span() }, screenW, screenH)
         val px = x.toFloat()
         val py = y.toFloat()
         for (i in ops.indices.reversed()) {
+            if (!keep[i]) continue
             if (ops[i].contains(px, py)) return true
         }
         return false
@@ -162,6 +232,36 @@ private sealed class Op {
     data class Line(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val color: Int) : Op()
     data class Circle(val x: Float, val y: Float, val r: Float, val color: Int) : Op()
     data class Text(val x: Float, val y: Float, val text: String, val color: Int) : Op()
+}
+
+private fun Op.span(): TouchBox = when (this) {
+    is Op.Rect -> TouchBox(w, h)
+    is Op.Line -> TouchBox(kotlin.math.abs(x2 - x1), kotlin.math.abs(y2 - y1))
+    is Op.Circle -> TouchBox(r * 2f, r * 2f)
+    is Op.Text -> TouchBox(16f, 16f)
+}
+
+/**
+ * A wash that covers the screen is paint. Touches on it belong to the launcher,
+ * otherwise a wallpaper drawn with gfx.clear and full-width bands cannot be swiped.
+ * A few controls that together stay under half the screen keep their own hits.
+ */
+internal data class TouchBox(val w: Float, val h: Float)
+
+internal fun chooseTouchBoxes(boxes: List<TouchBox>, screenW: Float, screenH: Float): BooleanArray {
+    val keep = BooleanArray(boxes.size) { true }
+    if (screenW <= 0f || screenH <= 0f) return keep
+    val screen = screenW * screenH
+    val cover = boxes.sumOf { (it.w.coerceAtLeast(0f) * it.h.coerceAtLeast(0f)).toDouble() }
+    if (cover < screen * 0.45) return keep
+    for (i in boxes.indices) {
+        val box = boxes[i]
+        val wide = box.w >= screenW * 0.8f
+        val tall = box.h >= screenH * 0.8f
+        val bulky = box.w * box.h >= screen * 0.06f
+        keep[i] = !wide && !tall && !bulky
+    }
+    return keep
 }
 
 private class SceneBuffer(private val onLog: (String) -> Unit) {
@@ -253,124 +353,12 @@ private fun pxRect(l: Float, t: Float, r: Float, b: Float, density: Float): Rect
     return Rect(left, top, right, bottom)
 }
 
-private fun argb(n: Double): Int {
-    val bits = n.toLong() and 0xFFFFFFFFL
-    if (bits == 0L) return Color.TRANSPARENT
-    val color = if (bits <= 0xFFFFFFL) 0xFF000000L or bits else bits
-    return color.toInt()
-}
-
-private class GfxApi(
-    private val buffer: SceneBuffer,
-    private val allow: () -> Boolean,
-) : ScriptableObject() {
-    override fun getClassName(): String = "gfx"
-
-    override fun get(name: String, start: Scriptable?): Any = when (name) {
-        "clear" -> clearFn
-        "rect" -> rectFn
-        "line" -> lineFn
-        "circle" -> circleFn
-        "text" -> textFn
-        "text_width" -> widthFn
-        else -> NOT_FOUND
-    }
-
-    private val clearFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            val color = if (args.isNullOrEmpty()) 0.0 else JsContext.toNumber(args[0])
-            buffer.fill(argb(color))
-            return Undefined.instance
-        }
-    }
-
-    private val rectFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            need(args, 5, "gfx.rect(x, y, w, h, color)")
-            buffer.add(Op.Rect(num(args, 0), num(args, 1), num(args, 2), num(args, 3), argb(JsContext.toNumber(args!![4]))))
-            return Undefined.instance
-        }
-    }
-
-    private val lineFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            need(args, 5, "gfx.line(x1, y1, x2, y2, color)")
-            buffer.add(Op.Line(num(args, 0), num(args, 1), num(args, 2), num(args, 3), argb(JsContext.toNumber(args!![4]))))
-            return Undefined.instance
-        }
-    }
-
-    private val circleFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            need(args, 4, "gfx.circle(x, y, r, color)")
-            buffer.add(Op.Circle(num(args, 0), num(args, 1), num(args, 2), argb(JsContext.toNumber(args!![3]))))
-            return Undefined.instance
-        }
-    }
-
-    private val measure = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16f }
-
-    private val widthFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            val text = if (args.isNullOrEmpty()) "" else JsContext.toString(args[0])
-            return measure.measureText(text).toDouble()
-        }
-    }
-
-    private val textFn = object : BaseFunction() {
-        override fun call(cx: JsContext, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>?): Any {
-            if (!allow()) return Undefined.instance
-            need(args, 4, "gfx.text(x, y, text, color)")
-            buffer.add(Op.Text(num(args, 0), num(args, 1), JsContext.toString(args!![2]), argb(JsContext.toNumber(args[3]))))
-            return Undefined.instance
-        }
-    }
-
-    private fun need(args: Array<out Any>?, n: Int, sig: String) {
-        if (args == null || args.size < n) throw JsContext.reportRuntimeError(sig)
-    }
-
-    private fun num(args: Array<out Any>?, i: Int): Float = JsContext.toNumber(args!![i]).toFloat()
-}
-
 class ScreenMetrics {
     @Volatile var top = 0.0
     @Volatile var right = 0.0
     @Volatile var bottom = 0.0
     @Volatile var left = 0.0
     @Volatile var keyboard = 0.0
-}
-
-private class UiApi(
-    private val screen: () -> Pair<Double, Double>,
-    private val metrics: ScreenMetrics,
-) : ScriptableObject() {
-    override fun getClassName(): String = "ui"
-
-    override fun get(name: String, start: Scriptable?): Any {
-        val (w, h) = screen()
-        return when (name) {
-            "w", "W" -> w
-            "h", "H" -> h
-            "keyboard" -> metrics.keyboard
-            "safe" -> safeObject(start)
-            else -> NOT_FOUND
-        }
-    }
-
-    private fun safeObject(start: Scriptable?): Scriptable {
-        val cx = JsContext.getCurrentContext()
-        val obj = cx.newObject(start ?: this)
-        ScriptableObject.putProperty(obj, "top", metrics.top)
-        ScriptableObject.putProperty(obj, "right", metrics.right)
-        ScriptableObject.putProperty(obj, "bottom", metrics.bottom)
-        ScriptableObject.putProperty(obj, "left", metrics.left)
-        return obj
-    }
 }
 
 private class OverlayWindow(
@@ -410,6 +398,7 @@ private class OverlayWindow(
             try {
                 wm.addView(stage, params)
                 added = true
+                (app as? OcApp)?.chat?.raise()
             } catch (_: Throwable) {
                 if (!failed) {
                     failed = true
@@ -441,7 +430,8 @@ private class OverlayWindow(
         val y = event.rawY / density.toDouble()
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                tracking = stage.frame.hits(x, y)
+                val (sw, sh) = screenPx(wm)
+                tracking = stage.frame.hits(x, y, sw / density, sh / density)
                 if (!tracking) return false
                 pointer("down", x, y)
             }
@@ -466,14 +456,15 @@ private class OverlayWindow(
 
     private fun applyTouchable(frame: Frame) {
         val (sw, sh) = screenPx(wm)
+        val screenW = sw / density
+        val screenH = sh / density
+        val opaque = frame.ops.filter { Color.alpha(it.color()) > 0 }
+        val keep = chooseTouchBoxes(opaque.map { it.span() }, screenW, screenH)
+        val washed = opaque.indices.any { !keep[it] } || Color.alpha(frame.backdrop) > 0 && opaque.isEmpty()
         val region = android.graphics.Region()
-        if (Color.alpha(frame.backdrop) > 0) {
-            region.set(0, 0, sw, sh)
-        } else {
-            for (op in frame.ops) {
-                if (Color.alpha(op.color()) == 0) continue
-                region.op(op.boundsPx(density), android.graphics.Region.Op.UNION)
-            }
+        for (i in opaque.indices) {
+            if (!keep[i]) continue
+            region.op(opaque[i].boundsPx(density), android.graphics.Region.Op.UNION)
         }
         val ok = runCatching {
             val getRoot = View::class.java.getDeclaredMethod("getViewRootImpl")
@@ -487,16 +478,20 @@ private class OverlayWindow(
             method.invoke(root, region)
             true
         }.getOrDefault(false)
-        // Empty scene: ignore all touches. Region ok: only ball pixels. Region fail: whole screen.
+        // Empty or a failed hole-punch on a full-screen wash: let the launcher swipe.
+        val pass = region.isEmpty || (!ok && washed)
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
-            if (region.isEmpty) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0
+            if (pass) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0
         if (params.flags != flags) {
             params.flags = flags
-            if (added) wm.updateViewLayout(stage, params)
+            if (added) {
+                wm.updateViewLayout(stage, params)
+                (app as? OcApp)?.chat?.raise()
+            }
         }
         if (!ok && !region.isEmpty) {
             // keep receiving touches; onTouch still filters misses for gesture tracking
@@ -548,6 +543,14 @@ private class OverlayWindow(
             canvas.restore()
         }
     }
+}
+
+private fun argb(n: Double): Int {
+    if (n.isNaN()) return Color.TRANSPARENT
+    val bits = n.toLong() and 0xFFFFFFFFL
+    if (bits == 0L) return Color.TRANSPARENT
+    val color = if (bits <= 0xFFFFFFL) 0xFF000000L or bits else bits
+    return color.toInt()
 }
 
 private fun screenPx(wm: WindowManager): Pair<Int, Int> {
