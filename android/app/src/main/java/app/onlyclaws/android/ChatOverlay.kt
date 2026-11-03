@@ -74,6 +74,9 @@ class ChatOverlay(private val app: OcApp) {
     private var customKey: EditText? = null
     private var wallFpsSpin: Spinner? = null
     private var wallPowerSave: CheckBox? = null
+    private var remoteControlBox: CheckBox? = null
+    private var presetHost: LinearLayout? = null
+    private var presetStatus: TextView? = null
     private var onChat = true
     private var added = false
     private var open = false
@@ -302,6 +305,35 @@ class ChatOverlay(private val app: OcApp) {
         root.addView(customUrl)
         root.addView(customModel)
         root.addView(customKey)
+        root.addView(settingLabel("云端资源"))
+        root.addView(hint("默认本机运行：只从 OnlyClaws 下载脚本，不长连接受远控。需要控制台热推脚本时再打开远控。"))
+        val remoteBox = CheckBox(app).apply {
+            text = "接受远控（长连设备会话）"
+            isChecked = OcPrefs.remoteControl(app)
+            setTextColor(INK)
+        }
+        remoteControlBox = remoteBox
+        root.addView(remoteBox)
+        val presetStatusView = TextView(app).apply {
+            textSize = 12f
+            setTextColor(MUTED)
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        presetStatus = presetStatusView
+        root.addView(presetStatusView)
+        val presetList = LinearLayout(app).apply { orientation = LinearLayout.VERTICAL }
+        presetHost = presetList
+        root.addView(presetList)
+        val refreshPresets = TextView(app).apply {
+            text = "刷新云端脚本列表"
+            setTextColor(ACCENT)
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { loadPresets() }
+        }
+        root.addView(refreshPresets)
+        loadPresets()
+
         root.addView(settingLabel("壁纸功耗"))
         root.addView(hint("跟 Wallpaper Engine 一样：限帧，系统省电时暂停。"))
         val fpsLabels = WallpaperPower.FPS_CHOICES.map { WallpaperPower.fpsLabel(it) }
@@ -349,6 +381,91 @@ class ChatOverlay(private val app: OcApp) {
         return root
     }
 
+    private fun loadPresets() {
+        val host = presetHost ?: return
+        val statusView = presetStatus ?: return
+        statusView.text = "正在拉取云端列表…"
+        host.removeAllViews()
+        Thread {
+            val result = PresetCatalog().listOca()
+            main.post {
+                if (presetHost !== host) return@post
+                result.onSuccess { items ->
+                    statusView.text = if (items.isEmpty()) "云端暂无 OCA 脚本" else "点「安装」下载到本机并运行"
+                    for (item in items) {
+                        host.addView(presetRow(item))
+                    }
+                }.onFailure {
+                    statusView.text = "列表失败：${it.message}"
+                }
+            }
+        }.start()
+    }
+
+    private fun presetRow(item: PresetCatalog.Item): LinearLayout {
+        val row = LinearLayout(app).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        row.addView(TextView(app).apply {
+            text = item.title.ifBlank { item.id }
+            textSize = 14f
+            setTextColor(INK)
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        if (item.summary.isNotBlank()) {
+            row.addView(TextView(app).apply {
+                text = item.summary
+                textSize = 12f
+                setTextColor(MUTED)
+            })
+        }
+        val install = TextView(app).apply {
+            text = "安装 ${item.id}"
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = round(ACCENT, 8)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setOnClickListener { installPreset(item.id, this) }
+        }
+        row.addView(install, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(6)
+        })
+        return row
+    }
+
+    private fun installPreset(id: String, button: TextView) {
+        button.isEnabled = false
+        val was = button.text
+        button.text = "下载中…"
+        presetStatus?.text = "正在下载 $id"
+        Thread {
+            val result = PresetCatalog().download(id)
+            main.post {
+                result.onSuccess { source ->
+                    app.load(source) { loaded ->
+                        loaded.onSuccess {
+                            app.container.writeActive(app, source)
+                            app.append("已安装云端脚本 $id")
+                            presetStatus?.text = "已安装 $id"
+                            status.text = "已安装 $id"
+                            showTab(true)
+                        }.onFailure {
+                            app.append("云端脚本未加载：${it.message}")
+                            presetStatus?.text = "安装失败：${it.message}"
+                        }
+                        button.isEnabled = true
+                        button.text = was
+                    }
+                }.onFailure {
+                    presetStatus?.text = "下载失败：${it.message}"
+                    button.isEnabled = true
+                    button.text = was
+                }
+            }
+        }.start()
+    }
+
     private fun confirmExit() {
         val themed = ContextThemeWrapper(app, R.style.Theme_Oca)
         AlertDialog.Builder(themed)
@@ -379,8 +496,12 @@ class ChatOverlay(private val app: OcApp) {
         WallpaperPower.setFps(app, WallpaperPower.FPS_CHOICES.getOrElse(fpsIndex) { 30 })
         WallpaperPower.setPauseOnPowerSave(app, wallPowerSave?.isChecked != false)
         app.wallpaper.applyPowerPrefs()
+        val wantRemote = remoteControlBox?.isChecked == true
+        val remoteChanged = wantRemote != OcPrefs.remoteControl(app)
+        OcPrefs.setRemoteControl(app, wantRemote)
+        if (remoteChanged) OcService.restart(app)
         app.agent.reload()
-        status.text = "已保存，正在重载 pi"
+        status.text = if (wantRemote) "已保存；远控已打开" else "已保存；本机模式（可下云端脚本）"
         showTab(true)
     }
 

@@ -1,11 +1,13 @@
 # OnlyClaws Android (OCA)
 
-Phone-side JS container for OnlyClaws. The APK is the host (V8 via Javet, session wire,
-A2UI, transparent WebView overlay, TTS, live wallpaper). Behavior lives in a
-downloaded script (`files/active.js`), pushed over the device session as a `js`
-tool — same control plane as the boards.
+Phone-side JS container for OnlyClaws. The APK is the host (V8 via Javet, local
+agent, transparent WebView overlay, TTS, live wallpaper). Behavior lives in
+`files/active.js`. By default the phone runs **download-only** (ADR 0010): it
+pulls OCA presets from `https://onlyclaws.world/epaper/api/presets` over HTTPS
+and does **not** hold a device session for remote control. Opt in to「接受远控」
+in settings when you need console `js` invoke / preset deploy over the wire.
 
-Package: `app.onlyclaws.android` · firmware string: `oca-0.8.25` · capability: `container`
+Package: `app.onlyclaws.android` · firmware string: `oca-0.9.0` · capability: `container`
 
 ## Build
 
@@ -47,8 +49,10 @@ Bilibili login.
 
 Scripts: `/presets/oca/` on the server lists ready-made ones (Bilibili play is
 `scripts/bilibili-play.js`, copied to `server/presets/oca/`; run
-`python server/presets.py sync` after editing it). Agents send any script with
-`POST /api/invoke` and a `js` tool. Do not commit tokens.
+`python server/presets.py sync` after editing it). On the phone, Settings →
+云端资源 refreshes that list and installs a preset into `active.js`. With remote
+control on, agents can still push any script with `POST /api/invoke` and a `js`
+tool. Do not commit tokens.
 
 ## Harness on the phone
 
