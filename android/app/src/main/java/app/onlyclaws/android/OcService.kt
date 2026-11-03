@@ -4,11 +4,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 class OcService : Service() {
     private var wire: SessionWire? = null
@@ -21,27 +23,43 @@ class OcService : Service() {
             return START_NOT_STICKY
         }
         startInForeground()
-        if (wire == null) {
-            val app = application as OcApp
-            val session = SessionWire(
-                this,
-                onScript = { source, reply ->
-                    app.load(source) { result ->
-                        result.onSuccess {
-                            app.container.writeActive(this, source)
-                            app.append("脚本已换上")
-                        }
-                        result.onFailure { app.append("脚本未换上：${it.message}") }
-                        reply(result.isSuccess)
-                    }
-                },
-                onState = { app.append(it) },
-            )
-            wire = session
-            session.start()
-        }
+        syncWire()
         (application as OcApp).chat.attach()
         return START_STICKY
+    }
+
+    /** Start or tear down the session wire to match [OcPrefs.remoteControl]. */
+    private fun syncWire() {
+        val want = OcPrefs.remoteControl(this)
+        if (!want) {
+            if (wire != null) {
+                wire?.stop()
+                wire = null
+                (application as OcApp).append("本机模式：不连远控，可从设置下载云端脚本")
+                updateNote(this, "本机模式")
+            } else {
+                updateNote(this, "本机模式")
+            }
+            return
+        }
+        if (wire != null) return
+        val app = application as OcApp
+        val session = SessionWire(
+            this,
+            onScript = { source, reply ->
+                app.load(source) { result ->
+                    result.onSuccess {
+                        app.container.writeActive(this, source)
+                        app.append("脚本已换上")
+                    }
+                    result.onFailure { app.append("脚本未换上：${it.message}") }
+                    reply(result.isSuccess)
+                }
+            },
+            onState = { app.append(it) },
+        )
+        wire = session
+        session.start()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -91,6 +109,13 @@ class OcService : Service() {
                 .setOngoing(true)
                 .build()
             manager.notify(1, note)
+        }
+
+        /** Restart the service so [OcPrefs.remoteControl] is applied. */
+        fun restart(context: Context) {
+            if (OcLifecycle.stayDown(context)) return
+            context.stopService(Intent(context, OcService::class.java))
+            ContextCompat.startForegroundService(context, Intent(context, OcService::class.java))
         }
     }
 }

@@ -81,6 +81,7 @@
     "firmware_dist: browser Web Serial flash (/flash + ESP Web Tools manifests). Bins live under server/firmware/<product>/; not committed. See ADR 0008.",
     "AMOLED 1.75C: Lua color/round/touch contract in AMOLED-175C-PRODUCT.md; CO5300 driver not yet linked.",
     "oca_dist: per-download OCA install package (stock unsigned APK + assets/session.json, zipalign + apksigner with one fixed key). Human login only. See ADR 0009.",
+    "oca_pull: OCA phone pulls public presets over HTTPS; SessionWire remote control is opt-in. See ADR 0010.",
     "presets: public preset catalog per device kind (esp32 Lua, oca JS); server copies are checked against demos/ and android/scripts/. Deploy goes through signed Lua deploy or invoke js.",
     "oca_app is a second device runtime (the phone). Same device session; reports capability container; control_plane allows the js tool only for container."
   ]

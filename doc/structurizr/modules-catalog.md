@@ -14,6 +14,7 @@ Same O(1) rule as mcp_guard.
 | ml_registry | infra | `server/ml_registry.py`, `ml_opset.py` | tenancy | Model upload + op-set check + ECDSA signing + device download ([ML-PLUGIN.md](./ML-PLUGIN.md)) |
 | firmware_dist | infra | `server/firmware_catalog.py`, `server/nvs_cloud.py`, `server/firmware/`, `rlcd/scripts/package_web_flash.sh` | tenancy | Product bin catalog + login-gated provision (NVS token inject) for `/flash` ([ADR 0008](./decisions/0008-web-flash-and-color-panel.md)) |
 | oca_dist | infra | `server/oca_pack.py`, `server/oca/` (not committed), `android/scripts/package_oca_base.sh` | — | Per-phone OCA install package: base APK + `assets/session.json`, zipalign + apksigner with one fixed key ([ADR 0009](./decisions/0009-oca-install-package-and-presets.md)) |
+| oca_pull | app | `android/.../PresetCatalog.kt`, `OcPrefs`, `OcCloud`, ChatOverlay 云端资源 | presets | Phone pulls OCA presets over HTTPS; remote session wire is opt-in ([ADR 0010](./decisions/0010-oca-download-without-remote-wire.md)) |
 | presets | infra | `server/presets.py`, `server/presets/` | demos (copies) | Public preset scripts per device kind (`/presets/esp32/`, `/presets/oca/`); copies of `demos/` Lua and `android/scripts/` JS |
 | demos | infra | `demos/` | — | Lua apps (data), not firmware plugins |
 | vision_path | infra | `vision/` | — | **通路 B** 主机：帧 → 对象/空描述/state；非 ESP |

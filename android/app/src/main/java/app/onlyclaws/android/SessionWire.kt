@@ -70,7 +70,7 @@ class SessionWire(
             connecting.set(false)
             return
         }
-        val url = "wss://onlyclaws.world/epaper/api/v1/device/${creds.id}/session"
+        val url = OcCloud.deviceSessionUrl(creds.id)
         val request = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer ${creds.token}")
@@ -188,7 +188,7 @@ class SessionWire(
 
     companion object {
         private const val TAG = "OcaSession"
-        const val FW = "oca-0.8.25"
+        const val FW = "oca-0.9.0"
 
         fun jsSource(body: String): String? {
             val tools = try {
