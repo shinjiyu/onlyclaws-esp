@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -20,16 +21,24 @@ class MainActivity : AppCompatActivity() {
     private val show: (String) -> Unit = { text ->
         findViewById<TextView>(R.id.log).text = text.ifEmpty { "启动中" }
     }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         val app = application as OcApp
-        app.a2ui.attach(
+        findViewById<View>(R.id.harness_bar).visibility = View.GONE
+        app.screen.attach(
             findViewById(R.id.a2ui_host),
             findViewById(R.id.log_pane),
             findViewById(R.id.wallpaper),
         )
+        app.desk.attach(findViewById(R.id.desk_host))
+        app.desk.watchLogs(app)
+        app.overlay.attachPage(findViewById(R.id.page_host))
+        onBackPressedDispatcher.addCallback(this) {
+            if (app.overlay.backPage()) return@addCallback
+            isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+        }
         findViewById<Button>(R.id.permit).setOnClickListener {
             startActivity(
                 Intent(
@@ -46,11 +55,16 @@ class MainActivity : AppCompatActivity() {
                 ),
             )
         }
+        val needed = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            needed += Manifest.permission.POST_NOTIFICATIONS
         }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            needed += Manifest.permission.RECORD_AUDIO
+        }
+        if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1)
         ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
             val density = resources.displayMetrics.density.toDouble()
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -62,6 +76,7 @@ class MainActivity : AppCompatActivity() {
             app.overlay.metrics.keyboard = ime.bottom / density
             insets
         }
+        OcLifecycle.clearStayDown(this)
         ContextCompat.startForegroundService(this, Intent(this, OcService::class.java))
         maybeReload(intent)
     }
@@ -89,11 +104,23 @@ class MainActivity : AppCompatActivity() {
         refreshPermit()
         if (Settings.canDrawOverlays(this)) {
             (application as OcApp).overlay.resumeIfNeeded()
+            (application as OcApp).chat.attach()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 2 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            (application as OcApp).append("麦克风已允许，按住悬浮窗里的「说」")
         }
     }
 
     override fun onDestroy() {
-        (application as OcApp).a2ui.detach()
+        val app = application as OcApp
+        app.overlay.detachPage()
+        app.desk.unwatchLogs(app)
+        app.desk.detach()
+        app.screen.detach()
         super.onDestroy()
     }
 

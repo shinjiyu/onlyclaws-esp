@@ -1,0 +1,12 @@
+{
+  "name": "oca-agent",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.11"
+  }
+}

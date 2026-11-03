@@ -1,0 +1,109 @@
+package app.onlyclaws.android
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class HarnessTextTest {
+    private val todo = """
+        // 标题：待办
+        var items = [];
+        function onStart() { oca.log("ok"); }
+    """.trimIndent()
+
+    @Test
+    fun takesTheFirstFencedBlock() {
+        val reply = "好的。\n```js\n$todo\n```\n另外一段：\n```js\nfunction onStart() {}\n```"
+        assertEquals(todo, HarnessText.extractScript(reply))
+    }
+
+    @Test
+    fun acceptsAnUntaggedFenceAndABareScript() {
+        assertEquals(todo, HarnessText.extractScript("```\n$todo\n```"))
+        assertEquals(todo, HarnessText.extractScript(todo))
+        assertNull(HarnessText.extractScript("我做不到这个。"))
+    }
+
+    @Test
+    fun checkPassesWithOnStart() {
+        assertNull(HarnessText.check(todo))
+    }
+
+    @Test
+    fun checkReportsSyntaxErrorWithLine() {
+        val problem = HarnessText.check("function onStart() {\n  var a = ;\n}")
+        assertNotNull(problem)
+        assertTrue(problem!!, problem.startsWith("第 2 行"))
+    }
+
+    @Test
+    fun checkAcceptsModernSyntax() {
+        val code = """
+            const xs = [1, 2].map((n) => n * 2);
+            class A { #n = 1; get n() { return this.#n; } }
+            const s = `${'$'}{xs[0]}`;
+            async function later() { await null; }
+            function onStart() { oca.log(new A().n ?? s); }
+        """.trimIndent()
+        assertNull(HarnessText.check(code))
+    }
+
+    @Test
+    fun checkWantsOnStart() {
+        assertEquals("没有 onStart", HarnessText.check("var a = 1;"))
+    }
+
+    @Test
+    fun titleComesFromTheFirstLine() {
+        assertEquals("待办", HarnessText.title(todo))
+        assertEquals("新界面", HarnessText.title("function onStart() {}"))
+    }
+
+    @Test
+    fun keyLooksLikeAnApiKeyOnly() {
+        assertTrue(HarnessText.looksLikeKey("  sk-0123456789abcdef0123  "))
+        assertFalse(HarnessText.looksLikeKey("sk-short"))
+        assertFalse(HarnessText.looksLikeKey("帮我做个计时器 sk-0123456789abcdef0123"))
+    }
+
+    @Test
+    fun promptCarriesCurrentScriptWithoutMarkAndRecentAsks() {
+        val current = HarnessText.MARK + "\n" + todo
+        val prompt = HarnessText.userPrompt("加一个清空按钮", current, listOf("做个待办"), "item is undefined")
+        assertTrue(prompt.contains("1. 做个待办"))
+        assertTrue(prompt.contains("现在要的：加一个清空按钮"))
+        assertTrue(prompt.contains(todo))
+        assertFalse(prompt.contains(HarnessText.MARK))
+        assertTrue(prompt.contains("item is undefined"))
+    }
+
+    @Test
+    fun freshPromptHasNoScript() {
+        val prompt = HarnessText.userPrompt("做个计时器", null, emptyList(), "")
+        assertEquals("现在要的：做个计时器\n", prompt)
+    }
+
+    @Test
+    fun diagnoseUsesTheModelsLineNumbersAndQuotesTheLine() {
+        val code = "// 标题：坏\nfunction onStart() {\n  boom();\n}"
+        val report = HarnessText.diagnose(
+            "装上时出错：ReferenceError: boom is not defined（第 4 行）",
+            code,
+            listOf("开始了", "脚本出错：ReferenceError: boom is not defined（第 4 行）"),
+        )
+        assertTrue(report, report.startsWith("装上时出错：ReferenceError: boom is not defined（第 3 行）"))
+        assertTrue(report, report.contains("第 3 行是：boom();"))
+        assertTrue(report, report.contains("- 开始了"))
+        assertTrue(report, report.contains("- 脚本出错：ReferenceError: boom is not defined（第 3 行）"))
+    }
+
+    @Test
+    fun theSystemExampleItselfPasses() {
+        val example = HarnessText.extractScript(HarnessText.SYSTEM.substringAfter("例子："))
+        assertNotNull(example)
+        assertNull(HarnessText.check(example!!))
+    }
+}

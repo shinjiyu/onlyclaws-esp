@@ -32,6 +32,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
@@ -47,6 +48,9 @@ import accounts
 import device_session
 import firmware_catalog
 import ml_registry
+import nvs_cloud
+import oca_pack
+import presets
 import render as epd_render
 import script_sign
 import live_comments
@@ -75,6 +79,12 @@ DEFAULT_DEVICE_ID = os.environ.get("EPD_DEFAULT_DEVICE_ID", "a4cb8fdf8440")
 PUBLIC_BASE = os.environ.get("EPD_PUBLIC_BASE", "https://onlyclaws.world").rstrip("/")
 COOKIE_PATH = urlparse(PUBLIC_BASE).path.rstrip("/") or "/"
 CONSOLE_URL = f"{PUBLIC_BASE}/console/"
+# Written into device NVS during login-gated web flash (firmware polls /epaper/…).
+DEVICE_CLOUD_HOST = (
+    os.environ.get("EPD_DEVICE_CLOUD_HOST", "").strip()
+    or (urlparse(PUBLIC_BASE).hostname or "onlyclaws.world")
+)
+DEVICE_CLOUD_PREFIX = os.environ.get("EPD_DEVICE_CLOUD_PREFIX", "/epaper").strip() or "/epaper"
 WENAI_UPSTREAM = os.environ.get("WENAI_UPSTREAM", "").rstrip("/")
 WENAI_SECRET = os.environ.get("WENAI_SECRET", "").strip()
 WENAI_ENABLED = os.environ.get("WENAI_ENABLED", "").strip().lower() in ("1", "true", "yes")
@@ -151,6 +161,7 @@ def init_db() -> None:
         ensure_column(conn, "devices", "owner_email", "TEXT")
         ensure_column(conn, "devices", "token_hash", "TEXT")
         ensure_column(conn, "devices", "claimed_at", "TEXT")
+        ensure_column(conn, "devices", "kind", "TEXT")
         tenancy.ensure_agent_tokens_table(conn)
         access.ensure_table(conn)
         accounts.ensure_table(conn)
@@ -272,6 +283,12 @@ app = FastAPI(
 )
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 app.mount("/firmware", StaticFiles(directory=FIRMWARE_DIR), name="firmware")
+_castle_dir = STATIC_DIR / "castle"
+if _castle_dir.is_dir():
+    app.mount("/castle", StaticFiles(directory=_castle_dir, html=True), name="castle")
+_live2d_dir = STATIC_DIR / "live2d"
+if _live2d_dir.is_dir():
+    app.mount("/live2d", StaticFiles(directory=_live2d_dir, html=True), name="live2d")
 app.include_router(snake_ctrl.router)
 app.include_router(live_comments.router)
 
@@ -355,6 +372,8 @@ class DeviceEventIn(BaseModel):
 
 
 SCRIPT_SOURCE_MAX = 24000
+# OCA keeps whole JS apps in one invoke; ESP boards keep SCRIPT_SOURCE_MAX.
+INVOKE_CONTAINER_MAX = 256_000
 
 
 def normalize_script_record(
@@ -628,6 +647,16 @@ def device_capabilities(device_id: str) -> Optional[list[str]]:
     return out or None
 
 
+def device_kind(device_id: str) -> str:
+    """'oca' for phones (created as OCA or reporting container), else 'esp32'."""
+    with db() as conn:
+        row = conn.execute("SELECT kind FROM devices WHERE id=?", (device_id,)).fetchone()
+    if row and row["kind"]:
+        return str(row["kind"])
+    caps = device_capabilities(device_id) or []
+    return "oca" if "container" in caps else "esp32"
+
+
 def require_device_token(device_id: str, request: Request) -> str:
     """Per-device bearer auth for device wire protocol."""
     token = tenancy.extract_bearer(request)
@@ -809,17 +838,56 @@ async def flash_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "flash.html")
 
 
+@app.get("/presets")
+async def presets_redirect() -> RedirectResponse:
+    return RedirectResponse(url="presets/esp32/", status_code=301)
+
+
+@app.get("/presets/")
+async def presets_index_redirect() -> RedirectResponse:
+    return RedirectResponse(url="esp32/", status_code=302)
+
+
+@app.get("/presets/{kind}")
+async def presets_kind_redirect(kind: str) -> RedirectResponse:
+    if kind not in presets.KINDS:
+        raise HTTPException(status_code=404, detail="unknown preset kind")
+    return RedirectResponse(url=f"{kind}/", status_code=301)
+
+
+@app.get("/presets/{kind}/")
+async def presets_page(kind: str) -> FileResponse:
+    if kind not in presets.KINDS:
+        raise HTTPException(status_code=404, detail="unknown preset kind")
+    return FileResponse(STATIC_DIR / "presets.html")
+
+
+def _require_human_session(sess: dict[str, Any]) -> str:
+    """Web flash binds a board to a person — agent tokens cannot provision."""
+    if sess.get("auth") == "agent_token":
+        raise HTTPException(status_code=403, detail="web flash requires browser login")
+    return tenancy.session_email(sess)
+
+
 @app.get("/api/firmware")
-async def api_firmware_list(request: Request) -> dict[str, Any]:
+async def api_firmware_list(
+    request: Request, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    _require_human_session(sess)
     include_all = request.query_params.get("all", "").lower() in ("1", "true", "yes")
     return {
         "products": firmware_catalog.list_products(include_all=include_all),
         "default": firmware_catalog.WEB_FLASH_DEFAULT_ID,
+        "cloud_host": DEVICE_CLOUD_HOST,
+        "cloud_prefix": DEVICE_CLOUD_PREFIX,
     }
 
 
 @app.get("/api/firmware/{product_id}/manifest.json")
-async def api_firmware_manifest(product_id: str) -> JSONResponse:
+async def api_firmware_manifest(
+    product_id: str, sess: dict[str, Any] = Depends(require_user)
+) -> JSONResponse:
+    _require_human_session(sess)
     product = firmware_catalog.get_product(product_id)
     if not product:
         raise HTTPException(status_code=404, detail="unknown product")
@@ -830,6 +898,285 @@ async def api_firmware_manifest(product_id: str) -> JSONResponse:
     if not firmware_catalog.parts_ready(firmware_catalog.product_dir(product_id)):
         raise HTTPException(status_code=404, detail="firmware not packaged")
     return JSONResponse(firmware_catalog.build_manifest(product))
+
+
+class FirmwareProvisionIn(BaseModel):
+    product_id: str = Field(..., min_length=3, max_length=64)
+    device_id: str = Field(..., min_length=4, max_length=32)
+    name: str = ""
+    wifi_ssid: str = Field("", max_length=32)
+    wifi_pass: str = Field("", max_length=64)
+
+
+@app.post("/api/firmware/provision")
+async def api_firmware_provision(
+    body: FirmwareProvisionIn, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    """Claim the chip MAC for the logged-in user, mint a token, return NVS + flash parts.
+
+    The browser reads the MAC over Web Serial, calls this, then flashes firmware plus
+    the returned NVS image at 0x9000 so the board boots already bound.
+    """
+    email = _require_human_session(sess)
+    product = firmware_catalog.get_product(body.product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="unknown product")
+    pdir = firmware_catalog.product_dir(body.product_id)
+    if not firmware_catalog.parts_ready(pdir):
+        raise HTTPException(status_code=404, detail="firmware not packaged")
+
+    device_id = body.device_id.strip().lower().replace(":", "").replace("-", "")
+    if len(device_id) < 4 or not device_id.isalnum():
+        raise HTTPException(status_code=400, detail="device_id must be the chip MAC (hex)")
+
+    name = body.name.strip() or f"{product.get('title_zh') or product['name']} {device_id[-4:]}"
+    token = tenancy.new_device_token()
+    th = tenancy.hash_token(token)
+    now = utc_now()
+    with db() as conn:
+        row = tenancy.get_device(conn, device_id)
+        if row:
+            owner = (row["owner_email"] or "").strip().lower()
+            if owner and owner != email:
+                raise HTTPException(status_code=409, detail="device already claimed")
+            conn.execute(
+                """
+                UPDATE devices
+                SET name=?, owner_email=?, token_hash=?, claimed_at=?
+                WHERE id=?
+                """,
+                (name, email, th, now, device_id),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO devices (id, name, meta, owner_email, token_hash, claimed_at)
+                VALUES (?, ?, '{}', ?, ?, ?)
+                """,
+                (device_id, name, email, th, now),
+            )
+
+    try:
+        nvs = nvs_cloud.build_cloud_nvs(
+            host=DEVICE_CLOUD_HOST,
+            prefix=DEVICE_CLOUD_PREFIX,
+            device_id=device_id,
+            token=token,
+            wifi_ssid=body.wifi_ssid or None,
+            wifi_pass=body.wifi_pass or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    base = f"/firmware/{body.product_id}"
+    parts: list[dict[str, Any]] = [
+        {"path": f"{base}/{fname}", "offset": off}
+        for fname, off in firmware_catalog.DEFAULT_PARTS
+    ]
+    parts.append(
+        {
+            "path": "nvs",
+            "offset": nvs_cloud.NVS_OFFSET,
+            "data_base64": base64.b64encode(nvs).decode("ascii"),
+        }
+    )
+    return {
+        "success": True,
+        "device": {
+            "id": device_id,
+            "name": name,
+            "owner_email": email,
+            "claimed_at": now,
+        },
+        "device_token": token,
+        "cloud_host": DEVICE_CLOUD_HOST,
+        "cloud_prefix": DEVICE_CLOUD_PREFIX,
+        "chipFamily": product["chipFamily"],
+        "serialType": product.get("serialType"),
+        "parts": parts,
+        "note": "Token is written into NVS during flash; save it only if you need a backup.",
+    }
+
+
+class OcaCreateIn(BaseModel):
+    name: str = Field("", max_length=60)
+
+
+@app.get("/api/oca/package")
+async def api_oca_package(sess: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    _require_human_session(sess)
+    return {"success": True, **oca_pack.status()}
+
+
+@app.post("/api/oca/devices")
+async def api_oca_create(
+    body: OcaCreateIn, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    """Create an OCA phone for the logged-in user. The token is minted per download."""
+    email = _require_human_session(sess)
+    device_id = "oca" + uuid.uuid4().hex[:9]
+    name = body.name.strip() or f"OCA {device_id[-4:]}"
+    now = utc_now()
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO devices (id, name, meta, owner_email, claimed_at, kind)
+            VALUES (?, ?, '{}', ?, ?, 'oca')
+            """,
+            (device_id, name, email, now),
+        )
+    return {
+        "success": True,
+        "device": {
+            "id": device_id,
+            "name": name,
+            "kind": "oca",
+            "owner_email": email,
+            "claimed_at": now,
+        },
+    }
+
+
+def _owned_oca(device_id: str, sess: dict[str, Any]) -> str:
+    email = _require_human_session(sess)
+    did = (device_id or "").strip().lower()
+    with db() as conn:
+        tenancy.assert_user_owns_device(conn, did, email)
+    if device_kind(did) != "oca":
+        raise HTTPException(status_code=400, detail="not an OCA device")
+    return did
+
+
+def _store_device_token(device_id: str, token: str) -> None:
+    with db() as conn:
+        conn.execute(
+            "UPDATE devices SET token_hash=?, claimed_at=? WHERE id=?",
+            (tenancy.hash_token(token), utc_now(), device_id),
+        )
+
+
+def _attachment(content: bytes, media_type: str, filename: str) -> RawResponse:
+    return RawResponse(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/api/oca/devices/{device_id}/apk")
+async def api_oca_apk(
+    device_id: str, sess: dict[str, Any] = Depends(require_user)
+) -> RawResponse:
+    """Signed install package with this phone's session.json. Revokes earlier packages."""
+    did = _owned_oca(device_id, sess)
+    if not oca_pack.status()["ready"]:
+        raise HTTPException(status_code=503, detail="OCA package not configured on server")
+    token = tenancy.new_device_token()
+    try:
+        apk = await run_in_threadpool(oca_pack.build_apk, did, token)
+    except oca_pack.PackError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    _store_device_token(did, token)
+    return _attachment(apk, "application/vnd.android.package-archive", f"onlyclaws-oca-{did}.apk")
+
+
+@app.post("/api/oca/devices/{device_id}/session")
+async def api_oca_session(
+    device_id: str, sess: dict[str, Any] = Depends(require_user)
+) -> RawResponse:
+    """session.json alone, for builds signed with another key. Revokes earlier packages."""
+    did = _owned_oca(device_id, sess)
+    token = tenancy.new_device_token()
+    _store_device_token(did, token)
+    return _attachment(oca_pack.session_json(did, token), "application/json", "session.json")
+
+
+@app.get("/api/presets")
+async def api_presets(kind: str = "") -> dict[str, Any]:
+    k = kind.strip().lower()
+    if k and k not in presets.KINDS:
+        raise HTTPException(status_code=400, detail="kind must be esp32 or oca")
+    return {"success": True, "kind": k or None, "presets": presets.list_presets(k)}
+
+
+@app.get("/api/presets/{preset_id}/source")
+async def api_preset_source(preset_id: str, inline: bool = False) -> RawResponse:
+    preset = presets.get(preset_id)
+    if not preset or not presets.path_of(preset).is_file():
+        raise HTTPException(status_code=404, detail="unknown preset")
+    media = "text/x-lua" if presets.language(preset) == "lua" else "text/javascript"
+    headers = {"Cache-Control": "public, max-age=300"}
+    if not inline:
+        headers["Content-Disposition"] = (
+            f'attachment; filename="{Path(preset["file"]).name}"'
+        )
+    return RawResponse(
+        content=presets.path_of(preset).read_bytes(),
+        media_type=f"{media}; charset=utf-8",
+        headers=headers,
+    )
+
+
+class PresetDeployIn(BaseModel):
+    device_id: str = Field(..., min_length=4, max_length=32)
+
+
+@app.post("/api/presets/{preset_id}/deploy")
+async def api_preset_deploy(
+    preset_id: str, body: PresetDeployIn, sess: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
+    """Send a preset to an owned device of the same kind (signed Lua or invoke js)."""
+    preset = presets.get(preset_id)
+    if not preset or not presets.path_of(preset).is_file():
+        raise HTTPException(status_code=404, detail="unknown preset")
+    did = user_owns_device(body.device_id, sess)
+    kind = device_kind(did)
+    if kind != preset["kind"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"preset is for {preset['kind']} devices; {did} is {kind}",
+        )
+    caps = device_capabilities(did)
+    if caps is not None:
+        lacking = [n for n in preset.get("needs") or [] if n not in caps]
+        if lacking:
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "device lacks capabilities", "missing": lacking},
+            )
+    src = presets.source(preset)
+    if preset["kind"] == "esp32":
+        created = await create_script(
+            ScriptCreateIn(
+                name=f"preset:{preset['id']}",
+                source=src,
+                mode=preset["mode"],
+                every_ms=preset["every_ms"],
+                device_id=did,
+            ),
+            sess,
+        )
+        script = {k: v for k, v in created["script"].items() if k != "source"}
+        return {
+            "success": True,
+            "preset": preset["id"],
+            "device_id": did,
+            "script": script,
+            "deploy": created.get("deploy"),
+        }
+    sent = await invoke_tools(
+        InvokeIn(device_id=did, tools=[{"tool": "js", "source": src}]), sess
+    )
+    message = {k: v for k, v in sent["message"].items() if k != "body"}
+    return {
+        "success": True,
+        "preset": preset["id"],
+        "device_id": did,
+        "message": message,
+    }
 
 
 @app.get("/wenai/")
@@ -1171,7 +1518,8 @@ async def list_devices(sess: dict[str, Any] = Depends(require_user)) -> dict[str
     with db() as conn:
         rows = conn.execute(
             """
-            SELECT id, name, last_seen, ip, rssi, fw, meta, owner_email, claimed_at
+            SELECT id, name, last_seen, ip, rssi, fw, meta, owner_email, claimed_at, kind,
+                   token_hash IS NOT NULL AS has_token
             FROM devices
             WHERE lower(coalesce(owner_email,''))=?
             ORDER BY id
@@ -1197,10 +1545,14 @@ async def list_devices(sess: dict[str, Any] = Depends(require_user)) -> dict[str
                     meta = parsed
             except (TypeError, ValueError, json.JSONDecodeError):
                 meta = {}
+        caps = meta.get("capabilities") if isinstance(meta.get("capabilities"), list) else []
+        kind = r["kind"] or ("oca" if "container" in caps else "esp32")
+        phone = kind == "oca"
         devices.append(
             {
                 "id": r["id"],
                 "name": r["name"],
+                "kind": kind,
                 "last_seen": r["last_seen"],
                 "ip": r["ip"],
                 "rssi": r["rssi"],
@@ -1209,8 +1561,9 @@ async def list_devices(sess: dict[str, Any] = Depends(require_user)) -> dict[str
                 "online": online,
                 "owner_email": r["owner_email"],
                 "claimed_at": r["claimed_at"],
-                "width": panel_for(r["id"])[0],
-                "height": panel_for(r["id"])[1],
+                "has_token": bool(r["has_token"]),
+                "width": None if phone else panel_for(r["id"])[0],
+                "height": None if phone else panel_for(r["id"])[1],
             }
         )
     return {"success": True, "devices": devices}
@@ -1677,6 +2030,11 @@ async def deploy_script(
     if len(source) > SCRIPT_SOURCE_MAX + 512:
         raise HTTPException(status_code=400, detail="script too large after overrides")
     device_id = resolve_user_device_id(body.device_id, sess)
+    if device_kind(device_id) == "oca":
+        raise HTTPException(
+            status_code=400,
+            detail="OCA phones run JS, not Lua; use /api/invoke with tool js or an oca preset",
+        )
     with db() as conn:
         prev = conn.execute(
             "SELECT script_version FROM device_scripts WHERE device_id=?",
@@ -1839,7 +2197,8 @@ async def invoke_tools(
                 },
             )
     payload = json.dumps({"tools": tools}, ensure_ascii=False, separators=(",", ":"))
-    if len(payload) > SCRIPT_SOURCE_MAX:
+    container = device_kind(device_id) == "oca"
+    if len(payload) > (INVOKE_CONTAINER_MAX if container else SCRIPT_SOURCE_MAX):
         raise HTTPException(status_code=400, detail="invoke payload too large")
     msg = enqueue_control_message(
         device_id=device_id,
@@ -2491,7 +2850,21 @@ async def agent_capabilities(
                     "tools": "[{tool, ...}]",
                     "tool": "object?",
                 },
-                "notes": "One-shot whitelist; filtered by device capabilities[] (panel/audio/sensors/arm)",
+                "notes": "One-shot whitelist; filtered by device capabilities[] (panel/audio/sensors/arm). OCA phones (container) take {tool:'js', source} up to 256 KB",
+            },
+            {
+                "name": "onlyclaws_list_presets",
+                "method": "GET",
+                "path": "/api/presets",
+                "query": {"kind": "esp32|oca"},
+                "notes": "Public. Source: GET /api/presets/{id}/source",
+            },
+            {
+                "name": "onlyclaws_deploy_preset",
+                "method": "POST",
+                "path": "/api/presets/{id}/deploy",
+                "body": {"device_id": "string"},
+                "notes": "Device kind must match the preset (esp32 Lua or oca JS)",
             },
             {
                 "name": "onlyclaws_list_events",

@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;height:100%;background:#09080c;overflow:hidden}canvas{display:block;width:100%;height:100%}</style>
+</head><body><canvas id="c"></canvas>
+<script>
+/**
+ * Port of enji-demos/infinity-castle FallCamera + CastleLayout for a wallpaper WebView.
+ * Seed, shaft size, camera pose and fog match the Cocos scene; lanterns feed six point lights.
+ */
+var SEED = 7;
+var CHUNK_HEIGHT = 28;
+var SHAFT_W = 16;
+var CLEAR_RADIUS = 4.5;
+var CHUNKS_ABOVE = 2;
+var CHUNKS_BELOW = 6;
+var FACADES = ["B_facade_0", "B_facade_1", "B_facade_2", "B_facade_3"];
+var WALL_KINDS = ["B_room_a", "B_room_c", "B_corr_a", "B_corr_b", "B_stair_a"];
+var BRIDGE_KINDS = ["B_corr_a", "B_corr_b", "B_corr_c"];
+var FLOAT_KINDS = ["B_room_b", "B_stair_a", "B_room_a", "B_room_c"];
+var YAWS = [0, 90, 180, 270];
+var UPS = [
+  [0, 1, 0], [0, 1, 0], [0, 1, 0], [0, 1, 0],
+  [0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]
+];
+
+var mesh = {};
+var blocks = null;
+var chunks = {};
+var colShift = null;
+var allLamps = [];
+var gl, prog, glowProg, skyProg, uVP, uM, uEye, uLamps = [];
+var FALL_SPEED = 22;
+var depth = 120, fallTime = 0, last = 0;
+var glowBuf = null, glowCount = 0;
+var skyBuf = null;
+var uInvVP = null;
+
+function Rng(seed) { this.state = seed >>> 0; }
+Rng.forChunk = function (seed, chunk) {
+  var h = Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(chunk | 0, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return new Rng(h ^ (h >>> 16));
+};
+Rng.prototype.next = function () {
+  var t = (this.state = (this.state + 0x6d2b79f5) >>> 0);
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+Rng.prototype.uniform = function (a, b) { return a + (b - a) * this.next(); };
+Rng.prototype.pick = function (items) { return items[Math.floor(this.next() * items.length)]; };
+
+function mul(a, b) {
+  var o = new Float32Array(16);
+  for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++)
+    o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  return o;
+}
+function perspective(fovy, aspect, near, far) {
+  var f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
+}
+function lookAt(eye, target, up) {
+  var zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+  var zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+  var xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+  var xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+  var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  return new Float32Array([
+    xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
+    -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
+    -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
+    -(zx * eye[0] + zy * eye[1] + zz * eye[2]), 1
+  ]);
+}
+function rotX(a) { var c = Math.cos(a), s = Math.sin(a); return new Float32Array([1,0,0,0, 0,c,-s,0, 0,s,c,0, 0,0,0,1]); }
+function rotY(a) { var c = Math.cos(a), s = Math.sin(a); return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]); }
+function rotZ(a) { var c = Math.cos(a), s = Math.sin(a); return new Float32Array([c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]); }
+
+function qId() { return [0, 0, 0, 1]; }
+function qAxisAngle(ax, ay, az, deg) {
+  var a = deg * Math.PI / 180, h = a * 0.5, s = Math.sin(h), l = Math.hypot(ax, ay, az) || 1;
+  return [ax / l * s, ay / l * s, az / l * s, Math.cos(h)];
+}
+function qMul(a, b) {
+  return [
+    a[3]*b[0] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1],
+    a[3]*b[1] - a[0]*b[2] + a[1]*b[3] + a[2]*b[0],
+    a[3]*b[2] + a[0]*b[1] - a[1]*b[0] + a[2]*b[3],
+    a[3]*b[3] - a[0]*b[0] - a[1]*b[1] - a[2]*b[2]
+  ];
+}
+function qTransform(q, v) {
+  var x = q[0], y = q[1], z = q[2], w = q[3];
+  var vx = v[0], vy = v[1], vz = v[2];
+  var ix = w*vx + y*vz - z*vy, iy = w*vy + z*vx - x*vz, iz = w*vz + x*vy - y*vx, iw = -x*vx - y*vy - z*vz;
+  return [
+    ix*w + iw*-x + iy*-z - iz*-y,
+    iy*w + iw*-y + iz*-x - ix*-z,
+    iz*w + iw*-z + ix*-y - iy*-x
+  ];
+}
+function qFromTo(from, to) {
+  var f = from.slice(), t = to.slice();
+  var fl = Math.hypot(f[0], f[1], f[2]) || 1, tl = Math.hypot(t[0], t[1], t[2]) || 1;
+  f[0] /= fl; f[1] /= fl; f[2] /= fl; t[0] /= tl; t[1] /= tl; t[2] /= tl;
+  var d = f[0]*t[0] + f[1]*t[1] + f[2]*t[2];
+  if (d < -0.999999) return qAxisAngle(1, 0, 0, 180);
+  if (d > 0.999999) return qId();
+  var ax = f[1]*t[2] - f[2]*t[1], ay = f[2]*t[0] - f[0]*t[2], az = f[0]*t[1] - f[1]*t[0];
+  var q = [ax, ay, az, 1 + d];
+  var n = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+  return [q[0]/n, q[1]/n, q[2]/n, q[3]/n];
+}
+function upFrame(up, yaw) {
+  var align = up[1] < -0.999 ? qAxisAngle(1, 0, 0, 180) : qFromTo([0, 1, 0], up);
+  return qMul(qAxisAngle(up[0], up[1], up[2], yaw), align);
+}
+function matFromQR(q, p) {
+  var x = q[0], y = q[1], z = q[2], w = q[3];
+  var x2 = x+x, y2 = y+y, z2 = z+z;
+  var xx = x*x2, xy = x*y2, xz = x*z2, yy = y*y2, yz = y*z2, zz = z*z2;
+  var wx = w*x2, wy = w*y2, wz = w*z2;
+  return new Float32Array([
+    1-(yy+zz), xy+wz, xz-wy, 0,
+    xy-wz, 1-(xx+zz), yz+wx, 0,
+    xz+wy, yz-wx, 1-(xx+yy), 0,
+    p[0], p[1], p[2], 1
+  ]);
+}
+
+function makeWalls() {
+  var defs = [
+    [[0, 0, -SHAFT_W], 0],
+    [[0, 0, SHAFT_W], 180],
+    [[SHAFT_W, 0, 0], -90],
+    [[-SHAFT_W, 0, 0], 90]
+  ];
+  return defs.map(function (d) {
+    var rot = qAxisAngle(0, 1, 0, d[1]);
+    return {
+      point: d[0].slice(),
+      rot: rot,
+      inward: qTransform(rot, [0, 0, 1]),
+      along: qTransform(rot, [1, 0, 0])
+    };
+  });
+}
+var WALLS = makeWalls();
+
+function freeOf(name, pos, rot) {
+  var info = blocks[name];
+  if (!info) return false;
+  for (var i = 0; i < 27; i++) {
+    var u0 = i % 3, u1 = Math.floor(i / 3) % 3, u2 = Math.floor(i / 9);
+    var local = [
+      info.min[0] + ((info.max[0] - info.min[0]) * u0) / 2,
+      info.min[1] + ((info.max[1] - info.min[1]) * u1) / 2,
+      info.min[2] + ((info.max[2] - info.min[2]) * u2) / 2
+    ];
+    var p = qTransform(rot, local);
+    p[0] += pos[0]; p[1] += pos[1]; p[2] += pos[2];
+    if (Math.hypot(p[0], p[2]) < CLEAR_RADIUS) return false;
+  }
+  return true;
+}
+
+function initColShift() {
+  var rng = new Rng(SEED);
+  colShift = WALLS.map(function () {
+    return [0, 1, 2, 3].map(function () { return rng.pick([0, 0, 1.75, 3.5, -1.75]); });
+  });
+}
+
+function chunkPlacements(k) {
+  var rng = Rng.forChunk(SEED, k);
+  var top = -k * CHUNK_HEIGHT;
+  var out = [];
+  function place(name, pos, rot) {
+    if (!mesh[name]) return;
+    if (!freeOf(name, pos, rot)) return;
+    out.push({ name: name, pos: pos, rot: rot, mat: matFromQR(rot, pos) });
+  }
+
+  WALLS.forEach(function (wall, w) {
+    for (var level = 0; level < CHUNK_HEIGHT / 7; level++) {
+      var y = top - 7 * (level + 1);
+      var inset = rng.pick([0, 0, 0, 1.2, 2.4]);
+      for (var i = 0; i < 4; i++) {
+        var pos = [
+          wall.point[0] + wall.along[0] * (-12 + 8 * i) + wall.inward[0] * (inset + rng.pick([0, 0, 0.8, -0.8])),
+          y + colShift[w][i],
+          wall.point[2] + wall.along[2] * (-12 + 8 * i) + wall.inward[2] * (inset + rng.pick([0, 0, 0.8, -0.8]))
+        ];
+        var spin = rng.next();
+        var name = rng.pick(FACADES);
+        var rot = wall.rot.slice();
+        if (spin < 0.26) {
+          if (spin >= 0.2) continue;
+          var ang = spin < 0.12 ? rng.pick([90, -90]) : 180;
+          var spinRot = qAxisAngle(wall.inward[0], wall.inward[1], wall.inward[2], ang);
+          var offset = qTransform(spinRot, [0, -3.5, 0]);
+          pos[1] += 3.5;
+          pos[0] += offset[0]; pos[1] += offset[1]; pos[2] += offset[2];
+          rot = qMul(spinRot, wall.rot);
+        }
+        if (mesh[name]) out.push({ name: name, pos: pos, rot: rot, mat: matFromQR(rot, pos) });
+      }
+    }
+  });
+
+  for (var wi = 0; wi < WALLS.length; wi++) {
+    var wall = WALLS[wi];
+    var count = 2 + (rng.next() < 0.5 ? 1 : 0);
+    for (var n = 0; n < count; n++) {
+      var along = rng.uniform(-10, 10);
+      var pos = [
+        wall.point[0] + wall.along[0] * along + wall.inward[0] * 3.2,
+        rng.uniform(top - CHUNK_HEIGHT, top),
+        wall.point[2] + wall.along[2] * along + wall.inward[2] * 3.2
+      ];
+      place(rng.pick(WALL_KINDS), pos, upFrame(wall.inward, rng.pick(YAWS)));
+    }
+  }
+
+  var bridges = rng.next() < 0.6 ? 2 : 1;
+  for (var b = 0; b < bridges; b++) {
+    var by = rng.uniform(top - CHUNK_HEIGHT, top);
+    var alongX = rng.next() < 0.5;
+    var c = (rng.next() < 0.5 ? -1 : 1) * rng.uniform(8.5, 11);
+    var roll = rng.pick([0, 0, 0, 90, 180]);
+    var bname = rng.pick(BRIDGE_KINDS);
+    var rolled = qAxisAngle(1, 0, 0, roll);
+    var brot = alongX ? rolled : qMul(qAxisAngle(0, 1, 0, 90), rolled);
+    var segs = [0, 1, 2, 3].map(function (i) {
+      var t = -12 + 8 * i;
+      return alongX ? [t, by, c] : [c, by, t];
+    });
+    if (segs.every(function (p) { return freeOf(bname, p, brot); }) && mesh[bname]) {
+      for (var s = 0; s < segs.length; s++) out.push({ name: bname, pos: segs[s], rot: brot, mat: matFromQR(brot, segs[s]) });
+    }
+  }
+
+  var floating = 2 + (rng.next() < 0.5 ? 1 : 0);
+  for (var f = 0; f < floating; f++) {
+    var a = rng.uniform(0, Math.PI * 2);
+    var r = rng.uniform(10, 12.5);
+    var fpos = [r * Math.cos(a), rng.uniform(top - CHUNK_HEIGHT, top), r * Math.sin(a)];
+    place(rng.pick(FLOAT_KINDS), fpos, upFrame(rng.pick(UPS), rng.pick(YAWS)));
+  }
+  return out;
+}
+
+function lanternsOf(placements) {
+  var lamps = [];
+  for (var i = 0; i < placements.length; i++) {
+    var p = placements[i];
+    var info = blocks[p.name];
+    if (!info || !info.lanterns) continue;
+    for (var j = 0; j < info.lanterns.length; j++) {
+      var w = qTransform(p.rot, info.lanterns[j]);
+      lamps.push([w[0] + p.pos[0], w[1] + p.pos[1], w[2] + p.pos[2], 3.2]);
+    }
+  }
+  return lamps;
+}
+
+function syncChunks(depthNow) {
+  var k0 = Math.floor(depthNow / CHUNK_HEIGHT);
+  var keep = {};
+  for (var k = k0 - CHUNKS_ABOVE; k <= k0 + CHUNKS_BELOW; k++) {
+    keep[k] = true;
+    if (!chunks[k]) {
+      var list = chunkPlacements(k);
+      chunks[k] = { list: list, lamps: lanternsOf(list) };
+    }
+  }
+  Object.keys(chunks).forEach(function (key) {
+    if (!keep[key]) delete chunks[key];
+  });
+  allLamps = [];
+  Object.keys(chunks).forEach(function (key) {
+    allLamps = allLamps.concat(chunks[key].lamps);
+  });
+}
+
+function nearestLamps(eye) {
+  var scored = allLamps.map(function (l) {
+    var dx = l[0] - eye[0], dy = l[1] - eye[1], dz = l[2] - eye[2];
+    return { l: l, d: dx * dx + dy * dy + dz * dz };
+  });
+  scored.sort(function (a, b) { return a.d - b.d; });
+  var out = [];
+  for (var i = 0; i < 6; i++) out.push(scored[i] ? scored[i].l : [0, -1000, 0, 0]);
+  return out;
+}
+
+function noise1(t) {
+  return Math.sin(t * 1.7) * 0.5 + Math.sin(t * 3.1 + 1.3) * 0.3 + Math.sin(t * 5.9 + 2.1) * 0.2;
+}
+
+function parseGlb(buf) {
+  var dv = new DataView(buf), off = 12, json, bin;
+  while (off + 8 <= buf.byteLength) {
+    var len = dv.getUint32(off, true), type = dv.getUint32(off + 4, true);
+    var chunk = buf.slice(off + 8, off + 8 + len);
+    if (type === 0x4E4F534A) json = JSON.parse(new TextDecoder().decode(new Uint8Array(chunk)));
+    else bin = chunk;
+    off += 8 + len;
+  }
+  var acc = json.accessors, views = json.bufferViews, prim = json.meshes[0].primitives[0];
+  function take(index) {
+    var a = acc[index], v = views[a.bufferView];
+    var start = (v.byteOffset || 0) + (a.byteOffset || 0);
+    return bin.slice(start, start + v.byteLength);
+  }
+  return {
+    position: take(prim.attributes.POSITION),
+    normal: take(prim.attributes.NORMAL),
+    color: take(prim.attributes.COLOR_0),
+    indices: take(prim.indices),
+    count: acc[prim.indices].count
+  };
+}
+function upload(data) {
+  var buffers = {};
+  ["position", "normal", "color", "indices"].forEach(function (key) {
+    var buf = gl.createBuffer();
+    gl.bindBuffer(key === "indices" ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER, buf);
+    gl.bufferData(key === "indices" ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER, data[key], gl.STATIC_DRAW);
+    buffers[key] = buf;
+  });
+  buffers.count = data.count;
+  return buffers;
+}
+function bindMesh(m) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, m.position);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, m.normal);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, m.color);
+  gl.enableVertexAttribArray(2);
+  gl.vertexAttribPointer(2, 4, gl.UNSIGNED_SHORT, true, 0, 0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, m.indices);
+}
+
+var VS = [
+  "attribute vec3 aPos;",
+  "attribute vec3 aNor;",
+  "attribute vec4 aCol;",
+  "uniform mat4 uVP;",
+  "uniform mat4 uM;",
+  "varying vec3 vWorld;",
+  "varying vec3 vNor;",
+  "varying vec3 vLocal;",
+  "varying vec4 vCol;",
+  "void main(){",
+  "  vec4 world = uM * vec4(aPos,1.0);",
+  "  vWorld = world.xyz;",
+  "  vNor = mat3(uM) * aNor;",
+  "  vLocal = aPos;",
+  "  vCol = aCol;",
+  "  gl_Position = uVP * world;",
+  "}"
+].join("\n");
+
+var FS = [
+  "precision mediump float;",
+  "varying vec3 vWorld;",
+  "varying vec3 vNor;",
+  "varying vec3 vLocal;",
+  "varying vec4 vCol;",
+  "uniform vec3 uEye;",
+  "uniform vec4 uLamp0;",
+  "uniform vec4 uLamp1;",
+  "uniform vec4 uLamp2;",
+  "uniform vec4 uLamp3;",
+  "uniform vec4 uLamp4;",
+  "uniform vec4 uLamp5;",
+  "vec3 tonemap(vec3 c){",
+  "  c = max(c, vec3(0.0));",
+  "  c = (c*(2.51*c+0.03))/(c*(2.43*c+0.59)+0.14);",
+  "  return pow(clamp(c,0.0,1.0), vec3(1.0/2.2));",
+  "}",
+  "vec3 haze(vec3 dir){",
+  "  float down = clamp(-dir.y, 0.0, 1.0);",
+  "  float side = 1.0 - abs(dir.y);",
+  "  vec3 up = vec3(0.035, 0.03, 0.05);",
+  "  vec3 warm = vec3(0.95, 0.42, 0.16) * 0.55;",
+  "  vec3 c = mix(up, warm * 0.55, side * 0.8);",
+  "  return mix(c, warm, pow(down, 1.5));",
+  "}",
+  "vec3 lamp(vec4 l, vec3 n, vec3 wp){",
+  "  vec3 d = l.xyz - wp;",
+  "  float dist2 = dot(d,d);",
+  "  float r = 8.0;",
+  "  float att = max(1.0 - dist2/(r*r), 0.0);",
+  "  att = att*att/(1.0 + dist2*0.35);",
+  "  float ndl = max(dot(n, d*inversesqrt(dist2+1e-4))*0.8+0.2, 0.0);",
+  "  return vec3(1.0,0.42,0.13)*(l.w*att*ndl);",
+  "}",
+  "void main(){",
+  "  float id = floor(vCol.r * 16.0 + 1e-4);",
+  "  float baked = vCol.g;",
+  "  float rnd = vCol.b;",
+  "  vec3 n = normalize(vNor);",
+  "  vec3 toEye = uEye - vWorld;",
+  "  float dist = length(toEye);",
+  "  vec3 v = toEye / max(dist, 1e-4);",
+  "  float g = 0.3 + 0.4*(0.5+0.5*sin((vLocal.x*0.5+vLocal.y*2.3+vLocal.z*0.6+rnd*17.0)*5.0));",
+  "  vec3 albedo = vec3(0.1,0.045,0.02);",
+  "  vec3 emit = vec3(0.0);",
+  "  float spec = 0.0;",
+  "  if (id < 0.5) { albedo = mix(vec3(0.05,0.022,0.009), vec3(0.14,0.062,0.026), g); spec = 0.15; }",
+  "  else if (id < 1.5) { albedo = mix(vec3(0.12,0.05,0.02), vec3(0.26,0.12,0.05), g); spec = 0.6; }",
+  "  else if (id < 2.5) albedo = mix(vec3(0.28,0.24,0.09), vec3(0.42,0.37,0.16), 0.5+0.5*sin((vLocal.x+vLocal.z)*90.0));",
+  "  else if (id < 3.5) { albedo = vec3(0.2,0.1,0.04); emit = vec3(1.0,0.3,0.05)*mix(0.5,2.2,rnd*rnd); }",
+  "  else if (id < 4.5) { albedo = vec3(0.03,0.032,0.036); spec = 0.5; }",
+  "  else if (id < 5.5) { albedo = vec3(0.45,0.02,0.01); spec = 0.8; }",
+  "  else if (id < 6.5) { albedo = vec3(0.8,0.25,0.06); emit = vec3(1.0,0.32,0.05)*6.0; }",
+  "  else if (id < 7.5) albedo = vec3(0.015,0.02,0.015);",
+  "  else if (id < 8.5) albedo = vec3(0.38,0.3,0.22);",
+  "  else { albedo = vec3(0.8,0.55,0.2); spec = 0.9; }",
+  "  vec3 light = mix(vec3(0.09,0.045,0.025), vec3(0.03,0.035,0.08), n.y*0.5+0.5)*0.6;",
+  "  light += vec3(1.0,0.42,0.14)*baked*baked*3.0;",
+  "  vec2 toAxis = -vWorld.xz;",
+  "  float axisDist = length(toAxis);",
+  "  float facing = max(dot(n.xz, toAxis/max(axisDist,0.001))*0.7+0.3, 0.0);",
+  "  light += vec3(1.0,0.4,0.12)*facing*0.7/(1.0+axisDist*axisDist*0.009);",
+  "  light += lamp(uLamp0,n,vWorld)+lamp(uLamp1,n,vWorld)+lamp(uLamp2,n,vWorld);",
+  "  light += lamp(uLamp3,n,vWorld)+lamp(uLamp4,n,vWorld)+lamp(uLamp5,n,vWorld);",
+  "  vec3 color = albedo*light + emit;",
+  "  vec3 h = normalize(v + vec3(0.0,-1.0,0.0));",
+  "  color += spec*pow(max(dot(n,h),0.0),24.0)*vec3(1.0,0.45,0.18)*0.35;",
+  "  vec3 display = tonemap(color*0.9);",
+  "  float x = max(dist-3.0,0.0)*0.02;",
+  "  float fog = 1.0 - exp(-x*x*0.6 - x*0.4);",
+  "  gl_FragColor = vec4(mix(display, haze(-v), fog), 1.0);",
+  "}"
+].join("\n");
+
+var GVS = [
+  "attribute vec3 aPos;",
+  "uniform mat4 uVP;",
+  "uniform vec3 uEye;",
+  "void main(){",
+  "  float d = distance(aPos, uEye);",
+  "  gl_PointSize = clamp(180.0 / max(d, 1.0), 4.0, 48.0);",
+  "  gl_Position = uVP * vec4(aPos, 1.0);",
+  "}"
+].join("\n");
+var GFS = [
+  "precision mediump float;",
+  "void main(){",
+  "  vec2 p = gl_PointCoord * 2.0 - 1.0;",
+  "  float a = exp(-dot(p,p) * 2.8);",
+  "  gl_FragColor = vec4(1.0, 0.38, 0.08, 1.0) * a * 0.85;",
+  "}"
+].join("\n");
+
+// Fullscreen haze (same colours as haze-sky.effect / icHaze). Fills the empty shaft.
+var SKY_VS = [
+  "attribute vec2 aUv;",
+  "uniform mat4 uInvVP;",
+  "varying vec3 vDir;",
+  "void main(){",
+  "  vec4 near = uInvVP * vec4(aUv, -1.0, 1.0);",
+  "  vec4 far = uInvVP * vec4(aUv, 1.0, 1.0);",
+  "  near.xyz /= near.w;",
+  "  far.xyz /= far.w;",
+  "  vDir = far.xyz - near.xyz;",
+  "  gl_Position = vec4(aUv, 0.999999, 1.0);",
+  "}"
+].join("\n");
+var SKY_FS = [
+  "precision mediump float;",
+  "varying vec3 vDir;",
+  "void main(){",
+  "  vec3 dir = normalize(vDir);",
+  "  float down = clamp(-dir.y, 0.0, 1.0);",
+  "  float side = 1.0 - abs(dir.y);",
+  "  vec3 up = vec3(0.035, 0.03, 0.05);",
+  "  vec3 warm = vec3(0.95, 0.42, 0.16) * 0.55;",
+  "  vec3 c = mix(up, warm * 0.55, side * 0.8);",
+  "  c = mix(c, warm, pow(down, 1.5));",
+  "  gl_FragColor = vec4(c, 1.0);",
+  "}"
+].join("\n");
+
+function buildSkyMesh() {
+  // One big triangle covering the clip space.
+  var v = new Float32Array([-1, -1, 3, -1, -1, 3]);
+  skyBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, skyBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW);
+}
+
+function invert4(m) {
+  var o = new Float32Array(16);
+  var a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+  var a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+  var a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+  var a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+  var b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10, b02 = a00 * a13 - a03 * a10;
+  var b03 = a01 * a12 - a02 * a11, b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12;
+  var b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30, b08 = a20 * a33 - a23 * a30;
+  var b09 = a21 * a32 - a22 * a31, b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;
+  var det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (Math.abs(det) < 1e-8) return m;
+  var id = 1 / det;
+  o[0] = (a11 * b11 - a12 * b10 + a13 * b09) * id;
+  o[1] = (a02 * b10 - a01 * b11 - a03 * b09) * id;
+  o[2] = (a31 * b05 - a32 * b04 + a33 * b03) * id;
+  o[3] = (a22 * b04 - a21 * b05 - a23 * b03) * id;
+  o[4] = (a12 * b08 - a10 * b11 - a13 * b07) * id;
+  o[5] = (a00 * b11 - a02 * b08 + a03 * b07) * id;
+  o[6] = (a32 * b02 - a30 * b05 - a33 * b01) * id;
+  o[7] = (a20 * b05 - a22 * b02 + a23 * b01) * id;
+  o[8] = (a10 * b10 - a11 * b08 + a13 * b06) * id;
+  o[9] = (a01 * b08 - a00 * b10 - a03 * b06) * id;
+  o[10] = (a30 * b04 - a31 * b02 + a33 * b00) * id;
+  o[11] = (a21 * b02 - a20 * b04 - a23 * b00) * id;
+  o[12] = (a11 * b07 - a10 * b09 - a12 * b06) * id;
+  o[13] = (a00 * b09 - a01 * b07 + a02 * b06) * id;
+  o[14] = (a31 * b01 - a30 * b03 - a32 * b00) * id;
+  o[15] = (a20 * b03 - a21 * b01 + a22 * b00) * id;
+  return o;
+}
+
+function shader(type, src) {
+  var sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(sh));
+  return sh;
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  var dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016;
+  last = now;
+  fallTime += dt;
+  depth += dt * FALL_SPEED;
+  syncChunks(depth);
+
+  var tiltX = 0, tiltY = 0;
+  try { tiltX = OcaWallpaper.tiltX(); tiltY = OcaWallpaper.tiltY(); } catch (e) {}
+  var orbit = 2.0 + 0.8 * Math.sin(depth * 0.021);
+  var turn = depth * 0.045;
+  var eye = [orbit * Math.cos(turn), -depth, orbit * Math.sin(turn)];
+  var heading = (20 + depth * 0.55 + tiltX * 40) * Math.PI / 180;
+  var pitch = Math.max(-89, Math.min(40, -70 + 14 * Math.sin(depth * 0.013 + 1) + tiltY * 18)) * Math.PI / 180;
+  var shake = Math.min(FALL_SPEED / 20, 1.5);
+  var roll = (7 * Math.sin(fallTime * 0.5) + shake * 2.5 * noise1(fallTime * 2.2)) * Math.PI / 180;
+  var pitchShake = shake * 0.8 * noise1(fallTime * 2.7 + 11) * Math.PI / 180;
+  // Match Cocos FallCamera basis: Ry(heading) * Rx(pitch) * Rz(roll).
+  var pose = mul(mul(rotY(heading), rotX(pitch + pitchShake)), rotZ(roll));
+  // Camera falls toward -Y. Look must point the same way, or the fall feels reversed.
+  var forward = [-pose[8], -pose[9], -pose[10]];
+  if (forward[1] > 0) {
+    forward[0] = -forward[0];
+    forward[1] = -forward[1];
+    forward[2] = -forward[2];
+  }
+  var target = [eye[0] + forward[0], eye[1] + forward[1], eye[2] + forward[2]];
+  var up = [pose[4], pose[5], pose[6]];
+  var vp = mul(
+    perspective(62 * Math.PI / 180, gl.canvas.width / Math.max(1, gl.canvas.height), 0.1, 480),
+    lookAt(eye, target, up)
+  );
+
+  var dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+  var w = Math.floor(window.innerWidth * dpr), h = Math.floor(window.innerHeight * dpr);
+  if (gl.canvas.width !== w || gl.canvas.height !== h) {
+    gl.canvas.width = w; gl.canvas.height = h;
+    gl.viewport(0, 0, w, h);
+  }
+
+  gl.clearColor(9 / 255, 8 / 255, 12 / 255, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  // Fullscreen haze first — fills the empty shaft the same way haze-sky.effect does.
+  gl.useProgram(skyProg);
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.bindBuffer(gl.ARRAY_BUFFER, skyBuf);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.uniformMatrix4fv(uInvVP, false, invert4(vp));
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthMask(true);
+
+  gl.useProgram(prog);
+  gl.disable(gl.BLEND);
+  gl.uniformMatrix4fv(uVP, false, vp);
+  gl.uniform3f(uEye, eye[0], eye[1], eye[2]);
+  var lamps = nearestLamps(eye);
+  for (var i = 0; i < 6; i++) gl.uniform4f(uLamps[i], lamps[i][0], lamps[i][1], lamps[i][2], lamps[i][3]);
+
+  var batch = [];
+  Object.keys(chunks).forEach(function (key) {
+    var list = chunks[key].list;
+    for (var i = 0; i < list.length; i++) batch.push(list[i]);
+  });
+  batch.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  var current = "";
+  for (var i = 0; i < batch.length; i++) {
+    if (batch[i].name !== current) {
+      current = batch[i].name;
+      if (!mesh[current]) continue;
+      bindMesh(mesh[current]);
+    }
+    gl.uniformMatrix4fv(uM, false, batch[i].mat);
+    gl.drawElements(gl.TRIANGLES, mesh[current].count, gl.UNSIGNED_SHORT, 0);
+  }
+
+  // Lantern halos (soft points), like lantern-glow.effect.
+  var glow = new Float32Array(Math.min(allLamps.length, 512) * 3);
+  glowCount = glow.length / 3;
+  for (var g = 0; g < glowCount; g++) {
+    glow[g * 3] = allLamps[g][0];
+    glow[g * 3 + 1] = allLamps[g][1];
+    glow[g * 3 + 2] = allLamps[g][2];
+  }
+  if (!glowBuf) glowBuf = gl.createBuffer();
+  gl.useProgram(glowProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, glowBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, glow, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  gl.uniformMatrix4fv(gl.getUniformLocation(glowProg, "uVP"), false, vp);
+  gl.uniform3f(gl.getUniformLocation(glowProg, "uEye"), eye[0], eye[1], eye[2]);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.depthMask(false);
+  gl.drawArrays(gl.POINTS, 0, glowCount);
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+}
+
+function boot() {
+  var canvas = document.getElementById("c");
+  gl = canvas.getContext("webgl", { antialias: false, alpha: false, preserveDrawingBuffer: true });
+  prog = gl.createProgram();
+  gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
+  gl.bindAttribLocation(prog, 0, "aPos");
+  gl.bindAttribLocation(prog, 1, "aNor");
+  gl.bindAttribLocation(prog, 2, "aCol");
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog));
+  uVP = gl.getUniformLocation(prog, "uVP");
+  uM = gl.getUniformLocation(prog, "uM");
+  uEye = gl.getUniformLocation(prog, "uEye");
+  uLamps = [0,1,2,3,4,5].map(function (i) { return gl.getUniformLocation(prog, "uLamp" + i); });
+
+  glowProg = gl.createProgram();
+  gl.attachShader(glowProg, shader(gl.VERTEX_SHADER, GVS));
+  gl.attachShader(glowProg, shader(gl.FRAGMENT_SHADER, GFS));
+  gl.bindAttribLocation(glowProg, 0, "aPos");
+  gl.linkProgram(glowProg);
+
+  skyProg = gl.createProgram();
+  gl.attachShader(skyProg, shader(gl.VERTEX_SHADER, SKY_VS));
+  gl.attachShader(skyProg, shader(gl.FRAGMENT_SHADER, SKY_FS));
+  gl.bindAttribLocation(skyProg, 0, "aUv");
+  gl.linkProgram(skyProg);
+  uInvVP = gl.getUniformLocation(skyProg, "uInvVP");
+  buildSkyMesh();
+
+  gl.disable(gl.CULL_FACE);
+  initColShift();
+
+  var names = FACADES.concat(["B_room_a","B_room_b","B_room_c","B_corr_a","B_corr_b","B_corr_c","B_stair_a"]);
+  Promise.all([
+    fetch("blocks.json").then(function (r) { return r.json(); }),
+    Promise.all(names.map(function (name) {
+      return fetch(name + ".glb").then(function (r) {
+        if (!r.ok) throw new Error(name);
+        return r.arrayBuffer();
+      }).then(function (buf) { mesh[name] = upload(parseGlb(buf)); });
+    }))
+  ]).then(function (res) {
+    blocks = res[0];
+    syncChunks(depth);
+    requestAnimationFrame(frame);
+  }).catch(function (e) {
+    console.error("无限城模型没装上 " + e);
+  });
+}
+boot();
+</script></body></html>

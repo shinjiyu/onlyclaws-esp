@@ -36,6 +36,11 @@ On `401`, ask the human to mint/rotate a token at https://onlyclaws.world/consol
 | Beep action | `POST /api/action` |
 | **Deploy Lua** | `POST /api/scripts` (`language=lua`, `source` = Lua string, max 24000 bytes). The server signs it; the board stores it and reloads it after reboot |
 | Events from `emit()` | `GET /api/events` |
+| Preset scripts | `GET /api/presets?kind=esp32\|oca` (public), source at `GET /api/presets/{id}/source`; `POST /api/presets/{id}/deploy` `{device_id}` sends one to a device of the same kind |
+
+## OCA phones (`kind: "oca"`, capability `container`)
+
+OnlyClaws Android runs JS, not Lua. Send a whole script with `POST /api/invoke` and `{"tools":[{"tool":"js","source":"..."}]}` (up to 256 KB). The phone swaps to it and keeps it across restarts. `POST /api/scripts` to a phone is rejected. Phones are created and packaged by a signed-in human in the console; agents cannot create them.
 
 ## Lua on device
 
