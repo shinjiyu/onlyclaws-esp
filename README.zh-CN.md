@@ -14,6 +14,7 @@ ESP32 只烧一次固件。之后 AI Agent 通过 HTTP 下发 Lua，<br>
 [![Stars](https://img.shields.io/github/stars/shinjiyu/onlyclaws-esp?style=social)](https://github.com/shinjiyu/onlyclaws-esp/stargazers)
 ![PlatformIO](https://img.shields.io/badge/build-PlatformIO-f5822a)
 ![MCP](https://img.shields.io/badge/MCP-stdio-1c1d17)
+[![shinjiyu/onlyclaws-esp MCP server](https://glama.ai/mcp/servers/shinjiyu/onlyclaws-esp/badges/score.svg)](https://glama.ai/mcp/servers/shinjiyu/onlyclaws-esp)
 [![Agent skill](https://img.shields.io/badge/agent-skill.md-1c1d17)](https://onlyclaws.world/api/agent/skill.md)
 
 [主页](https://onlyclaws.world/) · [控制台](https://onlyclaws.world/console/) · [Agent API](https://onlyclaws.world/api/agent/docs) · [English](README.md)
